@@ -210,7 +210,7 @@ async function finalizeOrder(user, chatId, description) {
     where: { cartId: fresh.cart.id },
   });
 
-  // ذخیره آدرس برای استفاده مجدد (حداکثر ۳ آدرس)
+  // Save address for reuse (max 3 per user)
   const savedCount = await prisma.savedAddress.count({
     where: { userId: fresh.id },
   });
@@ -426,10 +426,10 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
     return [{ text: label, callback_data: order.trackingCode }];
   });
 
-  // keyboard عادی با دکمه بازگشت (tracked — حذف می‌شه در ناوبری بعدی)
+  // Regular keyboard with back button (tracked — deleted on next navigation)
   await reply(user, chatId, "📦 سفارشات من", backMain());
 
-  // لیست inline سفارشات + track برای حذف خودکار
+  // Inline order list + track message_id for automatic deletion
   const inlineResult = await bale.sendKeyboard(
     chatId,
     "برای دیدن جزئیات هر سفارش روی آن کلیک کنید:",

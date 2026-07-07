@@ -138,7 +138,7 @@ module.exports.showCategory = async function showCategory(
     return [{ text: label, callback_data: `product:${product.code}` }];
   });
 
-  // ارسال keyboard عادی با دکمه بازگشت (tracked — حذف می‌شه در ناوبری بعدی)
+  // Send regular keyboard with back button (tracked — deleted on next navigation)
   await reply(
     user,
     chatId,
@@ -149,7 +149,7 @@ module.exports.showCategory = async function showCategory(
     ])
   );
 
-  // ارسال لیست محصولات به صورت inline و track کردن message_id برای حذف بعدی
+  // Send product list as inline keyboard and track message_id for later deletion
   const inlineResult = await bale.sendKeyboard(
     chatId,
     `${products.length} محصول — روی هر محصول برای جزئیات کلیک کنید:`,

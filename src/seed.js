@@ -12,7 +12,7 @@ async function main() {
 
   console.log("Seeding categories and products...");
 
-  // کش دسته‌بندی‌ها برای جلوگیری از ساخت رکورد تکراری با نام یکسان
+  // Cache categories by name to avoid creating duplicate records
   const categoryCache = {};
 
   for (const group of productData) {
