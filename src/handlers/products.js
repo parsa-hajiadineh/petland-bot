@@ -290,17 +290,21 @@ ${
 }`;
 
   const menu = productDetailMenu(product);
+  const keepLast = { keepLast: true };
+  const photoCaption =
+    caption.length > 1000 ? `${caption.slice(0, 997)}…` : caption;
+  const textCaption =
+    caption.length > 3500 ? `${caption.slice(0, 3497)}…` : caption;
 
   if (product.imageUrl) {
     try {
-      const photoCaption =
-        caption.length > 1000 ? `${caption.slice(0, 997)}…` : caption;
       const photoResult = await replyPhoto(
         user,
         chatId,
         product.imageUrl,
         photoCaption,
-        menu
+        menu,
+        keepLast
       );
       if (photoResult?.ok || photoResult?.result?.message_id) {
         return;
@@ -311,10 +315,15 @@ ${
   }
 
   try {
-    await reply(user, chatId, caption, menu);
+    await reply(user, chatId, textCaption, menu, keepLast);
   } catch (err) {
     console.error("PRODUCT TEXT:", err);
-    await bale.sendMessage(chatId, caption);
+    try {
+      await bale.sendMessage(chatId, textCaption);
+    } catch (err2) {
+      console.error("PRODUCT PLAIN TEXT:", err2);
+      throw err2;
+    }
   }
 };
 

@@ -11,8 +11,10 @@ async function clearLastMessage(user, chatId) {
   }
 }
 
-async function reply(user, chatId, text, keyboard) {
-  await clearLastMessage(user, chatId);
+async function reply(user, chatId, text, keyboard, options = {}) {
+  if (!options.keepLast) {
+    await clearLastMessage(user, chatId);
+  }
 
   const result = keyboard
     ? await bale.sendKeyboard(chatId, text, keyboard)
@@ -31,8 +33,10 @@ async function reply(user, chatId, text, keyboard) {
   return result;
 }
 
-async function replyPhoto(user, chatId, photo, caption, keyboard) {
-  await clearLastMessage(user, chatId);
+async function replyPhoto(user, chatId, photo, caption, keyboard, options = {}) {
+  if (!options.keepLast) {
+    await clearLastMessage(user, chatId);
+  }
 
   const result = await bale.sendPhoto(chatId, photo, caption, keyboard);
   const messageId = result?.result?.message_id;
