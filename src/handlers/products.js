@@ -37,6 +37,7 @@ const PRODUCT_DETAIL_SELECT = {
 };
 
 async function loadProductByCode(code) {
+  if (!code) return null;
   try {
     return await prisma.product.findUnique({
       where: { code },
@@ -44,6 +45,19 @@ async function loadProductByCode(code) {
     });
   } catch (err) {
     console.error("PRODUCT LOAD:", err);
+  }
+  try {
+    return await prisma.product.findUnique({
+      where: { code },
+      select: {
+        ...PRODUCT_LIST_SELECT,
+        description: true,
+        imageUrl: true,
+        categoryId: true,
+      },
+    });
+  } catch (err) {
+    console.error("PRODUCT LOAD FALLBACK:", err);
     return null;
   }
 }
@@ -61,7 +75,7 @@ function productRow(product, wholesale) {
 async function sendProductInlineList(user, chatId, products, header) {
   const wholesale = isWholesaleUser(user);
   const rows = products.map((product) => productRow(product, wholesale));
-  const chunkSize = 8;
+    const chunkSize = 10;
   let lastId = null;
 
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -252,7 +266,7 @@ module.exports.showProduct = async function showProduct(
   const caption = `📦 ${product.title}
 
 🔖 کد: ${product.code}
-🏷 دسته: ${product.category.title}
+🏷 دسته: ${product.category?.title || "—"}
 💰 قیمت: ${formatPrice(price)}
 ${wholesale ? "🤝 قیمت همکار" : "🛒 قیمت مصرف‌کننده"}
 ${status}

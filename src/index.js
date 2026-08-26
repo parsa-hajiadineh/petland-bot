@@ -2,6 +2,7 @@ const express = require("express");
 const { PORT } = require("./config");
 const { testBot, getUpdates, answerCallbackQuery } = require("./bot/bale");
 const { getOrCreateUser } = require("./services/user");
+const { ensureMotherCatalog } = require("./database/prisma");
 const messageHandler = require("./handlers/router");
 
 const app = express();
@@ -20,9 +21,13 @@ let offset = 0;
 async function processUpdate(update) {
   if (update.callback_query) {
     const cq = update.callback_query;
+    try {
+      await answerCallbackQuery(cq.id);
+    } catch (err) {
+      console.error("ANSWER CALLBACK SKIP:", err.message);
+    }
     const user = await getOrCreateUser({ from: cq.from });
     await messageHandler.handleCallbackQuery(cq, user);
-    await answerCallbackQuery(cq.id);
     return;
   }
 
@@ -74,6 +79,7 @@ async function startPolling() {
 
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  await ensureMotherCatalog();
   await testBot();
   startPolling();
 });

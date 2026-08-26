@@ -318,11 +318,16 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   if (data.startsWith("product:")) {
     const code = data.replace("product:", "");
-    const product = await productsHandler.loadProductByCode(code);
-    if (product) {
-      await productsHandler.showProduct(user, chatId, product);
-    } else {
-      await reply(user, chatId, "خواندن این محصول ممکن نشد.");
+    try {
+      const product = await productsHandler.loadProductByCode(code);
+      if (product) {
+        await productsHandler.showProduct(user, chatId, product);
+      } else {
+        await reply(user, chatId, "خواندن این محصول ممکن نشد.");
+      }
+    } catch (err) {
+      console.error("PRODUCT CALLBACK:", err);
+      await reply(user, chatId, "نمایش این محصول با خطا مواجه شد. لطفاً دوباره تلاش کنید.");
     }
     return;
   }
