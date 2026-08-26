@@ -76,7 +76,7 @@ async function sendPhoto(chatId, photo, caption, keyboard) {
   };
 
   if (keyboard) {
-    body.components = keyboard;
+    body.reply_markup = keyboard;
   }
 
   return apiCall("sendPhoto", body);
