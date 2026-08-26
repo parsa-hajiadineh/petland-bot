@@ -86,10 +86,19 @@ function summaryText(user) {
 
 async function getOwnedTenant(userId) {
   try {
-    return await prisma.tenant.findUnique({
+    const tenant = await prisma.tenant.findUnique({
       where: { ownerUserId: userId },
-      include: { bot: true },
     });
+    if (!tenant) return null;
+    try {
+      tenant.bot = await prisma.bot.findUnique({
+        where: { tenantId: tenant.id },
+      });
+    } catch (err) {
+      console.error("BOT LOOKUP SKIP:", err.message);
+      tenant.bot = null;
+    }
+    return tenant;
   } catch (err) {
     console.error("TENANT LOOKUP SKIP:", err.message);
     return null;
@@ -181,6 +190,10 @@ async function goProfileBack(user, chatId) {
 
 async function persistColleague(user) {
   const d = profileData(user);
+  if (!d.fullName || !d.phone || !d.brand) {
+    return { ok: false };
+  }
+
   const tenantFields = {
     name: d.brand,
     type: tenantTypeFor(d.mode),
@@ -193,11 +206,26 @@ async function persistColleague(user) {
     description: d.mode === "BOTH" ? "ONLINE+PHYSICAL" : null,
   };
 
+  const coreFields = {
+    name: d.brand,
+    type: "PET_SHOP",
+    status: "ACTIVE",
+    ownerName: d.fullName,
+    phone: d.phone,
+    address: d.address || null,
+    ownerUserId: user.id,
+  };
+
+  let tenant = null;
   try {
-    let tenant = await prisma.tenant.findUnique({
+    tenant = await prisma.tenant.findUnique({
       where: { ownerUserId: user.id },
     });
+  } catch (err) {
+    console.error("TENANT FIND SKIP:", err.message);
+  }
 
+  try {
     if (tenant) {
       try {
         tenant = await prisma.tenant.update({
@@ -227,89 +255,99 @@ async function persistColleague(user) {
       } catch (err) {
         console.error("TENANT CREATE FULL:", err.message);
         tenant = await prisma.tenant.create({
-          data: {
-            name: d.brand,
-            type: "PET_SHOP",
-            status: "ACTIVE",
-            ownerName: d.fullName,
-            phone: d.phone,
-            address: d.address || null,
-            ownerUserId: user.id,
-          },
+          data: coreFields,
         });
       }
     }
-
-    try {
-      await prisma.tenantSettings.upsert({
-        where: { tenantId: tenant.id },
-        create: {
-          tenantId: tenant.id,
-          shopName: d.brand,
-          supportPhone: d.phone,
-        },
-        update: {
-          shopName: d.brand,
-          supportPhone: d.phone,
-        },
-      });
-    } catch (err) {
-      console.error("COLLEAGUE SETTINGS SKIP:", err.message);
-    }
-
-    try {
-      await prisma.tenantMember.upsert({
-        where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
-        create: {
-          tenantId: tenant.id,
-          userId: user.id,
-          role: "OWNER",
-        },
-        update: { role: "OWNER" },
-      });
-    } catch (err) {
-      console.error("COLLEAGUE MEMBER SKIP:", err.message);
-    }
-
-    try {
-      const existingCustomer = await prisma.customer.findFirst({
-        where: { userId: user.id, tenantId: tenant.id, type: "COLLEAGUE" },
-      });
-      const customerData = {
-        fullName: d.fullName,
-        phone: d.phone,
-        shopName: d.brand,
-        address: d.mode === "ONLINE" ? null : d.address || null,
-        notes: d.mode === "PHYSICAL" ? null : d.page || null,
-      };
-      if (existingCustomer) {
-        await prisma.customer.update({
-          where: { id: existingCustomer.id },
-          data: customerData,
-        });
-      } else {
-        await prisma.customer.create({
-          data: {
-            type: "COLLEAGUE",
-            userId: user.id,
-            tenantId: tenant.id,
-            ...customerData,
-          },
-        });
-      }
-    } catch (err) {
-      console.error("COLLEAGUE CUSTOMER SKIP:", err.message);
-    }
-
-    return { ok: true, tenant };
   } catch (err) {
     console.error("COLLEAGUE PROFILE SAVE:", err);
-    return { ok: false };
+    try {
+      tenant = await prisma.tenant.findFirst({
+        where: { ownerUserId: user.id },
+      });
+    } catch (findErr) {
+      console.error("TENANT FIND AFTER SAVE SKIP:", findErr.message);
+    }
+    if (!tenant) return { ok: false };
   }
+
+  try {
+    await prisma.tenantSettings.upsert({
+      where: { tenantId: tenant.id },
+      create: {
+        tenantId: tenant.id,
+        shopName: d.brand,
+        supportPhone: d.phone,
+      },
+      update: {
+        shopName: d.brand,
+        supportPhone: d.phone,
+      },
+    });
+  } catch (err) {
+    console.error("COLLEAGUE SETTINGS SKIP:", err.message);
+  }
+
+  try {
+    await prisma.tenantMember.upsert({
+      where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
+      create: {
+        tenantId: tenant.id,
+        userId: user.id,
+        role: "OWNER",
+      },
+      update: { role: "OWNER" },
+    });
+  } catch (err) {
+    console.error("COLLEAGUE MEMBER SKIP:", err.message);
+  }
+
+  try {
+    const existingCustomer = await prisma.customer.findFirst({
+      where: { userId: user.id, tenantId: tenant.id, type: "COLLEAGUE" },
+    });
+    const customerData = {
+      fullName: d.fullName,
+      phone: d.phone,
+      shopName: d.brand,
+      address: d.mode === "ONLINE" ? null : d.address || null,
+      notes: d.mode === "PHYSICAL" ? null : d.page || null,
+    };
+    if (existingCustomer) {
+      await prisma.customer.update({
+        where: { id: existingCustomer.id },
+        data: customerData,
+      });
+    } else {
+      await prisma.customer.create({
+        data: {
+          type: "COLLEAGUE",
+          userId: user.id,
+          tenantId: tenant.id,
+          ...customerData,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("COLLEAGUE CUSTOMER SKIP:", err.message);
+  }
+
+  return { ok: true, tenant };
 }
 
 async function startProfile(user, chatId) {
-  await askStep(user, chatId, "COLLEAGUE_NAME");
+  const d = profileData(user);
+  if (!d.fullName) return askStep(user, chatId, "COLLEAGUE_NAME");
+  if (!d.phone) return askStep(user, chatId, "COLLEAGUE_PHONE");
+  if (!d.brand) return askStep(user, chatId, "COLLEAGUE_BRAND");
+  if (!d.mode) return askStep(user, chatId, "COLLEAGUE_SHOP_TYPE");
+  if ((d.mode === "ONLINE" || d.mode === "BOTH") && !d.page) {
+    return askStep(user, chatId, "COLLEAGUE_PAGE");
+  }
+  if ((d.mode === "PHYSICAL" || d.mode === "BOTH") && !d.address) {
+    return askStep(user, chatId, "COLLEAGUE_ADDRESS");
+  }
+  return askStep(user, chatId, "COLLEAGUE_CONFIRM");
 }
 
 async function finishProfile(user, chatId) {
@@ -318,6 +356,26 @@ async function finishProfile(user, chatId) {
     ""
   );
   const saved = await persistColleague(user);
+
+  const hint =
+    "\n\nاگر ربات فروشگاهی می‌خواهید از دکمه «🤖 ساخت ربات فروشگاهی» استفاده کنید.";
+
+  if (!saved.ok) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null },
+    });
+    user.orderStep = null;
+    await reply(
+      user,
+      chatId,
+      `اطلاعات روی حساب شما ماند، ولی فروشگاه در دیتابیس ذخیره نشد.
+
+${snapshot}${hint}`,
+      mainMenu(user)
+    );
+    return;
+  }
 
   await prisma.user.update({
     where: { id: user.id },
@@ -330,21 +388,6 @@ async function finishProfile(user, chatId) {
     },
   });
   user.orderStep = null;
-
-  const hint =
-    "\n\nاگر ربات فروشگاهی می‌خواهید از دکمه «🤖 ساخت ربات فروشگاهی» استفاده کنید.";
-
-  if (!saved.ok) {
-    await reply(
-      user,
-      chatId,
-      `✅ اطلاعات تماس همکار روی حساب شما ثبت شد.
-
-${snapshot}${hint}`,
-      mainMenu(user)
-    );
-    return;
-  }
 
   await reply(
     user,
@@ -503,11 +546,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
 
     const tenant = await getOwnedTenant(user.id);
-    if (!tenant) {
-      await startProfile(user, chatId);
-      return true;
-    }
-    if (tenant.bot) {
+    if (tenant?.bot) {
       await reply(
         user,
         chatId,
@@ -518,7 +557,21 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       );
       return true;
     }
-    await startBotCreate(user, chatId);
+    if (tenant) {
+      await startBotCreate(user, chatId);
+      return true;
+    }
+
+    const d = profileData(user);
+    if (d.fullName && d.phone && d.brand) {
+      const saved = await persistColleague(user);
+      if (saved.ok) {
+        await startBotCreate(user, chatId);
+        return true;
+      }
+    }
+
+    await startProfile(user, chatId);
     return true;
   }
 
