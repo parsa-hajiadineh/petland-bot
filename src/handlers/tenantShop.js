@@ -9,7 +9,6 @@ const {
 const productsHandler = require("./products");
 const tenantAdmin = require("./tenantAdmin");
 const tenantOrder = require("./tenantOrder");
-const { ensureShopRuntimeTables } = require("../services/shopProvision");
 
 const NAV_BUTTONS = new Set([
   BTN.PRODUCTS,
@@ -52,9 +51,6 @@ async function resetSession(user) {
 async function showStart(user, chatId) {
   try {
     const ctx = getBotContext();
-    await ensureShopRuntimeTables().catch((err) => {
-      console.error("SHOP TABLES START:", err.message);
-    });
     const shop = await tenantAdmin.loadShopView(ctx.tenantId);
     const text = tenantAdmin.shopIntroText(shop);
     const menu = await shopMenu(user);

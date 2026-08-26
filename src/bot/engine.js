@@ -272,12 +272,6 @@ async function handleWebhook(botId, update) {
 }
 
 async function start() {
-  try {
-    await require("../services/shopProvision").ensureShopRuntimeTables();
-  } catch (err) {
-    console.error("SHOP TABLES START SKIP:", err.message);
-  }
-
   const mother = motherContext();
   await startPoller(mother);
   await runWithContext(mother, () => bale.testBot());
@@ -287,6 +281,13 @@ async function start() {
     lastLiveCount < 0 ? 0 : lastLiveCount,
     "tenant bot(s)"
   );
+  setImmediate(() => {
+    require("../services/shopProvision")
+      .ensureShopRuntimeTables()
+      .catch((err) => {
+        console.error("SHOP TABLES START SKIP:", err.message);
+      });
+  });
   setInterval(() => {
     syncTenantBots().catch((err) => {
       console.error("TENANT BOT SYNC:", err.message);

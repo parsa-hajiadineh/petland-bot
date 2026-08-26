@@ -438,7 +438,18 @@ async function tableExists(tableName) {
   }
 }
 
+let shopTablesPromise = null;
+
 async function ensureShopRuntimeTables() {
+  if (shopTablesPromise) return shopTablesPromise;
+  shopTablesPromise = ensureShopRuntimeTablesInner().catch((err) => {
+    shopTablesPromise = null;
+    throw err;
+  });
+  return shopTablesPromise;
+}
+
+async function ensureShopRuntimeTablesInner() {
   await execSql(
     "ENUM BotStatus SKIP:",
     `DO $$ BEGIN
@@ -567,10 +578,6 @@ async function ensureShopRuntimeTables() {
   await execSql(
     "ORDER BOT COL SKIP:",
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "botId" TEXT`
-  );
-  await execSql(
-    "ORDER TENANT INDEX SKIP:",
-    `CREATE INDEX IF NOT EXISTS "Order_tenantId_idx" ON "Order"("tenantId")`
   );
 
   if (!(await tableExists("ShopCart"))) {
