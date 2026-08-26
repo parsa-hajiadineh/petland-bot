@@ -6,8 +6,8 @@ function botApiUrl(token) {
   return `https://tapi.bale.ai/bot${token || getToken() || BOT_TOKEN}`;
 }
 
-async function apiCall(method, body, token) {
-  const options = { method: "POST" };
+async function apiCall(method, body, token, timeoutMs = 15000) {
+  const options = { method: "POST", timeout: timeoutMs };
 
   if (body) {
     options.headers = { "Content-Type": "application/json" };
@@ -37,7 +37,8 @@ async function getMeWithToken(token) {
 
 async function getUpdates(offset = 0, token) {
   const response = await fetch(
-    `${botApiUrl(token)}/getUpdates?offset=${offset}&timeout=30`
+    `${botApiUrl(token)}/getUpdates?offset=${offset}&timeout=30`,
+    { timeout: 45000 }
   );
   const text = await response.text();
 

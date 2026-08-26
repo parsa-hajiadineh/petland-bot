@@ -27,8 +27,14 @@ function defaultSettingsData(tenant) {
   };
 }
 
+function extractBotToken(raw) {
+  const text = String(raw || "").trim();
+  const match = text.match(/(\d{5,}:[A-Za-z0-9_-]{20,})/);
+  return match ? match[1] : text.replace(/\s+/g, "");
+}
+
 async function validateToken(plainToken) {
-  const token = (plainToken || "").trim();
+  const token = extractBotToken(plainToken);
   if (!token || token.length < 20) {
     return { ok: false, code: "INVALID_TOKEN" };
   }
@@ -36,12 +42,17 @@ async function validateToken(plainToken) {
     return { ok: false, code: "MOTHER_TOKEN" };
   }
 
-  const me = await bale.getMeWithToken(token);
-  if (!me?.ok || !me.result?.id) {
+  try {
+    const me = await bale.getMeWithToken(token);
+    if (!me?.ok || !me.result?.id) {
+      console.error("TOKEN VALIDATE FAIL:", me?.description || me?.error_code || "no result");
+      return { ok: false, code: "VALIDATE_FAILED" };
+    }
+    return { ok: true, token, me };
+  } catch (err) {
+    console.error("TOKEN VALIDATE ERROR:", err.message);
     return { ok: false, code: "VALIDATE_FAILED" };
   }
-
-  return { ok: true, token, me };
 }
 
 async function attachTenantExtras(tenant) {
@@ -404,12 +415,129 @@ async function ensureTenantSchema() {
   }
 }
 
+async function execSql(label, sql) {
+  try {
+    await prisma.$executeRawUnsafe(sql);
+  } catch (err) {
+    console.error(label, err.message);
+  }
+}
+
+async function tableExists(tableName) {
+  try {
+    const cols = await prisma.$queryRaw`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${tableName}
+      LIMIT 1
+    `;
+    return Boolean(cols && cols.length);
+  } catch (err) {
+    console.error("TABLE CHECK:", tableName, err.message);
+    return false;
+  }
+}
+
+async function ensureShopRuntimeTables() {
+  await execSql(
+    "ENUM BotStatus SKIP:",
+    `DO $$ BEGIN
+      CREATE TYPE "BotStatus" AS ENUM ('PENDING','ACTIVE','DISABLED','EXPIRED');
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;`
+  );
+  await execSql(
+    "ENUM TenantMemberRole SKIP:",
+    `DO $$ BEGIN
+      CREATE TYPE "TenantMemberRole" AS ENUM ('OWNER','ADMIN','STAFF');
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;`
+  );
+
+  if (!(await tableExists("Bot"))) {
+    await execSql(
+      "BOT TABLE CREATE FAIL:",
+      `CREATE TABLE IF NOT EXISTS "Bot" (
+        "id" TEXT NOT NULL,
+        "token" TEXT NOT NULL,
+        "tokenHash" TEXT NOT NULL,
+        "username" TEXT,
+        "baleBotId" TEXT,
+        "status" "BotStatus" NOT NULL DEFAULT 'PENDING',
+        "isEnabled" BOOLEAN NOT NULL DEFAULT false,
+        "activatedAt" TIMESTAMP(3),
+        "lastSeenAt" TIMESTAMP(3),
+        "tenantId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Bot_pkey" PRIMARY KEY ("id")
+      )`
+    );
+    await execSql(
+      "BOT HASH INDEX SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "Bot_tokenHash_key" ON "Bot"("tokenHash")`
+    );
+    await execSql(
+      "BOT TENANT INDEX SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "Bot_tenantId_key" ON "Bot"("tenantId")`
+    );
+    console.log("BOT TABLE READY");
+  }
+
+  if (!(await tableExists("TenantSettings"))) {
+    await execSql(
+      "SETTINGS TABLE CREATE FAIL:",
+      `CREATE TABLE IF NOT EXISTS "TenantSettings" (
+        "id" TEXT NOT NULL,
+        "shopName" TEXT,
+        "welcomeMessage" TEXT,
+        "supportPhone" TEXT,
+        "bankCard" TEXT,
+        "bankIban" TEXT,
+        "bankHolder" TEXT,
+        "bankName" TEXT,
+        "profitPercent" INTEGER,
+        "minOrderAmount" INTEGER,
+        "tenantId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "TenantSettings_pkey" PRIMARY KEY ("id")
+      )`
+    );
+    await execSql(
+      "SETTINGS TENANT INDEX SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "TenantSettings_tenantId_key" ON "TenantSettings"("tenantId")`
+    );
+    console.log("TENANT SETTINGS TABLE READY");
+  }
+
+  if (!(await tableExists("TenantMember"))) {
+    await execSql(
+      "MEMBER TABLE CREATE FAIL:",
+      `CREATE TABLE IF NOT EXISTS "TenantMember" (
+        "id" TEXT NOT NULL,
+        "role" "TenantMemberRole" NOT NULL DEFAULT 'STAFF',
+        "tenantId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "TenantMember_pkey" PRIMARY KEY ("id")
+      )`
+    );
+    await execSql(
+      "MEMBER UNIQUE SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "TenantMember_tenantId_userId_key" ON "TenantMember"("tenantId", "userId")`
+    );
+    console.log("TENANT MEMBER TABLE READY");
+  }
+}
+
 async function persistColleagueShop(user, profile) {
   if (!profile?.fullName || !profile?.phone || !profile?.brand) {
     return { ok: false };
   }
 
   await ensureTenantSchema();
+  await ensureShopRuntimeTables();
 
   let tenant = await findOwnedTenant(user.id);
   const payloads = colleagueTenantPayloads(user, profile);
@@ -447,62 +575,81 @@ async function loadDefaultSettings(tenant) {
 }
 
 async function connectBot(token, botId) {
+  try {
+    await bale.deleteWebhook(token);
+  } catch (err) {
+    console.error("DELETE WEBHOOK SKIP:", err.message);
+  }
+
+  try {
+    await bale.setMyCommands(token, [
+      { command: "start", description: "شروع فروشگاه" },
+    ]);
+  } catch (err) {
+    console.error("SET COMMANDS SKIP:", err.message);
+  }
+
   const webhookUrl = tenantWebhookUrl(botId);
-
-  await bale.deleteWebhook(token);
-
-  await bale.setMyCommands(token, [
-    { command: "start", description: "شروع فروشگاه" },
-  ]);
-
   if (!webhookUrl) {
     return "poll";
   }
 
-  const result = await bale.setWebhook(token, webhookUrl);
-  if (!result?.ok) {
-    console.error("SET WEBHOOK FAIL:", botId, result?.description || result);
+  try {
+    const result = await bale.setWebhook(token, webhookUrl);
+    if (!result?.ok) {
+      console.error("SET WEBHOOK FAIL:", botId, result?.description || result);
+      return "poll";
+    }
+    return "webhook";
+  } catch (err) {
+    console.error("SET WEBHOOK ERROR:", botId, err.message);
     return "poll";
   }
-
-  return "webhook";
 }
 
 async function provisionShop(user, rawToken) {
-  let tenant = await findOwnedTenant(user.id);
-  if (!tenant && user.pendingOrderId) {
-    try {
-      const byId = await prisma.tenant.findUnique({
-        where: { id: user.pendingOrderId },
-      });
-      if (byId) tenant = await attachTenantExtras(byId);
-    } catch (err) {
-      console.error("TENANT LOOKUP PENDING SKIP:", err.message);
-    }
-  }
-  if (!tenant) {
-    return { ok: false, code: "NEED_PROFILE" };
-  }
-  if (tenant.bot) {
-    return {
-      ok: false,
-      code: "ALREADY_HAS_BOT",
-      username: tenant.bot.username || null,
-      shopName: tenant.name,
-    };
-  }
-
-  const checked = await validateToken(rawToken);
-  if (!checked.ok) return checked;
-
-  const { token, me } = checked;
-  const tokenHash = hashToken(token);
-  const existing = await prisma.bot.findUnique({ where: { tokenHash } });
-  if (existing) {
-    return { ok: false, code: "DUPLICATE_TOKEN" };
-  }
-
   try {
+    await ensureTenantSchema();
+    await ensureShopRuntimeTables();
+
+    let tenant = await findOwnedTenant(user.id);
+    if (!tenant && user.pendingOrderId) {
+      try {
+        const byId = await prisma.tenant.findUnique({
+          where: { id: user.pendingOrderId },
+        });
+        if (byId) tenant = await attachTenantExtras(byId);
+      } catch (err) {
+        console.error("TENANT LOOKUP PENDING SKIP:", err.message);
+      }
+    }
+    if (!tenant) {
+      return { ok: false, code: "NEED_PROFILE" };
+    }
+    if (tenant.bot) {
+      return {
+        ok: false,
+        code: "ALREADY_HAS_BOT",
+        username: tenant.bot.username || null,
+        shopName: tenant.name,
+      };
+    }
+
+    const checked = await validateToken(rawToken);
+    if (!checked.ok) return checked;
+
+    const { token, me } = checked;
+    const tokenHash = hashToken(token);
+    let existing = null;
+    try {
+      existing = await prisma.bot.findUnique({ where: { tokenHash } });
+    } catch (err) {
+      console.error("BOT HASH LOOKUP SKIP:", err.message);
+    }
+    if (existing) {
+      return { ok: false, code: "DUPLICATE_TOKEN" };
+    }
+
     const bot = await prisma.bot.create({
       data: {
         tenantId: tenant.id,
@@ -520,10 +667,14 @@ async function provisionShop(user, rawToken) {
 
     const connectMode = await connectBot(token, bot.id);
 
-    await prisma.tenant.update({
-      where: { id: tenant.id },
-      data: { status: "ACTIVE" },
-    });
+    try {
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: { status: "ACTIVE" },
+      });
+    } catch (err) {
+      console.error("TENANT ACTIVATE SKIP:", err.message);
+    }
 
     setImmediate(() => {
       require("../bot/engine")

@@ -254,61 +254,70 @@ async function startBotCreate(user, chatId, tenantId) {
 }
 
 async function registerBot(user, chatId, rawToken) {
-  const result = await provisionShop(user, rawToken);
-
-  if (result.code === "NEED_PROFILE") {
-    await startProfile(user, chatId);
-    return;
-  }
-
-  if (result.code === "ALREADY_HAS_BOT") {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: null, pendingOrderId: null },
-    });
-    const at = result.username ? `: @${result.username}` : "";
+  try {
     await reply(
       user,
       chatId,
-      `ربات این فروشگاه قبلاً ثبت شده است${at}.`,
-      mainMenu(user)
+      "در حال بررسی Token...",
+      backMain(),
+      { keepLast: true }
     );
-    return;
-  }
 
-  if (!result.ok) {
-    const messages = {
-      INVALID_TOKEN: "❌ Token نامعتبر است. لطفاً Token کامل را ارسال کنید.",
-      MOTHER_TOKEN:
-        "❌ این Token مربوط به ربات مادر است. Token ربات خودتان را ارسال کنید.",
-      VALIDATE_FAILED:
-        "❌ اعتبارسنجی Token ناموفق بود. Token را بررسی کنید و دوباره ارسال کنید.",
-      DUPLICATE_TOKEN: "❌ این Token قبلاً ثبت شده است.",
-      SAVE_FAILED:
-        "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
-    };
-    const msg = messages[result.code] || messages.SAVE_FAILED;
-    const clearStep = result.code === "SAVE_FAILED";
-    if (clearStep) {
+    const result = await provisionShop(user, rawToken);
+
+    if (result.code === "NEED_PROFILE") {
+      await startProfile(user, chatId);
+      return;
+    }
+
+    if (result.code === "ALREADY_HAS_BOT") {
       await prisma.user.update({
         where: { id: user.id },
         data: { orderStep: null, pendingOrderId: null },
       });
+      const at = result.username ? `: @${result.username}` : "";
+      await reply(
+        user,
+        chatId,
+        `ربات این فروشگاه قبلاً ثبت شده است${at}.`,
+        mainMenu(user)
+      );
+      return;
     }
-    await reply(user, chatId, msg, clearStep ? mainMenu(user) : backMain());
-    return;
-  }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { orderStep: null, pendingOrderId: null },
-  });
+    if (!result.ok) {
+      const messages = {
+        INVALID_TOKEN: "❌ Token نامعتبر است. لطفاً Token کامل را ارسال کنید.",
+        MOTHER_TOKEN:
+          "❌ این Token مربوط به ربات مادر است. Token ربات خودتان را ارسال کنید.",
+        VALIDATE_FAILED:
+          "❌ اعتبارسنجی Token ناموفق بود. Token را بررسی کنید و دوباره ارسال کنید.",
+        DUPLICATE_TOKEN: "❌ این Token قبلاً ثبت شده است.",
+        SAVE_FAILED:
+          "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
+      };
+      const msg = messages[result.code] || messages.SAVE_FAILED;
+      const clearStep = result.code === "SAVE_FAILED";
+      if (clearStep) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { orderStep: null, pendingOrderId: null },
+        });
+      }
+      await reply(user, chatId, msg, clearStep ? mainMenu(user) : backMain());
+      return;
+    }
 
-  const at = result.username ? `@${result.username}` : "ربات شما";
-  await reply(
-    user,
-    chatId,
-    `✅ فروشگاه آماده تحویل است.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, pendingOrderId: null },
+    });
+
+    const at = result.username ? `@${result.username}` : "ربات شما";
+    await reply(
+      user,
+      chatId,
+      `✅ فروشگاه آماده تحویل است.
 
 🏷 ${result.shopName}
 🤖 ${at}
@@ -316,8 +325,17 @@ async function registerBot(user, chatId, rawToken) {
 الان در بله ${at} را باز کنید و /start بزنید.
 منوی محصولات و راهنما فعال است.
 کالا و کارت بانکی را بعداً از داخل ربات خودتان اضافه می‌کنید.`,
-    mainMenu(user)
-  );
+      mainMenu(user)
+    );
+  } catch (err) {
+    console.error("REGISTER BOT:", err);
+    await reply(
+      user,
+      chatId,
+      "ثبت ربات الان ممکن نشد. Token را دوباره در همین چت بفرستید.",
+      backMain()
+    );
+  }
 }
 
 function afterShopType(user) {
@@ -580,6 +598,14 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (user.orderStep === "BOT_CREATE_TOKEN") {
+    await registerBot(user, chatId, text);
+    return true;
+  }
+
+  if (
+    (user.role === "COLLEAGUE" || user.role === "ADMIN") &&
+    /\d{5,}:[A-Za-z0-9_-]{20,}/.test(text)
+  ) {
     await registerBot(user, chatId, text);
     return true;
   }

@@ -65,11 +65,11 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
+  if (await colleagueHandler(user, chatId, text)) return;
+
   if (isAdmin(user) && (await adminHandler.handleAdmin(user, chatId, text))) {
     return;
   }
-
-  if (await colleagueHandler(user, chatId, text)) return;
 
   if (await supportHandler.handleSupport(user, chatId, text)) return;
 
