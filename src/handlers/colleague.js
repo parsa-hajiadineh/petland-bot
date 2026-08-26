@@ -49,8 +49,7 @@ function shopModeLabel(mode) {
 
 function tenantTypeFor(mode) {
   if (mode === "ONLINE") return "ONLINE_SHOP";
-  if (mode === "PHYSICAL") return "PET_SHOP";
-  return "OTHER";
+  return "PET_SHOP";
 }
 
 function profileData(user) {
@@ -191,6 +190,7 @@ async function persistColleague(user) {
     address: d.mode === "ONLINE" ? null : d.address || null,
     pageName: d.mode === "PHYSICAL" ? null : d.page || null,
     pageDetails: d.mode === "PHYSICAL" ? null : d.page || null,
+    description: d.mode === "BOTH" ? "ONLINE+PHYSICAL" : null,
   };
 
   try {
@@ -199,17 +199,45 @@ async function persistColleague(user) {
     });
 
     if (tenant) {
-      tenant = await prisma.tenant.update({
-        where: { id: tenant.id },
-        data: tenantFields,
-      });
+      try {
+        tenant = await prisma.tenant.update({
+          where: { id: tenant.id },
+          data: tenantFields,
+        });
+      } catch (err) {
+        console.error("TENANT UPDATE FULL:", err.message);
+        tenant = await prisma.tenant.update({
+          where: { id: tenant.id },
+          data: {
+            name: d.brand,
+            ownerName: d.fullName,
+            phone: d.phone,
+            address: d.address || null,
+          },
+        });
+      }
     } else {
-      tenant = await prisma.tenant.create({
-        data: {
-          ...tenantFields,
-          ownerUserId: user.id,
-        },
-      });
+      try {
+        tenant = await prisma.tenant.create({
+          data: {
+            ...tenantFields,
+            ownerUserId: user.id,
+          },
+        });
+      } catch (err) {
+        console.error("TENANT CREATE FULL:", err.message);
+        tenant = await prisma.tenant.create({
+          data: {
+            name: d.brand,
+            type: "PET_SHOP",
+            status: "ACTIVE",
+            ownerName: d.fullName,
+            phone: d.phone,
+            address: d.address || null,
+            ownerUserId: user.id,
+          },
+        });
+      }
     }
 
     try {
@@ -303,28 +331,29 @@ async function finishProfile(user, chatId) {
   });
   user.orderStep = null;
 
+  const hint =
+    "\n\nاگر ربات فروشگاهی می‌خواهید از دکمه «🤖 ساخت ربات فروشگاهی» استفاده کنید.";
+
   if (!saved.ok) {
     await reply(
       user,
       chatId,
       `✅ اطلاعات تماس همکار روی حساب شما ثبت شد.
 
-${snapshot}
-ساخت ربات فروشگاهی را بعداً از منو ادامه دهید.`,
+${snapshot}${hint}`,
       mainMenu(user)
     );
     return;
   }
 
-  await reply(user, chatId, `✅ اطلاعات همکار ثبت شد.\n\n${snapshot}`);
+  await reply(
+    user,
+    chatId,
+    `✅ اطلاعات همکار ثبت شد.
 
-  const tenant = await getOwnedTenant(user.id);
-  if (tenant && !tenant.bot) {
-    await startBotCreate(user, chatId);
-    return;
-  }
-
-  await reply(user, chatId, "از منوی زیر استفاده کنید:", mainMenu(user));
+${snapshot}${hint}`,
+    mainMenu(user)
+  );
 }
 
 async function startBotCreate(user, chatId) {
@@ -471,7 +500,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (text === BTN.CREATE_SHOP_BOT) {
-    if (user.role !== "COLLEAGUE") return false;
+    if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
 
     const tenant = await getOwnedTenant(user.id);
     if (!tenant) {
@@ -509,11 +538,15 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       return true;
     }
 
+    const roleData =
+      user.role === "ADMIN"
+        ? { orderStep: null }
+        : { role: "COLLEAGUE", orderStep: null };
     await prisma.user.update({
       where: { id: user.id },
-      data: { role: "COLLEAGUE", orderStep: null },
+      data: roleData,
     });
-    user.role = "COLLEAGUE";
+    if (user.role !== "ADMIN") user.role = "COLLEAGUE";
 
     await reply(
       user,

@@ -188,15 +188,19 @@ function mainMenu(user) {
     rows.push([{ text: BTN.MARKETING }, { text: BTN.WALLET }]);
   }
 
-  if (user.role === "COLLEAGUE") {
+  if (user.role === "COLLEAGUE" || user.role === "ADMIN") {
     rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
+  }
+
+  if (user.role === "COLLEAGUE") {
     rows.push([{ text: BTN.RETAIL_MODE }]);
-  } else {
+  } else if (user.role !== "ADMIN") {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }
 
   if (user.role === "ADMIN") {
     rows.push([{ text: BTN.ADMIN_PANEL }]);
+    rows.push([{ text: BTN.COLLEAGUE }]);
   }
 
   return kb(rows);
