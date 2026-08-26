@@ -8,12 +8,81 @@ const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const { provisionShop } = require("../services/shopProvision");
 
+const PROFILE_STEPS = [
+  "COLLEAGUE_NAME",
+  "COLLEAGUE_PHONE",
+  "COLLEAGUE_BRAND",
+  "COLLEAGUE_SHOP_TYPE",
+  "COLLEAGUE_PAGE",
+  "COLLEAGUE_ADDRESS",
+  "COLLEAGUE_CONFIRM",
+];
+
+function profileNavKb() {
+  return kb([[{ text: BTN.BACK_QUESTION }], [{ text: BTN.BACK_MAIN }]]);
+}
+
 function shopTypeMenu() {
   return kb([
     [{ text: BTN.SHOP_ONLINE }],
     [{ text: BTN.SHOP_PHYSICAL }],
+    [{ text: BTN.SHOP_BOTH }],
+    [{ text: BTN.BACK_QUESTION }],
     [{ text: BTN.BACK_MAIN }],
   ]);
+}
+
+function confirmMenu() {
+  return kb([
+    [{ text: BTN.CONFIRM_PROFILE }],
+    [{ text: BTN.BACK_QUESTION }],
+    [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function shopModeLabel(mode) {
+  if (mode === "ONLINE") return "آنلاین";
+  if (mode === "PHYSICAL") return "حضوری";
+  if (mode === "BOTH") return "آنلاین و حضوری";
+  return "نامشخص";
+}
+
+function tenantTypeFor(mode) {
+  if (mode === "ONLINE") return "ONLINE_SHOP";
+  if (mode === "PHYSICAL") return "PET_SHOP";
+  return "OTHER";
+}
+
+function profileData(user) {
+  const mode = user.tempProvince || "";
+  return {
+    fullName: (user.fullName || "").trim(),
+    phone: (user.phone || "").trim(),
+    brand: (user.tempDescription || "").trim(),
+    mode,
+    page: (user.tempCity || "").trim(),
+    address: (user.tempAddress || "").trim(),
+  };
+}
+
+function summaryText(user) {
+  const d = profileData(user);
+  const lines = [
+    "📋 خلاصه اطلاعات همکار",
+    "━━━━━━━━━━━━━━━━━━",
+    `👤 نام: ${d.fullName || "—"}`,
+    `📞 تلفن: ${d.phone || "—"}`,
+    `🏷 برند: ${d.brand || "—"}`,
+    `🏪 نوع فعالیت: ${shopModeLabel(d.mode)}`,
+  ];
+  if (d.mode === "ONLINE" || d.mode === "BOTH") {
+    lines.push(`🌐 پیج آنلاین: ${d.page || "—"}`);
+  }
+  if (d.mode === "PHYSICAL" || d.mode === "BOTH") {
+    lines.push(`📍 آدرس حضوری: ${d.address || "—"}`);
+  }
+  lines.push("", "اگر موردی اشتباه است با بازگشت اصلاح کنید.");
+  return lines.join("\n");
 }
 
 async function getOwnedTenant(userId) {
@@ -28,91 +97,199 @@ async function getOwnedTenant(userId) {
   }
 }
 
-async function startProfile(user, chatId) {
+async function askStep(user, chatId, step) {
   await prisma.user.update({
     where: { id: user.id },
-    data: { orderStep: "COLLEAGUE_NAME" },
+    data: { orderStep: step },
   });
-  user.orderStep = "COLLEAGUE_NAME";
+  user.orderStep = step;
 
-  await reply(
-    user,
-    chatId,
-    "برای تکمیل حساب همکار این اطلاعات را وارد کنید.\n\n👤 نام و نام خانوادگی:",
-    backMain()
-  );
+  if (step === "COLLEAGUE_NAME") {
+    await reply(
+      user,
+      chatId,
+      "برای تکمیل حساب همکار این اطلاعات را وارد کنید.\n\n👤 نام و نام خانوادگی:",
+      backMain()
+    );
+    return;
+  }
+
+  if (step === "COLLEAGUE_PHONE") {
+    await reply(user, chatId, "📞 شماره تماس:", profileNavKb());
+    return;
+  }
+
+  if (step === "COLLEAGUE_BRAND") {
+    await reply(user, chatId, "🏷 نام برند:", profileNavKb());
+    return;
+  }
+
+  if (step === "COLLEAGUE_SHOP_TYPE") {
+    await reply(
+      user,
+      chatId,
+      "فروشگاه شما تا به امروز به چه شکلی فعالیت داشته است؟",
+      shopTypeMenu()
+    );
+    return;
+  }
+
+  if (step === "COLLEAGUE_PAGE") {
+    await reply(
+      user,
+      chatId,
+      "🌐 نام و مشخصات پیج آنلاین را ارسال کنید:",
+      profileNavKb()
+    );
+    return;
+  }
+
+  if (step === "COLLEAGUE_ADDRESS") {
+    await reply(
+      user,
+      chatId,
+      "📍 آدرس فروشگاه حضوری را ارسال کنید:",
+      profileNavKb()
+    );
+    return;
+  }
+
+  if (step === "COLLEAGUE_CONFIRM") {
+    await reply(user, chatId, summaryText(user), confirmMenu());
+  }
 }
 
-async function finishProfile(user, chatId, extra) {
-  const fullName = (user.fullName || "").trim();
-  const phone = (user.phone || "").trim();
-  const brand = (user.tempDescription || "").trim();
-  const isOnline = user.tempProvince === "ONLINE";
+async function goProfileBack(user, chatId) {
+  const step = user.orderStep;
+  const mode = user.tempProvince;
+
+  if (step === "COLLEAGUE_PHONE") return askStep(user, chatId, "COLLEAGUE_NAME");
+  if (step === "COLLEAGUE_BRAND") return askStep(user, chatId, "COLLEAGUE_PHONE");
+  if (step === "COLLEAGUE_SHOP_TYPE") return askStep(user, chatId, "COLLEAGUE_BRAND");
+  if (step === "COLLEAGUE_PAGE") return askStep(user, chatId, "COLLEAGUE_SHOP_TYPE");
+  if (step === "COLLEAGUE_ADDRESS") {
+    if (mode === "BOTH") return askStep(user, chatId, "COLLEAGUE_PAGE");
+    return askStep(user, chatId, "COLLEAGUE_SHOP_TYPE");
+  }
+  if (step === "COLLEAGUE_CONFIRM") {
+    if (mode === "PHYSICAL" || mode === "BOTH") {
+      return askStep(user, chatId, "COLLEAGUE_ADDRESS");
+    }
+    return askStep(user, chatId, "COLLEAGUE_PAGE");
+  }
+  return askStep(user, chatId, "COLLEAGUE_NAME");
+}
+
+async function persistColleague(user) {
+  const d = profileData(user);
+  const tenantFields = {
+    name: d.brand,
+    type: tenantTypeFor(d.mode),
+    status: "ACTIVE",
+    ownerName: d.fullName,
+    phone: d.phone,
+    address: d.mode === "ONLINE" ? null : d.address || null,
+    pageName: d.mode === "PHYSICAL" ? null : d.page || null,
+    pageDetails: d.mode === "PHYSICAL" ? null : d.page || null,
+  };
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const existing = await tx.tenant.findUnique({
-        where: { ownerUserId: user.id },
-      });
-      if (existing) return;
+    let tenant = await prisma.tenant.findUnique({
+      where: { ownerUserId: user.id },
+    });
 
-      const tenant = await tx.tenant.create({
+    if (tenant) {
+      tenant = await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: tenantFields,
+      });
+    } else {
+      tenant = await prisma.tenant.create({
         data: {
-          name: brand,
-          type: isOnline ? "ONLINE_SHOP" : "PET_SHOP",
-          status: "ACTIVE",
-          ownerName: fullName,
-          phone,
-          address: isOnline ? null : extra,
-          pageName: isOnline ? extra : null,
-          pageDetails: isOnline ? extra : null,
+          ...tenantFields,
           ownerUserId: user.id,
         },
       });
+    }
 
-      await tx.tenantSettings.create({
-        data: {
+    try {
+      await prisma.tenantSettings.upsert({
+        where: { tenantId: tenant.id },
+        create: {
           tenantId: tenant.id,
-          shopName: brand,
-          supportPhone: phone,
+          shopName: d.brand,
+          supportPhone: d.phone,
+        },
+        update: {
+          shopName: d.brand,
+          supportPhone: d.phone,
         },
       });
+    } catch (err) {
+      console.error("COLLEAGUE SETTINGS SKIP:", err.message);
+    }
 
-      await tx.tenantMember.create({
-        data: {
+    try {
+      await prisma.tenantMember.upsert({
+        where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
+        create: {
           tenantId: tenant.id,
           userId: user.id,
           role: "OWNER",
         },
+        update: { role: "OWNER" },
       });
+    } catch (err) {
+      console.error("COLLEAGUE MEMBER SKIP:", err.message);
+    }
 
-      await tx.customer.create({
-        data: {
-          type: "COLLEAGUE",
-          fullName,
-          phone,
-          shopName: brand,
-          address: isOnline ? null : extra,
-          notes: isOnline ? extra : null,
-          userId: user.id,
-          tenantId: tenant.id,
-        },
+    try {
+      const existingCustomer = await prisma.customer.findFirst({
+        where: { userId: user.id, tenantId: tenant.id, type: "COLLEAGUE" },
       });
-    });
+      const customerData = {
+        fullName: d.fullName,
+        phone: d.phone,
+        shopName: d.brand,
+        address: d.mode === "ONLINE" ? null : d.address || null,
+        notes: d.mode === "PHYSICAL" ? null : d.page || null,
+      };
+      if (existingCustomer) {
+        await prisma.customer.update({
+          where: { id: existingCustomer.id },
+          data: customerData,
+        });
+      } else {
+        await prisma.customer.create({
+          data: {
+            type: "COLLEAGUE",
+            userId: user.id,
+            tenantId: tenant.id,
+            ...customerData,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("COLLEAGUE CUSTOMER SKIP:", err.message);
+    }
+
+    return { ok: true, tenant };
   } catch (err) {
     console.error("COLLEAGUE PROFILE SAVE:", err);
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: null },
-    });
-    await reply(
-      user,
-      chatId,
-      "ثبت اطلاعات الان ممکن نشد. از منوی اصلی می‌توانید ادامه دهید و بعداً دوباره تلاش کنید.",
-      mainMenu(user)
-    );
-    return;
+    return { ok: false };
   }
+}
+
+async function startProfile(user, chatId) {
+  await askStep(user, chatId, "COLLEAGUE_NAME");
+}
+
+async function finishProfile(user, chatId) {
+  const snapshot = summaryText(user).replace(
+    "\n\nاگر موردی اشتباه است با بازگشت اصلاح کنید.",
+    ""
+  );
+  const saved = await persistColleague(user);
 
   await prisma.user.update({
     where: { id: user.id },
@@ -121,20 +298,25 @@ async function finishProfile(user, chatId, extra) {
       tempDescription: null,
       tempAddress: null,
       tempProvince: null,
+      tempCity: null,
     },
   });
   user.orderStep = null;
 
-  await reply(
-    user,
-    chatId,
-    `✅ اطلاعات همکار ثبت شد.
+  if (!saved.ok) {
+    await reply(
+      user,
+      chatId,
+      `✅ اطلاعات تماس همکار روی حساب شما ثبت شد.
 
-🏷 برند: ${brand}
-👤 ${fullName}
-📞 ${phone}
-${isOnline ? `🌐 ${extra}` : `📍 ${extra}`}`
-  );
+${snapshot}
+ساخت ربات فروشگاهی را بعداً از منو ادامه دهید.`,
+      mainMenu(user)
+    );
+    return;
+  }
+
+  await reply(user, chatId, `✅ اطلاعات همکار ثبت شد.\n\n${snapshot}`);
 
   const tenant = await getOwnedTenant(user.id);
   if (tenant && !tenant.bot) {
@@ -202,7 +384,7 @@ async function registerBot(user, chatId, rawToken) {
       SAVE_FAILED:
         "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
     };
-    const text = messages[result.code] || messages.SAVE_FAILED;
+    const msg = messages[result.code] || messages.SAVE_FAILED;
     const clearStep = result.code === "SAVE_FAILED";
     if (clearStep) {
       await prisma.user.update({
@@ -210,7 +392,7 @@ async function registerBot(user, chatId, rawToken) {
         data: { orderStep: null },
       });
     }
-    await reply(user, chatId, text, clearStep ? mainMenu(user) : backMain());
+    await reply(user, chatId, msg, clearStep ? mainMenu(user) : backMain());
     return;
   }
 
@@ -233,6 +415,17 @@ async function registerBot(user, chatId, rawToken) {
 کالا و کارت بانکی را بعداً از داخل ربات خودتان اضافه می‌کنید.`,
     mainMenu(user)
   );
+}
+
+function afterShopType(user) {
+  const mode = user.tempProvince;
+  if (mode === "PHYSICAL") return "COLLEAGUE_ADDRESS";
+  return "COLLEAGUE_PAGE";
+}
+
+function afterPage(user) {
+  if (user.tempProvince === "BOTH") return "COLLEAGUE_ADDRESS";
+  return "COLLEAGUE_CONFIRM";
 }
 
 module.exports = async function colleagueHandler(user, chatId, text) {
@@ -300,6 +493,11 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.BACK_QUESTION && PROFILE_STEPS.includes(user.orderStep)) {
+    await goProfileBack(user, chatId);
+    return true;
+  }
+
   if (user.orderStep === "COLLEAGUE_CODE") {
     if (text.trim() !== COLLEAGUE_ACCESS_CODE) {
       await reply(
@@ -350,88 +548,117 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     }
     await prisma.user.update({
       where: { id: user.id },
-      data: { fullName: name, orderStep: "COLLEAGUE_PHONE" },
+      data: { fullName: name },
     });
     user.fullName = name;
-    user.orderStep = "COLLEAGUE_PHONE";
-    await reply(user, chatId, "📞 شماره تماس:", backMain());
+    await askStep(user, chatId, "COLLEAGUE_PHONE");
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_PHONE") {
     const phone = text.trim();
     if (!phone) {
-      await reply(user, chatId, "لطفاً شماره تماس را وارد کنید.", backMain());
+      await reply(user, chatId, "لطفاً شماره تماس را وارد کنید.", profileNavKb());
       return true;
     }
     await prisma.user.update({
       where: { id: user.id },
-      data: { phone, orderStep: "COLLEAGUE_BRAND" },
+      data: { phone },
     });
     user.phone = phone;
-    user.orderStep = "COLLEAGUE_BRAND";
-    await reply(user, chatId, "🏷 نام برند:", backMain());
+    await askStep(user, chatId, "COLLEAGUE_BRAND");
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_BRAND") {
     const brand = text.trim();
     if (!brand) {
-      await reply(user, chatId, "لطفاً نام برند را وارد کنید.", backMain());
+      await reply(user, chatId, "لطفاً نام برند را وارد کنید.", profileNavKb());
       return true;
     }
     await prisma.user.update({
       where: { id: user.id },
-      data: { tempDescription: brand, orderStep: "COLLEAGUE_SHOP_TYPE" },
+      data: { tempDescription: brand },
     });
     user.tempDescription = brand;
-    user.orderStep = "COLLEAGUE_SHOP_TYPE";
-    await reply(user, chatId, "نوع فروشگاه را انتخاب کنید:", shopTypeMenu());
+    await askStep(user, chatId, "COLLEAGUE_SHOP_TYPE");
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_SHOP_TYPE") {
-    if (text === BTN.SHOP_ONLINE) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { tempProvince: "ONLINE", orderStep: "COLLEAGUE_PAGE" },
-      });
-      user.tempProvince = "ONLINE";
-      user.orderStep = "COLLEAGUE_PAGE";
-      await reply(user, chatId, "🌐 نام و مشخصات پیج را ارسال کنید:", backMain());
+    let mode = null;
+    if (text === BTN.SHOP_ONLINE) mode = "ONLINE";
+    if (text === BTN.SHOP_PHYSICAL) mode = "PHYSICAL";
+    if (text === BTN.SHOP_BOTH) mode = "BOTH";
+    if (!mode) {
+      await reply(
+        user,
+        chatId,
+        "لطفاً یکی از دکمه‌ها را انتخاب کنید.",
+        shopTypeMenu()
+      );
       return true;
     }
-    if (text === BTN.SHOP_PHYSICAL) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { tempProvince: "PHYSICAL", orderStep: "COLLEAGUE_ADDRESS" },
-      });
-      user.tempProvince = "PHYSICAL";
-      user.orderStep = "COLLEAGUE_ADDRESS";
-      await reply(user, chatId, "📍 آدرس فروشگاه را ارسال کنید:", backMain());
-      return true;
-    }
-    await reply(user, chatId, "لطفاً یکی از دکمه‌ها را انتخاب کنید.", shopTypeMenu());
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { tempProvince: mode },
+    });
+    user.tempProvince = mode;
+    await askStep(user, chatId, afterShopType(user));
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_PAGE") {
     const page = text.trim();
     if (!page) {
-      await reply(user, chatId, "لطفاً نام و مشخصات پیج را ارسال کنید.", backMain());
+      await reply(
+        user,
+        chatId,
+        "لطفاً نام و مشخصات پیج را ارسال کنید.",
+        profileNavKb()
+      );
       return true;
     }
-    await finishProfile(user, chatId, page);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { tempCity: page },
+    });
+    user.tempCity = page;
+    await askStep(user, chatId, afterPage(user));
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_ADDRESS") {
     const address = text.trim();
     if (!address) {
-      await reply(user, chatId, "لطفاً آدرس فروشگاه را ارسال کنید.", backMain());
+      await reply(
+        user,
+        chatId,
+        "لطفاً آدرس فروشگاه را ارسال کنید.",
+        profileNavKb()
+      );
       return true;
     }
-    await finishProfile(user, chatId, address);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { tempAddress: address },
+    });
+    user.tempAddress = address;
+    await askStep(user, chatId, "COLLEAGUE_CONFIRM");
+    return true;
+  }
+
+  if (user.orderStep === "COLLEAGUE_CONFIRM") {
+    if (text === BTN.CONFIRM_PROFILE) {
+      await finishProfile(user, chatId);
+      return true;
+    }
+    await reply(
+      user,
+      chatId,
+      "برای ثبت، دکمه تأیید را بزنید یا با بازگشت اطلاعات را اصلاح کنید.",
+      confirmMenu()
+    );
     return true;
   }
 
