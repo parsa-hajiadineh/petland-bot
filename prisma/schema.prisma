@@ -117,7 +117,6 @@ model User {
   tickets         Ticket[]
 
   cart            Cart?
-  shopCarts       ShopCart[]
   wallet          Wallet?
   savedAddresses  SavedAddress[]
 
@@ -158,7 +157,6 @@ model Product {
 
   orderItems      OrderItem[]
   cartItems       CartItem[]
-  shopCartItems   ShopCartItem[]
   tenantProducts  TenantProduct[]
 
   tenantId        String?
@@ -189,31 +187,6 @@ model CartItem {
 
   productId  String
   product    Product @relation(fields: [productId], references: [id])
-
-  @@unique([cartId, productId])
-  @@index([cartId])
-  @@index([productId])
-}
-
-model ShopCart {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  tenantId  String
-  createdAt DateTime @default(now())
-  items     ShopCartItem[]
-
-  @@unique([userId, tenantId])
-  @@index([tenantId])
-}
-
-model ShopCartItem {
-  id        String @id @default(cuid())
-  quantity  Int    @default(1)
-  cartId    String
-  cart      ShopCart @relation(fields: [cartId], references: [id])
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
 
   @@unique([cartId, productId])
   @@index([cartId])

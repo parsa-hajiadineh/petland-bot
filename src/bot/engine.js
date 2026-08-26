@@ -274,13 +274,15 @@ async function handleWebhook(botId, update) {
 async function start() {
   const mother = motherContext();
   await startPoller(mother);
-  await runWithContext(mother, () => bale.testBot());
   await syncTenantBots();
   console.log(
     "ENGINE READY: mother +",
     lastLiveCount < 0 ? 0 : lastLiveCount,
     "tenant bot(s)"
   );
+  runWithContext(mother, () => bale.testBot()).catch((err) => {
+    console.error("MOTHER getMe SKIP:", err.message);
+  });
   setImmediate(() => {
     require("../services/shopProvision")
       .ensureShopRuntimeTables()

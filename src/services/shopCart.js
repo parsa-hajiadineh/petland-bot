@@ -1,43 +1,66 @@
+const { Prisma } = require("@prisma/client");
 const prisma = require("../database/prisma");
-const { CART_ITEMS_SELECT } = require("../database/selects");
+const { PRODUCT_SAFE_SELECT } = require("../database/selects");
 const { reply } = require("../bot/messenger");
 const { BTN, cartMenu, backMain, kb } = require("../keyboards/menus");
 const { getUnitPrice, formatPrice } = require("../utils/price");
 const { ensureShopRuntimeTables } = require("./shopProvision");
 
+function newId() {
+  return `sc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function getCartRow(userId, tenantId) {
+  const rows = await prisma.$queryRaw`
+    SELECT id FROM "ShopCart"
+    WHERE "userId" = ${userId} AND "tenantId" = ${tenantId}
+    LIMIT 1
+  `;
+  return rows?.[0] || null;
+}
+
 async function getCartWithItems(userId, tenantId) {
   await ensureShopRuntimeTables().catch((err) => {
     console.error("SHOP CART TABLES:", err.message);
   });
-  if (typeof prisma.shopCart?.findUnique !== "function") {
-    const err = new Error("ShopCart client missing");
-    err.code = "SHOP_CART_CLIENT";
-    throw err;
-  }
-  return prisma.shopCart.findUnique({
-    where: { userId_tenantId: { userId, tenantId } },
-    include: {
-      items: { select: CART_ITEMS_SELECT },
-    },
+  const cart = await getCartRow(userId, tenantId);
+  if (!cart) return null;
+
+  const itemRows = await prisma.$queryRaw`
+    SELECT id, quantity, "productId" FROM "ShopCartItem" WHERE "cartId" = ${cart.id}
+  `;
+  if (!itemRows?.length) return { id: cart.id, items: [] };
+
+  const products = await prisma.product.findMany({
+    where: { id: { in: itemRows.map((row) => row.productId) } },
+    select: PRODUCT_SAFE_SELECT,
   });
+  const byId = new Map(products.map((product) => [product.id, product]));
+  return {
+    id: cart.id,
+    items: itemRows
+      .map((row) => ({
+        id: row.id,
+        quantity: row.quantity,
+        productId: row.productId,
+        product: byId.get(row.productId),
+      }))
+      .filter((item) => item.product),
+  };
 }
 
 async function getOrCreateCart(userId, tenantId) {
   await ensureShopRuntimeTables().catch((err) => {
     console.error("SHOP CART TABLES:", err.message);
   });
-  if (typeof prisma.shopCart?.findUnique !== "function") {
-    const err = new Error("ShopCart client missing");
-    err.code = "SHOP_CART_CLIENT";
-    throw err;
-  }
-  let cart = await prisma.shopCart.findUnique({
-    where: { userId_tenantId: { userId, tenantId } },
-  });
+  let cart = await getCartRow(userId, tenantId);
   if (!cart) {
-    cart = await prisma.shopCart.create({
-      data: { userId, tenantId },
-    });
+    const id = newId();
+    await prisma.$executeRaw`
+      INSERT INTO "ShopCart" ("id", "userId", "tenantId", "createdAt")
+      VALUES (${id}, ${userId}, ${tenantId}, NOW())
+    `;
+    cart = { id };
   }
   return cart;
 }
@@ -51,23 +74,36 @@ function calcCartTotal(items) {
 
 async function addItem(userId, tenantId, product, quantity) {
   const cart = await getOrCreateCart(userId, tenantId);
-  const existing = await prisma.shopCartItem.findFirst({
-    where: { cartId: cart.id, productId: product.id },
-  });
-  if (existing) {
-    await prisma.shopCartItem.update({
-      where: { id: existing.id },
-      data: { quantity: existing.quantity + quantity },
-    });
+  const existing = await prisma.$queryRaw`
+    SELECT id, quantity FROM "ShopCartItem"
+    WHERE "cartId" = ${cart.id} AND "productId" = ${product.id}
+    LIMIT 1
+  `;
+  const row = existing?.[0];
+  if (row) {
+    await prisma.$executeRaw`
+      UPDATE "ShopCartItem"
+      SET quantity = ${row.quantity + quantity}
+      WHERE id = ${row.id}
+    `;
   } else {
-    await prisma.shopCartItem.create({
-      data: {
-        cartId: cart.id,
-        productId: product.id,
-        quantity,
-      },
-    });
+    await prisma.$executeRaw`
+      INSERT INTO "ShopCartItem" ("id", "quantity", "cartId", "productId")
+      VALUES (${newId()}, ${quantity}, ${cart.id}, ${product.id})
+    `;
   }
+}
+
+async function clearItems(cartId) {
+  if (!cartId) return;
+  await prisma.$executeRaw`DELETE FROM "ShopCartItem" WHERE "cartId" = ${cartId}`;
+}
+
+async function deleteItemsForProducts(productIds) {
+  if (!productIds?.length) return;
+  await prisma.$executeRaw`
+    DELETE FROM "ShopCartItem" WHERE "productId" IN (${Prisma.join(productIds)})
+  `;
 }
 
 async function showCart(user, chatId, tenantId) {
@@ -76,11 +112,12 @@ async function showCart(user, chatId, tenantId) {
     cart = await getCartWithItems(user.id, tenantId);
   } catch (err) {
     console.error("SHOW SHOP CART:", err);
-    const msg =
-      err.code === "SHOP_CART_CLIENT"
-        ? "سبد این فروشگاه بعد از به‌روزرسانی ربات فعال می‌شود. لطفاً کمی بعد دوباره تلاش کنید."
-        : "خواندن سبد خرید ممکن نشد. لطفاً دوباره تلاش کنید.";
-    await reply(user, chatId, msg, backMain());
+    await reply(
+      user,
+      chatId,
+      "خواندن سبد خرید ممکن نشد. لطفاً دوباره تلاش کنید.",
+      backMain()
+    );
     return;
   }
 
@@ -117,7 +154,7 @@ async function clearCart(user, chatId, tenantId) {
     await reply(user, chatId, "سبد خرید خالی است.", backMain());
     return;
   }
-  await prisma.shopCartItem.deleteMany({ where: { cartId: cart.id } });
+  await clearItems(cart.id);
   await reply(
     user,
     chatId,
@@ -153,6 +190,8 @@ module.exports = {
   addItem,
   showCart,
   clearCart,
+  clearItems,
+  deleteItemsForProducts,
   validateCheckout,
   calcCartTotal,
 };

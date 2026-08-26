@@ -405,7 +405,7 @@ async function finalizeOrder(user, chatId, description) {
   }
 
   try {
-    await prisma.shopCartItem.deleteMany({ where: { cartId: check.cartId } });
+    await shopCart.clearItems(check.cartId);
   } catch (err) {
     console.error("CLEAR SHOP CART AFTER ORDER:", err.message);
   }

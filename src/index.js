@@ -23,6 +23,12 @@ app.post("/webhook/bot/:botId", (req, res) => {
 
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
-  await ensureMotherCatalog();
-  await engine.start();
+  try {
+    await engine.start();
+  } catch (err) {
+    console.error("ENGINE START:", err);
+  }
+  ensureMotherCatalog().catch((err) => {
+    console.error("MOTHER CATALOG SKIP:", err.message);
+  });
 });

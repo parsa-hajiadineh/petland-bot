@@ -987,9 +987,7 @@ async function handleAdminCallback(user, chatId, data) {
           console.error("CAT DELETE CART ITEMS:", err.message);
         }
         try {
-          await prisma.shopCartItem.deleteMany({
-            where: { productId: { in: ids } },
-          });
+          await require("../services/shopCart").deleteItemsForProducts(ids);
         } catch (err) {
           console.error("CAT DELETE SHOP CART ITEMS:", err.message);
         }
@@ -1094,9 +1092,10 @@ async function handleAdminCallback(user, chatId, data) {
   }
   if (action === "del") {
     try {
-      await prisma.shopCartItem.deleteMany({
-        where: { product: { code } },
-      });
+      const owned = await loadOwnedProduct(code, tenantId);
+      if (owned?.id) {
+        await require("../services/shopCart").deleteItemsForProducts([owned.id]);
+      }
     } catch (err) {
       console.error("PRODUCT DELETE SHOP CART:", err.message);
     }

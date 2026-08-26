@@ -84,7 +84,7 @@
 
 کالای کلینیک **نباید** در منوی پت‌لند دیده شود. کوئری‌های مادر با `motherCatalogWhere()` فیلتر می‌شوند (`tenantId` مادر یا `null`).
 
-سبد تننت جدول جداست (`ShopCart` / `ShopCartItem`) با `@@unique([userId, tenantId])`. `Cart` مادر دست نخورده می‌ماند.
+سبد تننت جدول جداست (`ShopCart` / `ShopCartItem`) که در runtime ساخته می‌شود و با SQL خام خوانده می‌شود — داخل schema Prisma نیست تا Client مادر به جدول جدید وابسته نشود. `Cart` مادر دست نخورده می‌ماند.
 
 سفارش تننت: `Order.tenantId` + `botId`، کد پیگیری `TS-YYYYMMDD-XXXX`. مادر فقط `PL-` را در فاکتور/آمار/سفارشات من می‌بیند.
 
@@ -168,7 +168,7 @@ src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
 - دکمه **محصولات** همیشه اول دسته‌بندی‌ها را نشان می‌دهد (حتی اگر یک دسته باشد)؛ بعد از انتخاب دسته، کالاها اینلاین ۱۰تایی
 - سبد جدا (`ShopCart`) → تعداد → تسویه آدرس → کارت همان فروشگاه → رسید → اطلاع به مالک
 - مشتری: **سفارشات من** فقط `TS-` همین فروشگاه. مالک: تایید / رد / بسته‌بندی / ارسال
-- جداول `ShopCart` / `ShopCartItem` اگر روی لیارا نباشند در `ensureShopRuntimeTables` ساخته می‌شوند؛ بعد از این اسکیما **redeploy** لازم است تا Prisma Client مدل جدید را داشته باشد
+- جداول `ShopCart` / `ShopCartItem` اگر روی لیارا نباشند در `ensureShopRuntimeTables` ساخته می‌شوند. مدل Prisma برایشان نیست؛ `db:push` برای سبد لازم نیست.
 
 ---
 
