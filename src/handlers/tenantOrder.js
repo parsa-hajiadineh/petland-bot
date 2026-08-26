@@ -35,6 +35,9 @@ const SHOP_ORDER_SELECT = {
   botId: true,
 };
 
+const QTY_STEP = "TCK:QTY";
+const RECEIPT_STEP = "TCK:RECEIPT";
+
 function parseQty(text) {
   const map = {
     "۰": "0",

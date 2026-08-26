@@ -1,7 +1,9 @@
-# CURRENT_STATUS.md — PetLand v22
+# CURRENT_STATUS.md — PetLand
+
+> **منبع حقیقت multi-tenant:** `.ai/AI_CONTEXT.md` را بخوان. این فایل مال فروشگاه تکی v22 است و برای ربات همکار به‌روز نیست.
 
 ## Overall Status
-**Operational** — bot is deployed on Liara and actively serving users.
+مادر روی لیارا جواب می‌دهد. ربات تست تا فیکس `QTY_STEP` در `tenantOrder.js` روی `/start` خطا می‌داد («فروشگاه الان پاسخ نداد»). بعد از دپلوی آن فیکس باید خوش‌آمد فروشگاه بیاید.
 
 ---
 
