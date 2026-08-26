@@ -2,13 +2,11 @@ const prisma = require("../database/prisma");
 const {
   COLLEAGUE_ACCESS_CODE,
   WHOLESALE_MIN_ORDER,
-  BOT_TOKEN,
 } = require("../config");
 const { reply } = require("../bot/messenger");
-const bale = require("../bot/bale");
 const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
-const { encryptToken, hashToken } = require("../utils/tokenCrypto");
+const { provisionShop } = require("../services/shopProvision");
 
 function shopTypeMenu() {
   return kb([
@@ -135,9 +133,16 @@ async function finishProfile(user, chatId, extra) {
 🏷 برند: ${brand}
 👤 ${fullName}
 📞 ${phone}
-${isOnline ? `🌐 ${extra}` : `📍 ${extra}`}`,
-    mainMenu(user)
+${isOnline ? `🌐 ${extra}` : `📍 ${extra}`}`
   );
+
+  const tenant = await getOwnedTenant(user.id);
+  if (tenant && !tenant.bot) {
+    await startBotCreate(user, chatId);
+    return;
+  }
+
+  await reply(user, chatId, "از منوی زیر استفاده کنید:", mainMenu(user));
 }
 
 async function startBotCreate(user, chatId) {
@@ -164,103 +169,48 @@ async function startBotCreate(user, chatId) {
 }
 
 async function registerBot(user, chatId, rawToken) {
-  const token = (rawToken || "").trim();
-  const tenant = await getOwnedTenant(user.id);
+  const result = await provisionShop(user, rawToken);
 
-  if (!tenant) {
+  if (result.code === "NEED_PROFILE") {
     await startProfile(user, chatId);
     return;
   }
 
-  if (tenant.bot) {
+  if (result.code === "ALREADY_HAS_BOT") {
     await prisma.user.update({
       where: { id: user.id },
       data: { orderStep: null },
     });
+    const at = result.username ? `: @${result.username}` : "";
     await reply(
       user,
       chatId,
-      `ربات این فروشگاه قبلاً ثبت شده است${
-        tenant.bot.username ? `: @${tenant.bot.username}` : ""
-      }.`,
+      `ربات این فروشگاه قبلاً ثبت شده است${at}.`,
       mainMenu(user)
     );
     return;
   }
 
-  if (!token || token.length < 20) {
-    await reply(
-      user,
-      chatId,
-      "❌ Token نامعتبر است. لطفاً Token کامل را ارسال کنید.",
-      backMain()
-    );
-    return;
-  }
-
-  if (BOT_TOKEN && token === BOT_TOKEN) {
-    await reply(
-      user,
-      chatId,
-      "❌ این Token مربوط به ربات مادر است. Token ربات خودتان را ارسال کنید.",
-      backMain()
-    );
-    return;
-  }
-
-  const me = await bale.getMeWithToken(token);
-  if (!me?.ok || !me.result?.id) {
-    await reply(
-      user,
-      chatId,
-      "❌ اعتبارسنجی Token ناموفق بود. Token را بررسی کنید و دوباره ارسال کنید.",
-      backMain()
-    );
-    return;
-  }
-
-  try {
-    const tokenHash = hashToken(token);
-    const existing = await prisma.bot.findUnique({ where: { tokenHash } });
-    if (existing) {
-      await reply(user, chatId, "❌ این Token قبلاً ثبت شده است.", backMain());
-      return;
+  if (!result.ok) {
+    const messages = {
+      INVALID_TOKEN: "❌ Token نامعتبر است. لطفاً Token کامل را ارسال کنید.",
+      MOTHER_TOKEN:
+        "❌ این Token مربوط به ربات مادر است. Token ربات خودتان را ارسال کنید.",
+      VALIDATE_FAILED:
+        "❌ اعتبارسنجی Token ناموفق بود. Token را بررسی کنید و دوباره ارسال کنید.",
+      DUPLICATE_TOKEN: "❌ این Token قبلاً ثبت شده است.",
+      SAVE_FAILED:
+        "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
+    };
+    const text = messages[result.code] || messages.SAVE_FAILED;
+    const clearStep = result.code === "SAVE_FAILED";
+    if (clearStep) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { orderStep: null },
+      });
     }
-
-    await prisma.bot.create({
-      data: {
-        tenantId: tenant.id,
-        token: encryptToken(token),
-        tokenHash,
-        username: me.result.username || null,
-        baleBotId: String(me.result.id),
-        status: "ACTIVE",
-        isEnabled: true,
-        activatedAt: new Date(),
-      },
-    });
-
-    await prisma.tenantSettings.upsert({
-      where: { tenantId: tenant.id },
-      create: {
-        tenantId: tenant.id,
-        shopName: tenant.name,
-        supportPhone: tenant.phone,
-      },
-      update: {},
-    });
-  } catch (err) {
-    console.error("BOT REGISTER:", err);
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: null },
-    });
-    await reply(
-      user,
-      chatId,
-      "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
-      mainMenu(user)
-    );
+    await reply(user, chatId, text, clearStep ? mainMenu(user) : backMain());
     return;
   }
 
@@ -269,24 +219,20 @@ async function registerBot(user, chatId, rawToken) {
     data: { orderStep: null },
   });
 
-  const username = me.result.username ? `@${me.result.username}` : "";
+  const at = result.username ? `@${result.username}` : "ربات شما";
   await reply(
     user,
     chatId,
-    `✅ ربات ثبت شد.
-${username}
+    `✅ فروشگاه آماده تحویل است.
 
-این ربات متعلق به فروشگاه «${tenant.name}» است.`,
+🏷 ${result.shopName}
+🤖 ${at}
+
+الان در بله ${at} را باز کنید و /start بزنید.
+منوی محصولات و راهنما فعال است.
+کالا و کارت بانکی را بعداً از داخل ربات خودتان اضافه می‌کنید.`,
     mainMenu(user)
   );
-
-  setImmediate(() => {
-    require("../bot/engine")
-      .syncTenantBots()
-      .catch((err) => {
-        console.error("BOT SYNC AFTER REGISTER:", err.message);
-      });
-  });
 }
 
 module.exports = async function colleagueHandler(user, chatId, text) {

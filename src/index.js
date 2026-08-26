@@ -14,6 +14,13 @@ app.get("/health", (req, res) => {
   res.json({ ok: true, service: "petland-bot" });
 });
 
+app.post("/webhook/bot/:botId", (req, res) => {
+  res.status(200).json({ ok: true });
+  engine.handleWebhook(req.params.botId, req.body).catch((err) => {
+    console.error("WEBHOOK:", err.message);
+  });
+});
+
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   await ensureMotherCatalog();

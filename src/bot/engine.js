@@ -1,5 +1,6 @@
 const prisma = require("../database/prisma");
 const bale = require("./bale");
+const { PUBLIC_BASE_URL } = require("../config");
 const { decryptToken } = require("../utils/tokenCrypto");
 const {
   motherContext,
@@ -10,7 +11,13 @@ const { getOrCreateUser } = require("../services/user");
 const messageHandler = require("../handlers/router");
 
 const pollers = new Map();
+const hooked = new Set();
 let lastLiveCount = -1;
+
+function tenantWebhookUrl(botId) {
+  if (!PUBLIC_BASE_URL) return null;
+  return `${PUBLIC_BASE_URL}/webhook/bot/${botId}`;
+}
 
 async function processUpdate(update) {
   if (update.callback_query) {
@@ -93,6 +100,10 @@ async function pollLoop(ctx, state) {
 
 function startPoller(ctx) {
   if (pollers.has(ctx.botId)) return;
+  if (!ctx.isMother) {
+    hooked.delete(ctx.botId);
+    bale.deleteWebhook(ctx.token).catch(() => {});
+  }
   const state = { stopped: false, offset: 0 };
   pollers.set(ctx.botId, { ctx, state });
   pollLoop(ctx, state).catch((err) => {
@@ -127,6 +138,19 @@ async function loadTenantContexts() {
   return contexts;
 }
 
+async function hookTenantBot(ctx) {
+  const url = tenantWebhookUrl(ctx.botId);
+  if (!url) return false;
+  const result = await bale.setWebhook(ctx.token, url);
+  if (!result?.ok) {
+    console.error("SET WEBHOOK FAIL:", ctx.botId, result?.description || result);
+    return false;
+  }
+  hooked.add(ctx.botId);
+  stopPoller(ctx.botId);
+  return true;
+}
+
 async function syncTenantBots() {
   let contexts = [];
   try {
@@ -137,15 +161,26 @@ async function syncTenantBots() {
   }
 
   const liveIds = new Set(contexts.map((c) => c.botId));
+  const preferWebhook = Boolean(PUBLIC_BASE_URL);
 
   for (const [botId] of pollers) {
     if (botId === "mother") continue;
     if (!liveIds.has(botId)) {
       stopPoller(botId);
+      hooked.delete(botId);
     }
   }
 
   for (const ctx of contexts) {
+    if (preferWebhook) {
+      if (!hooked.has(ctx.botId)) {
+        const ok = await hookTenantBot(ctx);
+        if (ok) continue;
+      } else {
+        continue;
+      }
+    }
+
     const running = pollers.get(ctx.botId);
     if (running) {
       running.ctx.token = ctx.token;
@@ -157,8 +192,42 @@ async function syncTenantBots() {
 
   if (liveIds.size !== lastLiveCount) {
     lastLiveCount = liveIds.size;
-    console.log("TENANT BOTS LIVE:", liveIds.size);
+    console.log(
+      "TENANT BOTS LIVE:",
+      liveIds.size,
+      preferWebhook ? "(webhook)" : "(poll)"
+    );
   }
+}
+
+async function handleWebhook(botId, update) {
+  if (!botId || !update) return;
+
+  const bot = await prisma.bot.findUnique({
+    where: { id: botId },
+    include: { tenant: { include: { settings: true } } },
+  });
+  if (!bot?.isEnabled || bot.status !== "ACTIVE") return;
+  if (!bot.tenant || bot.tenant.status !== "ACTIVE") return;
+
+  let token;
+  try {
+    token = decryptToken(bot.token);
+  } catch (err) {
+    console.error("WEBHOOK DECRYPT SKIP:", botId, err.message);
+    return;
+  }
+
+  const ctx = contextFromTenantBot(bot, token);
+  await runWithContext(ctx, async () => {
+    prisma.bot
+      .update({
+        where: { id: botId },
+        data: { lastSeenAt: new Date() },
+      })
+      .catch(() => {});
+    await processUpdate(update);
+  });
 }
 
 async function start() {
@@ -166,7 +235,11 @@ async function start() {
   startPoller(mother);
   await runWithContext(mother, () => bale.testBot());
   await syncTenantBots();
-  console.log("ENGINE READY: mother +", pollers.size - 1, "tenant bot(s)");
+  console.log(
+    "ENGINE READY: mother +",
+    lastLiveCount < 0 ? 0 : lastLiveCount,
+    "tenant bot(s)"
+  );
   setInterval(() => {
     syncTenantBots().catch((err) => {
       console.error("TENANT BOT SYNC:", err.message);
@@ -178,4 +251,5 @@ module.exports = {
   start,
   syncTenantBots,
   processUpdate,
+  handleWebhook,
 };

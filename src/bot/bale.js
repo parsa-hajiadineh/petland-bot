@@ -133,6 +133,23 @@ async function answerCallbackQuery(callbackQueryId, text = "") {
   });
 }
 
+async function setWebhook(url, token) {
+  return apiCall("setWebhook", { url: url || "" }, token);
+}
+
+async function deleteWebhook(token) {
+  return apiCall("setWebhook", { url: "" }, token);
+}
+
+async function setMyCommands(token, commands) {
+  try {
+    return await apiCall("setMyCommands", { commands }, token);
+  } catch (err) {
+    console.error("SET COMMANDS SKIP:", err.message);
+    return { ok: false };
+  }
+}
+
 module.exports = {
   testBot,
   getMeWithToken,
@@ -144,4 +161,7 @@ module.exports = {
   sendDocument,
   getFile,
   answerCallbackQuery,
+  setWebhook,
+  deleteWebhook,
+  setMyCommands,
 };

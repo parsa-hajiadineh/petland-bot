@@ -101,21 +101,35 @@ payment   { bank{card,iban,holder,name}, profitPercent, minOrderAmount }
 + alias تخت: name, username, welcomeMessage, supportPhone, bank, …
 ```
 
-`src/bot/bale.js` توکن را از `getToken()` می‌گیرد. Handlerها توکن پاس نمی‌دهند.
+## ساخت خودکار فروشگاه (وقتی Token ارسال شد)
+
+```
+Token → Validate → Ensure Tenant → Create Bot → Load Default Settings
+      → Set Webhook (یا Poll) → Activate
+```
+
+کد: `src/services/shopProvision.js`
+
+- پروفایل همکار باید از قبل Tenant را ساخته باشد (نام برند، تلفن، آدرس/پیج). بعد از پروفایل، همان لحظه توکن خواسته می‌شود.
+- Validate: `getMe` — توکن مادر و توکن تکراری رد می‌شوند.
+- Default settings: `shopName`, `welcomeMessage`, `supportPhone`, `profitPercent`.
+- Webhook: اگر `PUBLIC_BASE_URL` ست باشد → `setWebhook(PUBLIC_BASE_URL/webhook/bot/:botId)` و Engine دیگر آن ربات را poll نمی‌کند. اگر نباشد یا setWebhook شکست بخورد → `deleteWebhook` + long polling (ربات باز هم تحویل می‌شود).
+- مادر همیشه long polling است.
+- پیام تحویل: «فروشگاه آماده است، @username را /start کنید».
 
 ---
 
 ## فایل‌های Engine
 
 ```
-src/index.js              Express + ensureMotherCatalog + engine.start()
-src/bot/engine.js         poller مادر + poller هر Bot فعال (sync هر ۳۰ث / فوری بعد از ثبت توکن)
-src/bot/context.js        ALS + طراحی تنظیمات بالا
-src/bot/bale.js           API بله با توکن context
-src/bot/messenger.js      reply / replyPhoto (پاک کردن lastMessageId)
+src/index.js              Express + /webhook/bot/:botId + engine.start()
+src/bot/engine.js         poller مادر + poll یا webhook تننت
+src/bot/context.js        ALS + تنظیمات runtime
+src/bot/bale.js           API بله با توکن context + setWebhook
+src/services/shopProvision.js  Validate → Bot → Settings → Webhook → Activate
 src/handlers/router.js    اگر !isMother() → tenantShop
-src/handlers/tenantShop.js فروشگاه تننت: start / help / محصولات خود
-src/handlers/colleague.js پروفایل همکار + ثبت Bot + TenantSettings + sync فوری
+src/handlers/tenantShop.js فروشگاه تننت
+src/handlers/colleague.js پروفایل همکار + توکن → provisionShop
 src/handlers/products.js  کاتالوگ مادر (فیلتر شده) + showTenantProducts
 src/utils/tokenCrypto.js  encrypt / decrypt / hash
 src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
@@ -134,11 +148,11 @@ src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
 - `select` صریح روی Product
 - ادمین نباید دکمهٔ منوی اصلی را به‌عنوان کد سفارش قورت بدهد
 - همکار: کد دسترسی → نام، تلفن، برند، آنلاین یا آدرس → Tenant + Customer + TenantSettings + TenantMember OWNER
-- `🤖 ساخت ربات فروشگاهی` → آموزش BotFather → توکن → getMe → Bot فعال
+- `🤖 ساخت ربات فروشگاهی` → پروفایل (اگر نبود) → توکن → `provisionShop` → ربات آماده تحویل
 - `loadProductByCode` باید **بعد از** `module.exports = async function productsHandler` ست شود
 
 ### تننت
-- بعد از ثبت توکن، poller همان لحظه (و حداکثر ۳۰ث) بالا می‌آید
+- بعد از Token، فروشگاه با تنظیمات پیش‌فرض فعال می‌شود (webhook یا poll)
 - `/start` با `shopName` / `welcomeMessage`
 - محصولات فقط کالای `Product.tenantId` خودش (اگر خالی باشد کاتالوگ پت‌لند نشان داده **نمی‌شود**)
 - دکمه سبد روی جزئیات محصول تننت مخفی است
@@ -167,6 +181,7 @@ MARKETING_ACCESS_CODE
 DEFAULT_PROFIT_PERCENT
 WHOLESALE_MIN_ORDER
 BANK_*   SHOP_NAME   BOT_USERNAME
+PUBLIC_BASE_URL            # مثلا https://YOUR-APP.liara.run — اگر خالی باشد تننت‌ها poll می‌شوند
 ```
 
 ---
@@ -196,6 +211,7 @@ BANK_*   SHOP_NAME   BOT_USERNAME
 5. کاتالوگ مادر را با `motherCatalogWhere` فیلتر کن.
 6. توکن ربات را لاگ نکن.
 7. اسکیما را additive نگه دار مگر اینکه صریحاً خواسته شود.
+8. `setWebhook` و `getUpdates` روی یک توکن همزمان استفاده نشود.
 
 ---
 

@@ -21,4 +21,5 @@ module.exports = {
   BANK_HOLDER: process.env.BANK_HOLDER || "",
   BANK_NAME: process.env.BANK_NAME || "",
   BOT_USERNAME: process.env.BOT_USERNAME || "",
+  PUBLIC_BASE_URL: (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
 };
