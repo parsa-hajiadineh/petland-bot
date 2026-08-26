@@ -287,6 +287,10 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
+  if (Object.values(BTN).includes(text)) {
+    return false;
+  }
+
   if (user.adminStep === "SET_IMAGE_CODE") {
     const product = await prisma.product.findUnique({
       where: { code: text.trim().toUpperCase() },
@@ -354,10 +358,15 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
-  const order = await prisma.order.findUnique({
-    where: { trackingCode: text.trim() },
-    include: { items: { include: { product: true } } },
-  });
+  let order = null;
+  try {
+    order = await prisma.order.findUnique({
+      where: { trackingCode: text.trim() },
+      include: { items: { include: { product: true } } },
+    });
+  } catch (err) {
+    console.error("ADMIN ORDER LOOKUP SKIP:", err.message);
+  }
 
   if (order && user.role === "ADMIN") {
     await showAdminOrderDetail(user, chatId, order);
