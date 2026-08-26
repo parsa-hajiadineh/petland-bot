@@ -51,38 +51,44 @@ async function loadBotTenant(bot) {
   return { ...tenant, settings };
 }
 
-async function processUpdate(update) {
-  if (update.callback_query) {
-    const cq = update.callback_query;
-    try {
-      await bale.answerCallbackQuery(cq.id);
-    } catch (err) {
-      console.error("ANSWER CALLBACK SKIP:", err.message);
+async function processUpdate(update, runtimeCtx) {
+  const withCtx = (fn) =>
+    runtimeCtx ? runWithContext(runtimeCtx, fn) : fn();
+
+  return withCtx(async () => {
+    if (update.callback_query) {
+      const cq = update.callback_query;
+      try {
+        await bale.answerCallbackQuery(cq.id);
+      } catch (err) {
+        console.error("ANSWER CALLBACK SKIP:", err.message);
+      }
+      const user = await getOrCreateUser({ from: cq.from });
+      return withCtx(() => messageHandler.handleCallbackQuery(cq, user));
     }
-    const user = await getOrCreateUser({ from: cq.from });
-    await messageHandler.handleCallbackQuery(cq, user);
-    return;
-  }
 
-  if (!update.message) return;
+    if (!update.message) return;
 
-  const msg = update.message;
+    const msg = update.message;
 
-  let referrerBaleId = null;
-  if (msg.text && msg.text.startsWith("/start ref_")) {
-    referrerBaleId = msg.text.replace("/start ref_", "").trim();
-  }
+    let referrerBaleId = null;
+    if (msg.text && msg.text.startsWith("/start ref_")) {
+      referrerBaleId = msg.text.replace("/start ref_", "").trim();
+    }
 
-  const user = await getOrCreateUser(msg, referrerBaleId);
+    const user = await getOrCreateUser(msg, referrerBaleId);
 
-  if (msg.photo?.length) {
-    await messageHandler.handlePhoto(msg, user);
-    return;
-  }
+    return withCtx(async () => {
+      if (msg.photo?.length) {
+        await messageHandler.handlePhoto(msg, user);
+        return;
+      }
 
-  if (!msg.text) return;
+      if (!msg.text) return;
 
-  await messageHandler(msg, user);
+      await messageHandler(msg, user);
+    });
+  });
 }
 
 function touchLastSeen(ctx, state) {
@@ -106,13 +112,13 @@ async function pollLoop(ctx, state) {
   while (!state.stopped) {
     try {
       await runWithContext(ctx, async () => {
-        const updates = await bale.getUpdates(state.offset);
+        const updates = await bale.getUpdates(state.offset, ctx.token);
         if (updates.ok) {
           touchLastSeen(ctx, state);
           if (updates.result.length > 0) {
             for (const update of updates.result) {
               try {
-                await processUpdate(update);
+                await processUpdate(update, ctx);
               } catch (err) {
                 console.error("UPDATE HANDLER ERROR:", ctx.name, err);
               }
@@ -265,7 +271,7 @@ async function handleWebhook(botId, update) {
         data: { lastSeenAt: new Date() },
       })
       .catch(() => {});
-    await processUpdate(update);
+    await processUpdate(update, ctx);
   });
 }
 

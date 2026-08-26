@@ -19,7 +19,17 @@ const walletHandler = require("./wallet");
 
 module.exports = async function messageHandler(message, user) {
   if (!isMother()) {
-    return require("./tenantShop").handleMessage(message, user);
+    try {
+      return await require("./tenantShop").handleMessage(message, user);
+    } catch (err) {
+      console.error("TENANT SHOP:", err);
+      await reply(
+        user,
+        message.chat.id,
+        "فروشگاه الان پاسخ نداد. لطفاً دوباره /start بزنید."
+      );
+      return;
+    }
   }
 
   const text = (message.text || "").trim();
@@ -291,7 +301,12 @@ module.exports = async function messageHandler(message, user) {
 
 module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user) {
   if (!isMother()) {
-    return require("./tenantShop").handleCallbackQuery(cq, user);
+    try {
+      return await require("./tenantShop").handleCallbackQuery(cq, user);
+    } catch (err) {
+      console.error("TENANT CALLBACK:", err);
+      return;
+    }
   }
 
   const data = (cq.data || "").trim();
@@ -430,7 +445,12 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
 module.exports.handlePhoto = async function handlePhoto(message, user) {
   if (!isMother()) {
-    return require("./tenantShop").handlePhoto(message, user);
+    try {
+      return await require("./tenantShop").handlePhoto(message, user);
+    } catch (err) {
+      console.error("TENANT PHOTO:", err);
+      return;
+    }
   }
 
   const chatId = message.chat.id;
