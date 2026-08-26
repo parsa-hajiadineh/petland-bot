@@ -62,7 +62,7 @@ async function loadProductByCode(code) {
   }
 }
 
-module.exports.loadProductByCode = loadProductByCode;
+const inlineListIds = new Map();
 
 function productRow(product, wholesale) {
   const price = getUnitPrice(product, wholesale);
@@ -76,6 +76,8 @@ async function sendProductInlineList(user, chatId, products, header) {
   const wholesale = isWholesaleUser(user);
   const rows = products.map((product) => productRow(product, wholesale));
   const chunkSize = 10;
+  const ids = [];
+  if (user.lastMessageId) ids.push(user.lastMessageId);
   let lastId = null;
 
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -99,14 +101,34 @@ async function sendProductInlineList(user, chatId, products, header) {
       return;
     }
     lastId = inlineResult?.result?.message_id || lastId;
+    if (lastId) ids.push(lastId);
   }
+
+  inlineListIds.set(user.id, ids);
 
   if (lastId) {
     await prisma.user.update({
       where: { id: user.id },
       data: { lastMessageId: lastId },
     });
+    user.lastMessageId = lastId;
   }
+}
+
+async function clearProductListMessages(user, chatId) {
+  const ids = new Set(inlineListIds.get(user.id) || []);
+  if (user.lastMessageId) ids.add(user.lastMessageId);
+  inlineListIds.delete(user.id);
+
+  for (const id of ids) {
+    try {
+      await bale.deleteMessage(chatId, id);
+    } catch (err) {
+      console.log("DELETE LIST SKIP:", err.message);
+    }
+  }
+
+  user.lastMessageId = null;
 }
 
 module.exports = async function productsHandler(user, chatId) {
@@ -117,6 +139,8 @@ module.exports = async function productsHandler(user, chatId) {
     productCategoriesMenu()
   );
 };
+
+module.exports.loadProductByCode = loadProductByCode;
 
 module.exports.showSubMenu = async function showSubMenu(user, chatId, categoryBtn) {
   const cat = PRODUCT_CATEGORIES.find((c) => c.btn === categoryBtn);
@@ -290,11 +314,12 @@ ${
 }`;
 
   const menu = productDetailMenu(product);
-  const keepLast = { keepLast: true };
   const photoCaption =
     caption.length > 1000 ? `${caption.slice(0, 997)}…` : caption;
   const textCaption =
     caption.length > 3500 ? `${caption.slice(0, 3497)}…` : caption;
+
+  await clearProductListMessages(user, chatId);
 
   if (product.imageUrl) {
     try {
@@ -303,8 +328,7 @@ ${
         chatId,
         product.imageUrl,
         photoCaption,
-        menu,
-        keepLast
+        menu
       );
       if (photoResult?.ok || photoResult?.result?.message_id) {
         return;
@@ -315,7 +339,7 @@ ${
   }
 
   try {
-    await reply(user, chatId, textCaption, menu, keepLast);
+    await reply(user, chatId, textCaption, menu);
   } catch (err) {
     console.error("PRODUCT TEXT:", err);
     try {

@@ -3,7 +3,6 @@ const { reloadUser } = require("../services/user");
 const { isAdmin } = require("../services/user");
 const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES } = require("../keyboards/menus");
 const { reply } = require("../bot/messenger");
-const bale = require("../bot/bale");
 const { MARKETING_ACCESS_CODE } = require("../config");
 
 const productsHandler = require("./products");
@@ -328,14 +327,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
       }
     } catch (err) {
       console.error("PRODUCT CALLBACK:", err);
-      try {
-        await bale.sendMessage(
-          chatId,
-          `نمایش این محصول با خطا مواجه شد.\n${err.message || ""}`.slice(0, 500)
-        );
-      } catch (err2) {
-        console.error("PRODUCT CALLBACK REPLY:", err2);
-      }
+      await reply(user, chatId, "نمایش این محصول با خطا مواجه شد. لطفاً دوباره تلاش کنید.");
     }
     return;
   }
