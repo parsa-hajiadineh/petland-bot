@@ -58,8 +58,9 @@ setup-assets.js     ← one-time script for font/logo setup
 
 ---
 
-## Database (12 models)
+## Database (13 models + additive multi-tenant)
 
+**Current bot (unchanged):**
 | Model | Key Role |
 |-------|---------|
 | `User` | user + state machine + `referrerId` + `marketingEnabled` + `tempAddressId` |
@@ -72,6 +73,21 @@ setup-assets.js     ← one-time script for font/logo setup
 | `Withdrawal` | wallet withdrawal requests |
 | `SavedAddress` | saved delivery addresses (max 3) |
 | `MonthlySalesReport` | monthly sales archive (max 6 months) |
+
+**Multi-tenant (schema only — not used by handlers yet):**
+| Model | Key Role |
+|-------|---------|
+| `Tenant` | clinic / pet shop / online shop (colleague business) |
+| `TenantMember` | Tenant ↔ User membership |
+| `Customer` | profile for retail, colleague, or tenant's customer |
+| `TenantProduct` | which mother products a tenant sells |
+| `TenantSettings` | per-tenant shop/payment settings |
+| `Bot` | tenant-owned Bale bot (mother bot stays in env) |
+| `TenantSubscription` | activation + monthly fee + volume discount |
+| `SubscriptionDiscountTier` | platform discount brackets |
+| `TenantMessage` | messages from mother admin to a tenant |
+
+`Order` gained optional `tenantId`, `customerId`, `botId` (nullable; existing rows stay mother-bot orders). No required columns were added to existing tables.
 
 **Order lifecycle:**
 ```

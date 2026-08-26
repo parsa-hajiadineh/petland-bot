@@ -39,6 +39,48 @@ enum WithdrawalStatus {
   PAID
 }
 
+enum TenantType {
+  CLINIC
+  VET
+  PET_SHOP
+  ONLINE_SHOP
+  OTHER
+}
+
+enum TenantStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum BotStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+  EXPIRED
+}
+
+enum TenantMemberRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+enum CustomerType {
+  RETAIL
+  COLLEAGUE
+  TENANT_CUSTOMER
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
 model User {
   id              String   @id @default(cuid())
   baleId          String   @unique
@@ -77,6 +119,10 @@ model User {
   cart            Cart?
   wallet          Wallet?
   savedAddresses  SavedAddress[]
+
+  ownedTenant       Tenant?        @relation("TenantOwner")
+  tenantMemberships TenantMember[]
+  customers         Customer[]
 }
 model Category {
   id           String    @id @default(cuid())
@@ -106,6 +152,7 @@ model Product {
 
   orderItems      OrderItem[]
   cartItems       CartItem[]
+  tenantProducts  TenantProduct[]
 
   @@index([categoryId])
 }
@@ -164,10 +211,22 @@ model Order {
   userId         String
   user           User @relation(fields: [userId], references: [id])
 
+  tenantId       String?
+  tenant         Tenant?   @relation(fields: [tenantId], references: [id])
+
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id])
+
+  botId          String?
+  bot            Bot?      @relation(fields: [botId], references: [id])
+
   items          OrderItem[]
 
   @@index([userId])
   @@index([status])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([botId])
 }
 
 model OrderItem {
@@ -272,4 +331,196 @@ model MonthlySalesReport {
   totalCommission Int      @default(0)
   orderCount      Int      @default(0)
   createdAt       DateTime @default(now())
+}
+
+// --- Multi-tenant (additive; unused by current bot logic) ---
+
+model Tenant {
+  id          String       @id @default(cuid())
+  name        String
+  type        TenantType   @default(PET_SHOP)
+  status      TenantStatus @default(PENDING)
+
+  ownerName   String?
+  phone       String?
+  province    String?
+  city        String?
+  address     String?
+  postalCode  String?
+  nationalId  String?
+  description String?
+
+  ownerUserId String?      @unique
+  ownerUser   User?        @relation("TenantOwner", fields: [ownerUserId], references: [id])
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  members       TenantMember[]
+  customers     Customer[]
+  products      TenantProduct[]
+  orders        Order[]
+  settings      TenantSettings?
+  bot           Bot?
+  subscriptions TenantSubscription[]
+  messages      TenantMessage[]
+
+  @@index([status])
+  @@index([type])
+}
+
+model TenantMember {
+  id        String           @id @default(cuid())
+  role      TenantMemberRole @default(STAFF)
+
+  tenantId  String
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+
+  createdAt DateTime         @default(now())
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model Customer {
+  id         String       @id @default(cuid())
+  type       CustomerType @default(RETAIL)
+
+  fullName   String?
+  phone      String?
+  shopName   String?
+  province   String?
+  city       String?
+  address    String?
+  postalCode String?
+  notes      String?
+
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+
+  tenantId   String?
+  tenant     Tenant?      @relation(fields: [tenantId], references: [id])
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  orders     Order[]
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([type])
+}
+
+model TenantProduct {
+  id            String   @id @default(cuid())
+  isActive      Boolean  @default(true)
+  retailPrice   Int?
+  profitPercent Int?
+
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, productId])
+  @@index([productId])
+}
+
+model TenantSettings {
+  id             String   @id @default(cuid())
+
+  shopName       String?
+  welcomeMessage String?
+  supportPhone   String?
+
+  bankCard       String?
+  bankIban       String?
+  bankHolder     String?
+  bankName       String?
+
+  profitPercent  Int?
+  minOrderAmount Int?
+
+  tenantId       String   @unique
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Bot {
+  id          String    @id @default(cuid())
+  token       String
+  username    String?
+  baleBotId   String?
+
+  status      BotStatus @default(PENDING)
+  isEnabled   Boolean   @default(false)
+
+  activatedAt DateTime?
+  lastSeenAt  DateTime?
+
+  tenantId    String    @unique
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  orders      Order[]
+
+  @@index([status])
+}
+
+model TenantSubscription {
+  id                   String             @id @default(cuid())
+  status               SubscriptionStatus @default(PENDING)
+
+  activationFee        Int                @default(0)
+  monthlyFee           Int                @default(0)
+  discountPercent      Int                @default(0)
+  discountedMonthlyFee Int                @default(0)
+
+  periodStart          DateTime?
+  periodEnd            DateTime?
+
+  lastPurchaseVolume   Int                @default(0)
+
+  tenantId             String
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([periodEnd])
+}
+
+model SubscriptionDiscountTier {
+  id                 String   @id @default(cuid())
+  minMonthlyPurchase Int
+  discountPercent    Int
+  createdAt          DateTime @default(now())
+
+  @@unique([minMonthlyPurchase])
+}
+
+model TenantMessage {
+  id        String   @id @default(cuid())
+  title     String?
+  body      String
+
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
 }

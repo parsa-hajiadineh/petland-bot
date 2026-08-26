@@ -241,3 +241,127 @@ model TicketMessage {
 ### Seed
 - `npm run seed` دسته‌بندی‌ها و ~130 محصول را upsert می‌کند
 - منبع داده: `src/data/products.js`
+
+---
+
+## چندمستأجری (Additive — بدون اثر روی منطق فعلی ربات)
+
+این بخش فقط مدل داده را برای مرحلهٔ بعد آماده می‌کند. جدول‌ها و ستون‌های جدید به داده‌های موجود وابسته نیستند، فیلدهای جدید روی `Order` اختیاری‌اند، و هیچ handlerای هنوز از آن‌ها استفاده نمی‌کند.
+
+**قاعده ایمنی:** جدول‌های فعلی (`User`, `Product`, `Order`, ...) حذف یا اجباری نشده‌اند. کاربران، سفارش‌ها و محصولات فعلی با `tenantId = null` همان ربات مادر باقی می‌مانند.
+
+### نقش‌ها در مدل
+
+| موجودیت | معنی |
+|---------|------|
+| ربات مادر (PetLand) | سفارش‌ها و کاربران با `tenantId` خالی |
+| `Tenant` | هر پت‌شاپ / کلینیک / دامپزشکی / فروشگاه آنلاین همکار |
+| `User` | هویت Bale (بدون ستون جدید؛ روابط فقط از سمت جدول‌های جدید) |
+| `Customer` | پرونده اطلاعاتی خریدار (خرد، همکار، یا مشتریِ همکار) |
+| `Bot` | ربات اختصاصی هر Tenant (توکن مادر همچنان در env است) |
+
+### Enum های جدید
+
+```
+TenantType:           CLINIC | VET | PET_SHOP | ONLINE_SHOP | OTHER
+TenantStatus:         PENDING | ACTIVE | SUSPENDED | INACTIVE
+BotStatus:            PENDING | ACTIVE | DISABLED | EXPIRED
+TenantMemberRole:     OWNER | ADMIN | STAFF
+CustomerType:         RETAIL | COLLEAGUE | TENANT_CUSTOMER
+SubscriptionStatus:   PENDING | ACTIVE | PAST_DUE | CANCELLED | EXPIRED
+```
+
+### Tenant
+هر همکار پس از ورود کد دسترسی، در مرحلهٔ بعد یک Tenant می‌شود.
+
+```prisma
+model Tenant {
+  id          String       @id @default(cuid())
+  name        String
+  type        TenantType   @default(PET_SHOP)
+  status      TenantStatus @default(PENDING)
+
+  ownerName   String?
+  phone       String?
+  province    String?
+  city        String?
+  address     String?
+  postalCode  String?
+  nationalId  String?
+  description String?
+
+  ownerUserId String?  @unique   // User همکار مالک
+  ...
+}
+```
+
+### TenantMember — ارتباط Tenant با User
+عضویت کارکنان/مالک در پنل ادمین ربات Tenant.
+
+```prisma
+model TenantMember {
+  role     TenantMemberRole @default(STAFF)
+  tenantId String
+  userId   String
+  @@unique([tenantId, userId])
+}
+```
+
+### Customer
+پروندهٔ مشتری جدا از هویت `User`:
+
+| type | tenantId | معنی |
+|------|----------|------|
+| `RETAIL` | `null` | خریدار خرد از ربات مادر |
+| `COLLEAGUE` | `null` | همکار؛ خرید عمده از ربات مادر |
+| `TENANT_CUSTOMER` | id کلینیک | مشتریِ ربات همان کلینیک |
+
+فیلدهای پروفایل (نام، تلفن، آدرس، نام فروشگاه) برای ثبت اطلاعات بعد از فعال‌سازی حالت همکار اینجا ذخیره می‌شوند.
+
+### TenantProduct — ارتباط Tenant با Product
+کاتالوگ مادر (`Product`) دست‌نخورده است. این جدول مشخص می‌کند کدام محصول مادر در فروشگاه Tenant فروخته می‌شود و با چه قیمت خرده‌فروشی.
+
+```prisma
+model TenantProduct {
+  isActive      Boolean @default(true)
+  retailPrice   Int?
+  profitPercent Int?
+  tenantId      String
+  productId     String
+  @@unique([tenantId, productId])
+}
+```
+
+روی جدول `Product` ستونی اضافه نشده؛ فقط رابطهٔ معکوس `tenantProducts` تعریف شده است.
+
+### Order (ستون‌های اختیاری جدید)
+فیلدهای قبلی سفارش تغییر نکرده‌اند. سه FK اختیاری اضافه شده:
+
+- `tenantId` — اگر سفارش روی ربات Tenant ثبت شود؛ برای سفارش‌های فعلی مادر `null` است
+- `customerId` — پیوند به پرونده `Customer` در صورت وجود
+- `botId` — رباتی که سفارش از آن آمده
+
+Handlerهای فعلی این فیلدها را نمی‌فرستند → Prisma مقدار `null` می‌گذارد → رفتار فعلی حفظ می‌شود.
+
+### TenantSettings
+تنظیمات هر ربات Tenant (نام فروشگاه، پیام خوش‌آمد، حساب بانکی، درصد سود، حداقل سفارش). تنظیمات ربات مادر همچنان از env خوانده می‌شود و به این جدول منتقل نشده است.
+
+### Bot
+ربات اختصاصی Tenant. ربات مادر در `BOT_TOKEN` env می‌ماند و ردیفی در این جدول ندارد.
+
+### اشتراک (آماده‌سازی تخفیف حجمی)
+
+- `TenantSubscription` — هزینه فعال‌سازی، حق اشتراک ماهانه، درصد تخفیف دوره، حجم خرید ماهانه از مادر (`lastPurchaseVolume`)
+- `SubscriptionDiscountTier` — پله‌های تخفیف سراسری بر اساس حداقل خرید ماهانه از ربات مادر (مثلاً ۲۰ میلیون → X٪)
+
+هنوز هیچ منطق محاسبه‌ای در کد نیست؛ فقط محل ذخیره داده است.
+
+### TenantMessage
+لاگ پیام‌های ارسالی از پنل ادمین مادر به Tenantها.
+
+### آنچه عمداً تغییر نکرد
+- هیچ فیلد اجباری روی `User` / `Product` / `Cart` / `Order` (به‌جز FKهای nullable روی Order)
+- `User.role` و جریان `COLLEAGUE_ACCESS_CODE` بدون تغییر
+- `Cart` همچنان 1:1 با User است (سبد Tenant در مرحلهٔ بعد جدا طراحی می‌شود)
+- Cascade حذف روی داده‌های فعلی تعریف نشده است
+
