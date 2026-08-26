@@ -22,6 +22,21 @@ module.exports = async function messageHandler(message, user) {
 
   user = await reloadUser(user.id);
 
+  if (
+    text === BTN.BACK_MAIN ||
+    text === "/start" ||
+    text.startsWith("/start ") ||
+    text === BTN.BACK_PRODUCTS ||
+    text === BTN.PRODUCTS ||
+    text === BTN.CART ||
+    text === BTN.SEARCH ||
+    text === BTN.HELP ||
+    text === BTN.SUPPORT ||
+    text === BTN.ORDERS
+  ) {
+    await productsHandler.clearProductListMessages(user, chatId);
+  }
+
   if (text === BTN.BACK_MAIN || text === "/start" || text.startsWith("/start ")) {
     await prisma.user.update({
       where: { id: user.id },

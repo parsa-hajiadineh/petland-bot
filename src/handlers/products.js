@@ -129,6 +129,16 @@ async function clearProductListMessages(user, chatId) {
   }
 
   user.lastMessageId = null;
+  if (user?.id) {
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastMessageId: null },
+      });
+    } catch (err) {
+      console.log("CLEAR LAST ID SKIP:", err.message);
+    }
+  }
 }
 
 module.exports = async function productsHandler(user, chatId) {
@@ -140,6 +150,7 @@ module.exports = async function productsHandler(user, chatId) {
   );
 };
 
+module.exports.clearProductListMessages = clearProductListMessages;
 module.exports.loadProductByCode = loadProductByCode;
 
 module.exports.showSubMenu = async function showSubMenu(user, chatId, categoryBtn) {
