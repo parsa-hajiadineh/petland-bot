@@ -9,7 +9,6 @@ const bale = require("../bot/bale");
 const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const { encryptToken, hashToken } = require("../utils/tokenCrypto");
-const { reloadUser } = require("../services/user");
 
 function shopTypeMenu() {
   return kb([
@@ -17,6 +16,18 @@ function shopTypeMenu() {
     [{ text: BTN.SHOP_PHYSICAL }],
     [{ text: BTN.BACK_MAIN }],
   ]);
+}
+
+async function getOwnedTenant(userId) {
+  try {
+    return await prisma.tenant.findUnique({
+      where: { ownerUserId: userId },
+      include: { bot: true },
+    });
+  } catch (err) {
+    console.error("TENANT LOOKUP SKIP:", err.message);
+    return null;
+  }
 }
 
 async function startProfile(user, chatId) {
@@ -29,7 +40,7 @@ async function startProfile(user, chatId) {
   await reply(
     user,
     chatId,
-    "برای تکمیل حساب همکار، اطلاعات زیر را وارد کنید.\n\n👤 نام و نام خانوادگی:",
+    "برای تکمیل حساب همکار این اطلاعات را وارد کنید.\n\n👤 نام و نام خانوادگی:",
     backMain()
   );
 }
@@ -40,56 +51,73 @@ async function finishProfile(user, chatId, extra) {
   const brand = (user.tempDescription || "").trim();
   const isOnline = user.tempProvince === "ONLINE";
 
-  const tenant = await prisma.$transaction(async (tx) => {
-    const created = await tx.tenant.create({
-      data: {
-        name: brand,
-        type: isOnline ? "ONLINE_SHOP" : "PET_SHOP",
-        status: "ACTIVE",
-        ownerName: fullName,
-        phone,
-        address: isOnline ? null : extra,
-        pageName: isOnline ? extra : null,
-        pageDetails: isOnline ? extra : null,
-        ownerUserId: user.id,
-      },
-    });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.tenant.findUnique({
+        where: { ownerUserId: user.id },
+      });
+      if (existing) return;
 
-    await tx.tenantMember.create({
-      data: {
-        tenantId: created.id,
-        userId: user.id,
-        role: "OWNER",
-      },
-    });
+      const tenant = await tx.tenant.create({
+        data: {
+          name: brand,
+          type: isOnline ? "ONLINE_SHOP" : "PET_SHOP",
+          status: "ACTIVE",
+          ownerName: fullName,
+          phone,
+          address: isOnline ? null : extra,
+          pageName: isOnline ? extra : null,
+          pageDetails: isOnline ? extra : null,
+          ownerUserId: user.id,
+        },
+      });
 
-    await tx.customer.create({
-      data: {
-        type: "COLLEAGUE",
-        fullName,
-        phone,
-        shopName: brand,
-        address: isOnline ? null : extra,
-        notes: isOnline ? extra : null,
-        userId: user.id,
-        tenantId: created.id,
-      },
-    });
+      await tx.tenantMember.create({
+        data: {
+          tenantId: tenant.id,
+          userId: user.id,
+          role: "OWNER",
+        },
+      });
 
-    await tx.user.update({
+      await tx.customer.create({
+        data: {
+          type: "COLLEAGUE",
+          fullName,
+          phone,
+          shopName: brand,
+          address: isOnline ? null : extra,
+          notes: isOnline ? extra : null,
+          userId: user.id,
+          tenantId: tenant.id,
+        },
+      });
+    });
+  } catch (err) {
+    console.error("COLLEAGUE PROFILE SAVE:", err);
+    await prisma.user.update({
       where: { id: user.id },
-      data: {
-        orderStep: null,
-        tempDescription: null,
-        tempAddress: null,
-        tempProvince: null,
-      },
+      data: { orderStep: null },
     });
+    await reply(
+      user,
+      chatId,
+      "ثبت اطلاعات الان ممکن نشد. از منوی اصلی می‌توانید ادامه دهید و بعداً دوباره تلاش کنید.",
+      mainMenu(user)
+    );
+    return;
+  }
 
-    return created;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      orderStep: null,
+      tempDescription: null,
+      tempAddress: null,
+      tempProvince: null,
+    },
   });
-
-  user = await reloadUser(user.id);
+  user.orderStep = null;
 
   await reply(
     user,
@@ -99,13 +127,9 @@ async function finishProfile(user, chatId, extra) {
 🏷 برند: ${brand}
 👤 ${fullName}
 📞 ${phone}
-${isOnline ? `🌐 ${extra}` : `📍 ${extra}`}
-
-حالت همکار کامل فعال است.`,
+${isOnline ? `🌐 ${extra}` : `📍 ${extra}`}`,
     mainMenu(user)
   );
-
-  return tenant;
 }
 
 async function startBotCreate(user, chatId) {
@@ -133,7 +157,7 @@ async function startBotCreate(user, chatId) {
 
 async function registerBot(user, chatId, rawToken) {
   const token = (rawToken || "").trim();
-  const tenant = user.ownedTenant;
+  const tenant = await getOwnedTenant(user.id);
 
   if (!tenant) {
     await startProfile(user, chatId);
@@ -187,41 +211,47 @@ async function registerBot(user, chatId, rawToken) {
     return;
   }
 
-  const tokenHash = hashToken(token);
-  const existing = await prisma.bot.findUnique({
-    where: { tokenHash },
-  });
-  if (existing) {
+  try {
+    const tokenHash = hashToken(token);
+    const existing = await prisma.bot.findUnique({ where: { tokenHash } });
+    if (existing) {
+      await reply(user, chatId, "❌ این Token قبلاً ثبت شده است.", backMain());
+      return;
+    }
+
+    await prisma.bot.create({
+      data: {
+        tenantId: tenant.id,
+        token: encryptToken(token),
+        tokenHash,
+        username: me.result.username || null,
+        baleBotId: String(me.result.id),
+        status: "ACTIVE",
+        isEnabled: true,
+        activatedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    console.error("BOT REGISTER:", err);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null },
+    });
     await reply(
       user,
       chatId,
-      "❌ این Token قبلاً ثبت شده است.",
-      backMain()
+      "ثبت ربات الان ممکن نشد. بعداً دوباره از دکمه ساخت ربات تلاش کنید.",
+      mainMenu(user)
     );
     return;
   }
-
-  await prisma.bot.create({
-    data: {
-      tenantId: tenant.id,
-      token: encryptToken(token),
-      tokenHash,
-      username: me.result.username || null,
-      baleBotId: String(me.result.id),
-      status: "ACTIVE",
-      isEnabled: true,
-      activatedAt: new Date(),
-    },
-  });
 
   await prisma.user.update({
     where: { id: user.id },
     data: { orderStep: null },
   });
 
-  user = await reloadUser(user.id);
   const username = me.result.username ? `@${me.result.username}` : "";
-
   await reply(
     user,
     chatId,
@@ -264,7 +294,6 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     });
 
     user.role = "CUSTOMER";
-    user.ownedTenant = null;
 
     await reply(
       user,
@@ -278,18 +307,18 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
   if (text === BTN.CREATE_SHOP_BOT) {
     if (user.role !== "COLLEAGUE") return false;
-    if (!user.ownedTenant) {
+
+    const tenant = await getOwnedTenant(user.id);
+    if (!tenant) {
       await startProfile(user, chatId);
       return true;
     }
-    if (user.ownedTenant.bot) {
+    if (tenant.bot) {
       await reply(
         user,
         chatId,
         `ربات این فروشگاه قبلاً ثبت شده است${
-          user.ownedTenant.bot.username
-            ? `: @${user.ownedTenant.bot.username}`
-            : ""
+          tenant.bot.username ? `: @${tenant.bot.username}` : ""
         }.`,
         mainMenu(user)
       );
@@ -314,7 +343,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       where: { id: user.id },
       data: { role: "COLLEAGUE", orderStep: null },
     });
-    user = await reloadUser(user.id);
+    user.role = "COLLEAGUE";
 
     await reply(
       user,
@@ -331,15 +360,11 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 • فاکتور برای مشتریان همکاران ارسال نمی‌شود — فاکتور فقط در همین چت قابل مشاهده است`
     );
 
-    if (!user.ownedTenant) {
+    const tenant = await getOwnedTenant(user.id);
+    if (!tenant) {
       await startProfile(user, chatId);
     } else {
-      await reply(
-        user,
-        chatId,
-        "از منوی زیر استفاده کنید:",
-        mainMenu(user)
-      );
+      await reply(user, chatId, "از منوی زیر استفاده کنید:", mainMenu(user));
     }
 
     return true;
@@ -389,12 +414,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     });
     user.tempDescription = brand;
     user.orderStep = "COLLEAGUE_SHOP_TYPE";
-    await reply(
-      user,
-      chatId,
-      "نوع فروشگاه را انتخاب کنید:",
-      shopTypeMenu()
-    );
+    await reply(user, chatId, "نوع فروشگاه را انتخاب کنید:", shopTypeMenu());
     return true;
   }
 
@@ -406,12 +426,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       });
       user.tempProvince = "ONLINE";
       user.orderStep = "COLLEAGUE_PAGE";
-      await reply(
-        user,
-        chatId,
-        "🌐 نام و مشخصات پیج را ارسال کنید:",
-        backMain()
-      );
+      await reply(user, chatId, "🌐 نام و مشخصات پیج را ارسال کنید:", backMain());
       return true;
     }
     if (text === BTN.SHOP_PHYSICAL) {
@@ -424,24 +439,14 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       await reply(user, chatId, "📍 آدرس فروشگاه را ارسال کنید:", backMain());
       return true;
     }
-    await reply(
-      user,
-      chatId,
-      "لطفاً یکی از دکمه‌ها را انتخاب کنید.",
-      shopTypeMenu()
-    );
+    await reply(user, chatId, "لطفاً یکی از دکمه‌ها را انتخاب کنید.", shopTypeMenu());
     return true;
   }
 
   if (user.orderStep === "COLLEAGUE_PAGE") {
     const page = text.trim();
     if (!page) {
-      await reply(
-        user,
-        chatId,
-        "لطفاً نام و مشخصات پیج را ارسال کنید.",
-        backMain()
-      );
+      await reply(user, chatId, "لطفاً نام و مشخصات پیج را ارسال کنید.", backMain());
       return true;
     }
     await finishProfile(user, chatId, page);
@@ -465,5 +470,3 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
   return false;
 };
-
-module.exports.startProfile = startProfile;

@@ -185,9 +185,7 @@ function mainMenu(user) {
   }
 
   if (user.role === "COLLEAGUE") {
-    if (user.ownedTenant) {
-      rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
-    }
+    rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
   } else {
     rows.push([{ text: BTN.COLLEAGUE }]);

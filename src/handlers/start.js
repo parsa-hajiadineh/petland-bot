@@ -1,14 +1,8 @@
 const { SHOP_NAME } = require("../config");
 const { reply } = require("../bot/messenger");
 const { mainMenu } = require("../keyboards/menus");
-const colleagueHandler = require("./colleague");
 
 module.exports = async function startHandler(user, msg) {
-  if (user.role === "COLLEAGUE" && !user.ownedTenant) {
-    await colleagueHandler.startProfile(user, msg.chat.id);
-    return;
-  }
-
   const wholesale =
     user.role === "COLLEAGUE" ? "\n🤝 حالت خرید همکار فعال است." : "";
 

@@ -9,7 +9,7 @@
     "seed": "node src/seed.js",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "build": "PRISMA_ENGINES_MIRROR=https://prisma.storage.iran.liara.site prisma generate"
+    "build": "prisma generate"
   },
   "keywords": [],
   "author": "",
