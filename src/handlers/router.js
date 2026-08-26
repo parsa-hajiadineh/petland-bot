@@ -233,10 +233,15 @@ module.exports = async function messageHandler(message, user) {
     }
   }
 
-  const product = await prisma.product.findUnique({
-    where: { code: text.trim().toUpperCase() },
-    include: { category: true },
-  });
+  let product = null;
+  try {
+    product = await prisma.product.findUnique({
+      where: { code: text.trim().toUpperCase() },
+      include: { category: true },
+    });
+  } catch (err) {
+    console.error("PRODUCT CODE LOOKUP SKIP:", err.message);
+  }
 
   if (product) {
     await productsHandler.showProduct(user, chatId, product);
@@ -316,12 +321,19 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   if (data.startsWith("product:")) {
     const code = data.replace("product:", "");
-    const product = await prisma.product.findUnique({
-      where: { code },
-      include: { category: true },
-    });
+    let product = null;
+    try {
+      product = await prisma.product.findUnique({
+        where: { code },
+        include: { category: true },
+      });
+    } catch (err) {
+      console.error("PRODUCT CALLBACK LOOKUP:", err);
+    }
     if (product) {
       await productsHandler.showProduct(user, chatId, product);
+    } else {
+      await reply(user, chatId, "خواندن این محصول ممکن نشد.");
     }
     return;
   }

@@ -16,6 +16,61 @@ const {
   isWholesaleUser,
 } = require("../utils/price");
 
+const PRODUCT_LIST_SELECT = {
+  id: true,
+  code: true,
+  title: true,
+  costPrice: true,
+  profitPercent: true,
+  status: true,
+  brand: true,
+};
+
+function productRow(product, wholesale) {
+  const price = getUnitPrice(product, wholesale);
+  const availability = product.status === "AVAILABLE" ? "🟢" : "🔴";
+  let label = `${availability} ${product.title} | ${formatPrice(price)}`;
+  if (label.length > 60) label = `${label.slice(0, 59)}…`;
+  return [{ text: label, callback_data: `product:${product.code}` }];
+}
+
+async function sendProductInlineList(user, chatId, products, header) {
+  const wholesale = isWholesaleUser(user);
+  const rows = products.map((product) => productRow(product, wholesale));
+  const chunkSize = 8;
+  let lastId = null;
+
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const title =
+      i === 0
+        ? header
+        : `ادامه فهرست (${i + 1}–${Math.min(i + chunkSize, rows.length)}):`;
+    const inlineResult = await bale.sendKeyboard(
+      chatId,
+      title,
+      inlineKb(chunk)
+    );
+    if (!inlineResult?.ok) {
+      console.error("INLINE PRODUCTS FAILED:", inlineResult);
+      await reply(
+        user,
+        chatId,
+        "فهرست محصولات ارسال نشد. لطفاً دوباره تلاش کنید."
+      );
+      return;
+    }
+    lastId = inlineResult?.result?.message_id || lastId;
+  }
+
+  if (lastId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastMessageId: lastId },
+    });
+  }
+}
+
 module.exports = async function productsHandler(user, chatId) {
   await reply(
     user,
@@ -45,19 +100,31 @@ module.exports.showBrandProducts = async function showBrandProducts(
   categoryBtn,
   brand
 ) {
-  const category = await prisma.category.findFirst({
-    where: { title: categoryBtn },
-  });
-
-  if (!category) {
-    await reply(user, chatId, "دسته‌بندی پیدا نشد.");
+  let category;
+  let products;
+  try {
+    category = await prisma.category.findFirst({
+      where: { title: categoryBtn },
+    });
+    if (!category) {
+      await reply(user, chatId, "دسته‌بندی پیدا نشد.");
+      return;
+    }
+    products = await prisma.product.findMany({
+      where: { categoryId: category.id, brand },
+      orderBy: { title: "asc" },
+      select: PRODUCT_LIST_SELECT,
+    });
+  } catch (err) {
+    console.error("BRAND PRODUCTS QUERY:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن محصولات از دیتابیس ممکن نشد. لطفاً دوباره تلاش کنید.",
+      kb([[{ text: BTN.BACK_PRODUCTS }], [{ text: BTN.BACK_MAIN }]])
+    );
     return;
   }
-
-  const products = await prisma.product.findMany({
-    where: { categoryId: category.id, brand },
-    orderBy: { title: "asc" },
-  });
 
   if (products.length === 0) {
     await reply(
@@ -71,15 +138,6 @@ module.exports.showBrandProducts = async function showBrandProducts(
     return;
   }
 
-  const wholesale = isWholesaleUser(user);
-
-  const productRows = products.map((product) => {
-    const price = getUnitPrice(product, wholesale);
-    const availability = product.status === "AVAILABLE" ? "🟢" : "🔴";
-    const label = `${availability} ${product.title} | ${formatPrice(price)}`;
-    return [{ text: label, callback_data: `product:${product.code}` }];
-  });
-
   await reply(
     user,
     chatId,
@@ -90,19 +148,12 @@ module.exports.showBrandProducts = async function showBrandProducts(
     ])
   );
 
-  const inlineResult = await bale.sendKeyboard(
+  await sendProductInlineList(
+    user,
     chatId,
-    `${products.length} محصول — روی هر محصول برای جزئیات کلیک کنید:`,
-    inlineKb(productRows)
+    products,
+    `${products.length} محصول — روی هر محصول برای جزئیات کلیک کنید:`
   );
-
-  const inlineMsgId = inlineResult?.result?.message_id;
-  if (inlineMsgId) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastMessageId: inlineMsgId },
-    });
-  }
 };
 
 module.exports.showCategory = async function showCategory(
@@ -110,35 +161,37 @@ module.exports.showCategory = async function showCategory(
   chatId,
   categoryTitle
 ) {
-  const category = await prisma.category.findFirst({
-    where: { title: categoryTitle },
-  });
-
-  if (!category) {
-    await reply(user, chatId, "دسته‌بندی پیدا نشد.");
+  let category;
+  let products;
+  try {
+    category = await prisma.category.findFirst({
+      where: { title: categoryTitle },
+    });
+    if (!category) {
+      await reply(user, chatId, "دسته‌بندی پیدا نشد.");
+      return;
+    }
+    products = await prisma.product.findMany({
+      where: { categoryId: category.id },
+      orderBy: { title: "asc" },
+      select: PRODUCT_LIST_SELECT,
+    });
+  } catch (err) {
+    console.error("CATEGORY PRODUCTS QUERY:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن محصولات از دیتابیس ممکن نشد. لطفاً دوباره تلاش کنید.",
+      kb([[{ text: BTN.BACK_PRODUCTS }], [{ text: BTN.BACK_MAIN }]])
+    );
     return;
   }
-
-  const products = await prisma.product.findMany({
-    where: { categoryId: category.id },
-    orderBy: { title: "asc" },
-  });
 
   if (products.length === 0) {
     await reply(user, chatId, "در این دسته محصولی وجود ندارد.");
     return;
   }
 
-  const wholesale = isWholesaleUser(user);
-
-  const productRows = products.map((product) => {
-    const price = getUnitPrice(product, wholesale);
-    const availability = product.status === "AVAILABLE" ? "🟢" : "🔴";
-    const label = `${availability} ${product.title} | ${formatPrice(price)}`;
-    return [{ text: label, callback_data: `product:${product.code}` }];
-  });
-
-  // Send regular keyboard with back button (tracked — deleted on next navigation)
   await reply(
     user,
     chatId,
@@ -149,20 +202,12 @@ module.exports.showCategory = async function showCategory(
     ])
   );
 
-  // Send product list as inline keyboard and track message_id for later deletion
-  const inlineResult = await bale.sendKeyboard(
+  await sendProductInlineList(
+    user,
     chatId,
-    `${products.length} محصول — روی هر محصول برای جزئیات کلیک کنید:`,
-    inlineKb(productRows)
+    products,
+    `${products.length} محصول — روی هر محصول برای جزئیات کلیک کنید:`
   );
-
-  const inlineMsgId = inlineResult?.result?.message_id;
-  if (inlineMsgId) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastMessageId: inlineMsgId },
-    });
-  }
 };
 
 module.exports.showProduct = async function showProduct(
@@ -251,15 +296,27 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
     return;
   }
 
-  const products = await prisma.product.findMany({
-    where: {
-      title: { contains: term, mode: "insensitive" },
-      status: "AVAILABLE",
-    },
-    include: { category: true },
-    orderBy: { title: "asc" },
-    take: 30,
-  });
+  let products;
+  try {
+    products = await prisma.product.findMany({
+      where: {
+        title: { contains: term, mode: "insensitive" },
+        status: "AVAILABLE",
+      },
+      orderBy: { title: "asc" },
+      take: 30,
+      select: PRODUCT_LIST_SELECT,
+    });
+  } catch (err) {
+    console.error("SEARCH PRODUCTS QUERY:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن محصولات از دیتابیس ممکن نشد. لطفاً دوباره تلاش کنید.",
+      kb([[{ text: BTN.SEARCH }], [{ text: BTN.BACK_MAIN }]])
+    );
+    return;
+  }
 
   if (products.length === 0) {
     await reply(
@@ -271,14 +328,6 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
     return;
   }
 
-  const wholesale = isWholesaleUser(user);
-
-  const productRows = products.map((product) => {
-    const price = getUnitPrice(product, wholesale);
-    const label = `🟢 ${product.title} | ${formatPrice(price)}`;
-    return [{ text: label, callback_data: `product:${product.code}` }];
-  });
-
   await reply(
     user,
     chatId,
@@ -286,19 +335,12 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
     kb([[{ text: BTN.SEARCH }], [{ text: BTN.BACK_MAIN }]])
   );
 
-  const inlineResult = await bale.sendKeyboard(
+  await sendProductInlineList(
+    user,
     chatId,
-    "روی هر محصول برای جزئیات کلیک کنید:",
-    inlineKb(productRows)
+    products,
+    "روی هر محصول برای جزئیات کلیک کنید:"
   );
-
-  const inlineMsgId = inlineResult?.result?.message_id;
-  if (inlineMsgId) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastMessageId: inlineMsgId },
-    });
-  }
 };
 
 module.exports.startAddToCart = async function startAddToCart(user, chatId) {
