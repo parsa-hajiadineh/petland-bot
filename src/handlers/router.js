@@ -7,7 +7,6 @@ const { MARKETING_ACCESS_CODE } = require("../config");
 const { isMother } = require("../bot/context");
 
 const productsHandler = require("./products");
-const tenantShop = require("./tenantShop");
 const cartHandler = require("./cart");
 const orderHandler = require("./order");
 const colleagueHandler = require("./colleague");
@@ -20,7 +19,7 @@ const walletHandler = require("./wallet");
 
 module.exports = async function messageHandler(message, user) {
   if (!isMother()) {
-    return tenantShop.handleMessage(message, user);
+    return require("./tenantShop").handleMessage(message, user);
   }
 
   const text = (message.text || "").trim();
@@ -292,7 +291,7 @@ module.exports = async function messageHandler(message, user) {
 
 module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user) {
   if (!isMother()) {
-    return tenantShop.handleCallbackQuery(cq, user);
+    return require("./tenantShop").handleCallbackQuery(cq, user);
   }
 
   const data = (cq.data || "").trim();
@@ -431,7 +430,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
 module.exports.handlePhoto = async function handlePhoto(message, user) {
   if (!isMother()) {
-    return tenantShop.handlePhoto(message, user);
+    return require("./tenantShop").handlePhoto(message, user);
   }
 
   const chatId = message.chat.id;

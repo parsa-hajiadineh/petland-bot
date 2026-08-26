@@ -571,14 +571,6 @@ async function ensureShopRuntimeTablesInner() {
     "PRODUCT TENANT INDEX SKIP:",
     `CREATE INDEX IF NOT EXISTS "Product_tenantId_idx" ON "Product"("tenantId")`
   );
-  await execSql(
-    "ORDER TENANT COL SKIP:",
-    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "tenantId" TEXT`
-  );
-  await execSql(
-    "ORDER BOT COL SKIP:",
-    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "botId" TEXT`
-  );
 
   if (!(await tableExists("ShopCart"))) {
     await execSql(

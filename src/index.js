@@ -28,7 +28,5 @@ app.listen(PORT, async () => {
   } catch (err) {
     console.error("ENGINE START:", err);
   }
-  ensureMotherCatalog().catch((err) => {
-    console.error("MOTHER CATALOG SKIP:", err.message);
-  });
+  await ensureMotherCatalog();
 });

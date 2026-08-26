@@ -138,13 +138,11 @@ async function pollLoop(ctx, state) {
 
 async function startPoller(ctx) {
   if (pollers.has(ctx.botId)) return;
-  if (!ctx.isMother) {
-    hooked.delete(ctx.botId);
-    try {
-      await bale.deleteWebhook(ctx.token);
-    } catch (err) {
-      console.error("DELETE WEBHOOK BEFORE POLL:", err.message);
-    }
+  hooked.delete(ctx.botId);
+  try {
+    await bale.deleteWebhook(ctx.token);
+  } catch (err) {
+    console.error("DELETE WEBHOOK BEFORE POLL:", err.message);
   }
   const state = { stopped: false, offset: 0 };
   pollers.set(ctx.botId, { ctx, state });
@@ -282,13 +280,6 @@ async function start() {
   );
   runWithContext(mother, () => bale.testBot()).catch((err) => {
     console.error("MOTHER getMe SKIP:", err.message);
-  });
-  setImmediate(() => {
-    require("../services/shopProvision")
-      .ensureShopRuntimeTables()
-      .catch((err) => {
-        console.error("SHOP TABLES START SKIP:", err.message);
-      });
   });
   setInterval(() => {
     syncTenantBots().catch((err) => {
