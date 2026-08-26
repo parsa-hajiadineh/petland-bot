@@ -160,6 +160,7 @@ const BTN = {
   SHOP_PROFILE: "🏪 مشخصات فروشگاه",
   SHOP_LOGO: "🖼 لوگو",
   SHOP_WELCOME: "💬 پیام خوش‌آمد",
+  SHOP_HELP: "📖 متن راهنما",
   SHOP_BANK: "💳 کارت بانکی",
   SHOP_CATEGORIES: "📂 دسته‌بندی‌ها",
   SHOP_PRODUCTS: "📦 کالاهای فروشگاه",
@@ -225,7 +226,8 @@ function tenantMainMenu(isOwner) {
 function tenantAdminMenu() {
   return kb([
     [{ text: BTN.SHOP_PROFILE }, { text: BTN.SHOP_LOGO }],
-    [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_BANK }],
+    [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_HELP }],
+    [{ text: BTN.SHOP_BANK }],
     [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
     [{ text: BTN.BACK_MAIN }],
   ]);

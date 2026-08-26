@@ -176,6 +176,12 @@ module.exports.showTenantProducts = async function showTenantProducts(
     return;
   }
 
+  try {
+    await require("../services/shopProvision").ensureShopRuntimeTables();
+  } catch (err) {
+    console.error("TENANT PRODUCTS SCHEMA:", err.message);
+  }
+
   let products = [];
   try {
     products = await prisma.product.findMany({

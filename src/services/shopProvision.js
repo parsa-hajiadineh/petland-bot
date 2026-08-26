@@ -502,6 +502,7 @@ async function ensureShopRuntimeTables() {
         "shopDescription" TEXT,
         "shopAddress" TEXT,
         "openingHours" TEXT,
+        "helpMessage" TEXT,
         "tenantId" TEXT NOT NULL,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -539,6 +540,7 @@ async function ensureShopRuntimeTables() {
     "shopDescription",
     "shopAddress",
     "openingHours",
+    "helpMessage",
   ];
   for (const col of settingsCols) {
     await execSql(
@@ -549,6 +551,14 @@ async function ensureShopRuntimeTables() {
   await execSql(
     "CATEGORY TENANT COL SKIP:",
     `ALTER TABLE "Category" ADD COLUMN IF NOT EXISTS "tenantId" TEXT`
+  );
+  await execSql(
+    "PRODUCT TENANT COL SKIP:",
+    `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "tenantId" TEXT`
+  );
+  await execSql(
+    "PRODUCT TENANT INDEX SKIP:",
+    `CREATE INDEX IF NOT EXISTS "Product_tenantId_idx" ON "Product"("tenantId")`
   );
 }
 

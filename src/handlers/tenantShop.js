@@ -51,12 +51,11 @@ async function showHelp(user, chatId) {
   const phone = shop.phone ? `\n📞 ${shop.phone}` : "";
   const address = shop.address ? `\n📍 ${shop.address}` : "";
   const hours = shop.openingHours ? `\n🕐 ${shop.openingHours}` : "";
-  await reply(
-    user,
-    chatId,
-    `📖 راهنما\n\nاز دکمه محصولات، کالاهای همین فروشگاه را ببینید.${phone}${address}${hours}`,
-    await shopMenu(user)
-  );
+  const custom = (shop.helpMessage || "").trim();
+  const body = custom
+    ? custom
+    : `از دکمه محصولات، کالاهای همین فروشگاه را ببینید.${phone}${address}${hours}`;
+  await reply(user, chatId, `📖 راهنما\n\n${body}`, await shopMenu(user));
 }
 
 async function handleMessage(message, user) {

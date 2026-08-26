@@ -124,6 +124,7 @@ async function loadShopView(tenantId) {
     address: settings?.shopAddress || tenant?.address || "",
     description: settings?.shopDescription || tenant?.description || "",
     openingHours: settings?.openingHours || "",
+    helpMessage: settings?.helpMessage || "",
     logoFileId: settings?.logoFileId || null,
     bankCard: settings?.bankCard || "",
     bankIban: settings?.bankIban || "",
@@ -165,6 +166,7 @@ async function patchSettings(tenantId, data) {
       "shopDescription",
       "shopAddress",
       "openingHours",
+      "helpMessage",
     ];
     const slim = {};
     for (const key of allowed) {
@@ -281,9 +283,14 @@ async function showCategories(user, chatId, tenantId) {
   await reply(
     user,
     chatId,
-    `📂 دسته‌بندی‌های فروشگاه\n\n${lines.join("\n")}`,
+    `📂 دسته‌بندی‌های فروشگاه\n\n${lines.join("\n")}\n\nبرای حذف، روی دکمه همان دسته بزنید.`,
     tenantCategoriesMenu()
   );
+  const { sendKeyboard } = require("../bot/bale");
+  const rows = cats.map((c) => [
+    { text: `🗑 ${c.title}`, callback_data: `tcd:${c.id}`.slice(0, 64) },
+  ]);
+  await sendKeyboard(chatId, "حذف دسته:", inlineKb(rows.slice(0, 30)));
 }
 
 async function findOrCreateCategory(tenantId, title) {
@@ -333,7 +340,21 @@ async function listTenantProducts(tenantId) {
     });
   } catch (err) {
     console.error("TENANT ADMIN PRODUCTS:", err.message);
-    return [];
+    try {
+      return await prisma.product.findMany({
+        where: { tenantId },
+        take: 40,
+        select: {
+          code: true,
+          title: true,
+          costPrice: true,
+          status: true,
+        },
+      });
+    } catch (err2) {
+      console.error("TENANT ADMIN PRODUCTS FALLBACK:", err2.message);
+      return [];
+    }
   }
 }
 
@@ -473,34 +494,69 @@ async function askProductCategory(user, chatId, tenantId) {
 }
 
 async function saveNewProduct(user, tenantId) {
-  const title = (user.tempDescription || "").trim();
-  const categoryTitle = (user.tempProvince || "").trim();
-  const price = Number(user.tempCity) || 0;
-  const description = (user.tempAddress || "").trim() || null;
-  if (!title || !categoryTitle || price < 1) return null;
+  await ensureShopRuntimeTables();
+  let fresh = user;
+  try {
+    fresh = (await prisma.user.findUnique({ where: { id: user.id } })) || user;
+  } catch (err) {
+    console.error("PRODUCT SAVE USER RELOAD:", err.message);
+  }
+  const title = (fresh.tempDescription || user.tempDescription || "").trim();
+  const categoryTitle = (fresh.tempProvince || user.tempProvince || "").trim();
+  const price = Number(fresh.tempCity || user.tempCity) || 0;
+  const description = (fresh.tempAddress || user.tempAddress || "").trim() || null;
+  if (!title || !categoryTitle || price < 1) {
+    console.error("PRODUCT SAVE MISSING FIELDS:", {
+      title: Boolean(title),
+      categoryTitle: Boolean(categoryTitle),
+      price,
+    });
+    return null;
+  }
 
   const category = await findOrCreateCategory(tenantId, categoryTitle);
   if (!category) return null;
 
+  const payload = {
+    title,
+    description,
+    costPrice: price,
+    profitPercent: 0,
+    status: "AVAILABLE",
+    categoryId: category.id,
+    tenantId,
+  };
+
   for (let i = 0; i < 5; i += 1) {
+    const code = newProductCode();
     try {
       return await prisma.product.create({
-        data: {
-          code: newProductCode(),
-          title,
-          description,
-          costPrice: price,
-          profitPercent: 0,
-          status: "AVAILABLE",
-          categoryId: category.id,
-          tenantId,
-        },
+        data: { ...payload, code },
       });
     } catch (err) {
       console.error("TENANT PRODUCT CREATE:", err.message);
     }
   }
-  return null;
+
+  try {
+    const code = newProductCode();
+    const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "Product" ("id","code","title","description","costPrice","profitPercent","status","categoryId","tenantId","createdAt")
+       VALUES ($1,$2,$3,$4,$5,0,'AVAILABLE'::"ProductStatus",$6,$7,CURRENT_TIMESTAMP)`,
+      id,
+      code,
+      title,
+      description,
+      price,
+      category.id,
+      tenantId
+    );
+    return await prisma.product.findUnique({ where: { id } });
+  } catch (err) {
+    console.error("TENANT PRODUCT RAW INSERT:", err.message);
+    return null;
+  }
 }
 
 async function handleAdminText(user, chatId, text) {
@@ -521,6 +577,7 @@ async function handleAdminText(user, chatId, text) {
       user.adminStep === "TS:CATS" ||
       user.adminStep === "TS:PRODUCTS" ||
       user.adminStep === "TS:WELCOME" ||
+      user.adminStep === "TS:HELP" ||
       user.adminStep === "TS:LOGO"
     ) {
       await showAdminHome(user, chatId);
@@ -575,6 +632,17 @@ async function handleAdminText(user, chatId, text) {
       user,
       chatId,
       `پیام خوش‌آمد فعلی:\n${shop.welcomeMessage || "—"}\n\nمتن جدید را بفرستید:`,
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
+    return true;
+  }
+  if (text === BTN.SHOP_HELP) {
+    await setStep(user, "TS:HELP");
+    const shop = await loadShopView(tenantId);
+    await reply(
+      user,
+      chatId,
+      `متن راهنمای فعلی:\n${shop.helpMessage || "—"}\n\nمتن جدید دکمه «📖 راهنما» را بفرستید:`,
       kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
     );
     return true;
@@ -641,6 +709,12 @@ async function handleAdminText(user, chatId, text) {
   if (user.adminStep === "TS:WELCOME") {
     const ok = await patchSettings(tenantId, { welcomeMessage: text.trim() });
     await reply(user, chatId, ok ? "✅ پیام خوش‌آمد ذخیره شد." : "ذخیره نشد.");
+    await showAdminHome(user, chatId);
+    return true;
+  }
+  if (user.adminStep === "TS:HELP") {
+    const ok = await patchSettings(tenantId, { helpMessage: text.trim() });
+    await reply(user, chatId, ok ? "✅ متن راهنما ذخیره شد." : "ذخیره نشد.");
     await showAdminHome(user, chatId);
     return true;
   }
@@ -726,38 +800,48 @@ async function handleAdminText(user, chatId, text) {
     }
     await prisma.user.update({
       where: { id: user.id },
-      data: { tempCity: String(amount) },
+      data: { tempCity: String(amount), tempAddress: "" },
     });
     user.tempCity = String(amount);
-    await setStep(user, "TS:P_DESC");
+    user.tempAddress = "";
+    const product = await saveNewProduct(user, tenantId);
+    if (!product) {
+      await reply(
+        user,
+        chatId,
+        "ثبت کالا در دیتابیس ممکن نشد. دوباره از «کالای جدید» تلاش کنید."
+      );
+      return true;
+    }
+    await setStep(user, "TS:P_DESC", { lastProductCode: product.code });
+    user.lastProductCode = product.code;
     await reply(
       user,
       chatId,
-      "توضیحات کالا را بفرستید یا «رد کردن» را بزنید.",
+      `✅ کالا ثبت شد.\n🔖 ${product.code}\n💰 ${formatPrice(amount)}\n\nتوضیحات کالا را بفرستید یا «رد کردن» را بزنید.`,
       kb([[{ text: BTN.SKIP }], [{ text: BTN.BACK_PRODUCT_LIST }]])
     );
     return true;
   }
 
   if (user.adminStep === "TS:P_DESC") {
-    const desc = text === BTN.SKIP ? "" : text.trim();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { tempAddress: desc },
-    });
-    user.tempAddress = desc;
-    const product = await saveNewProduct(user, tenantId);
-    if (!product) {
-      await reply(user, chatId, "ثبت کالا ممکن نشد. دوباره از کالای جدید تلاش کنید.");
-      await showProducts(user, chatId, tenantId);
-      return true;
+    if (user.lastProductCode && text !== BTN.SKIP) {
+      try {
+        await prisma.product.update({
+          where: { code: user.lastProductCode },
+          data: { description: text.trim() },
+        });
+      } catch (err) {
+        console.error("PRODUCT DESC AFTER CREATE:", err.message);
+      }
     }
-    await setStep(user, "TS:P_PHOTO", { lastProductCode: product.code });
-    user.lastProductCode = product.code;
+    await setStep(user, "TS:P_PHOTO", {
+      lastProductCode: user.lastProductCode,
+    });
     await reply(
       user,
       chatId,
-      `✅ کالا ثبت شد.\n🔖 ${product.code}\n\nاگر عکس دارید همین‌جا بفرستید، وگرنه «رد کردن» را بزنید.`,
+      "اگر عکس دارید همین‌جا بفرستید، وگرنه «رد کردن» را بزنید.",
       kb([[{ text: BTN.SKIP }], [{ text: BTN.BACK_PRODUCT_LIST }]])
     );
     return true;
@@ -858,6 +942,65 @@ async function handleAdminCallback(user, chatId, data) {
   const ctx = getBotContext();
   const tenantId = ctx.tenantId;
   if (!(await isShopOwner(user, tenantId))) return false;
+
+  if (data.startsWith("tcd:")) {
+    const categoryId = data.slice(4);
+    const { sendKeyboard } = require("../bot/bale");
+    await sendKeyboard(
+      chatId,
+      "اگر این دسته حذف شود، کالاهای همین دسته هم از فروشگاه حذف می‌شوند. تأیید می‌کنید؟",
+      inlineKb([
+        [
+          { text: "✅ بله، حذف شود", callback_data: `tcy:${categoryId}`.slice(0, 64) },
+        ],
+      ])
+    );
+    return true;
+  }
+
+  if (data.startsWith("tcy:")) {
+    const categoryId = data.slice(4);
+    try {
+      const products = await prisma.product.findMany({
+        where: { tenantId, categoryId },
+        select: { id: true },
+      });
+      const ids = products.map((p) => p.id);
+      if (ids.length) {
+        try {
+          await prisma.cartItem.deleteMany({
+            where: { productId: { in: ids } },
+          });
+        } catch (err) {
+          console.error("CAT DELETE CART ITEMS:", err.message);
+        }
+        await prisma.product.deleteMany({
+          where: { tenantId, categoryId },
+        });
+      }
+      const cat = await prisma.category.findUnique({
+        where: { id: categoryId },
+      });
+      if (cat && (!cat.tenantId || cat.tenantId === tenantId)) {
+        const leftover = await prisma.product.count({
+          where: { categoryId },
+        });
+        if (!leftover && cat.tenantId === tenantId) {
+          await prisma.category.delete({ where: { id: categoryId } });
+        }
+      }
+      await reply(user, chatId, "✅ دسته و کالاهای آن حذف شد.");
+    } catch (err) {
+      console.error("CATEGORY DELETE:", err.message);
+      await reply(
+        user,
+        chatId,
+        "حذف دسته ممکن نشد. اگر کالایی در سفارش ثبت شده باشد، اول آن‌ها را ناموجود کنید."
+      );
+    }
+    await showCategories(user, chatId, tenantId);
+    return true;
+  }
 
   if (data.startsWith("tp:") && !data.startsWith("tpe:")) {
     const code = data.slice(3);

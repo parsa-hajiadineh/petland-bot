@@ -465,6 +465,7 @@ model TenantSettings {
   shopDescription  String?
   shopAddress      String?
   openingHours     String?
+  helpMessage      String?
 
   tenantId       String   @unique
   tenant         Tenant   @relation(fields: [tenantId], references: [id])
