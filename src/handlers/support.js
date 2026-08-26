@@ -1,7 +1,8 @@
 const prisma = require("../database/prisma");
 const { ADMIN_BALE_IDS } = require("../config");
 const { reply, notify } = require("../bot/messenger");
-const { BTN, supportMenu, backMain, activeTicketMenu, adminTicketsMenu, inlineKb } = require("../keyboards/menus");
+const bale = require("../bot/bale");
+const { BTN, supportMenu, backMain, activeTicketMenu, adminTicketsMenu, adminBackMenu, inlineKb } = require("../keyboards/menus");
 
 module.exports.showSupportMenu = async function showSupportMenu(user, chatId) {
   await reply(user, chatId, "🎫 پشتیبانی", supportMenu());
@@ -143,9 +144,10 @@ module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) 
   await reply(
     user,
     chatId,
-    `📭 تیکت‌های بی‌پاسخ (${tickets.length})\n\nروی تیکت کلیک کنید:`,
-    inlineKb(rows)
+    `📭 تیکت‌های بی‌پاسخ (${tickets.length})`,
+    adminBackMenu()
   );
+  await bale.sendKeyboard(chatId, "روی تیکت کلیک کنید:", inlineKb(rows));
 };
 
 module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, chatId, offset = 0) {
@@ -178,9 +180,10 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
   await reply(
     user,
     chatId,
-    `📬 تیکت‌های پاسخ داده شده — صفحه ${Math.floor(offset / take) + 1}\n\nروی تیکت کلیک کنید:`,
-    inlineKb(rows)
+    `📬 تیکت‌های پاسخ داده شده — صفحه ${Math.floor(offset / take) + 1}`,
+    adminBackMenu()
   );
+  await bale.sendKeyboard(chatId, "روی تیکت کلیک کنید:", inlineKb(rows));
 };
 
 module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ticketId) {
@@ -211,7 +214,7 @@ module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ti
       data: { adminStep: `REPLY_TICKET:${ticket.id}` },
     });
     text += `━━━━━━━━━━━━━━━━━━\n✏️ پاسخ خود را تایپ و ارسال کنید:`;
-    await reply(user, chatId, text, backMain());
+    await reply(user, chatId, text, adminBackMenu());
   } else {
     await reply(user, chatId, text, adminTicketsMenu());
   }

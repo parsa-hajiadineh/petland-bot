@@ -6,13 +6,14 @@ const { reply, notify, replyPhoto } = require("../bot/messenger");
 const {
   BTN,
   adminMenu,
+  adminInvoicesMenu,
+  adminBackMenu,
   adminOrderActions,
   adminApprovedActions,
-  adminTicketsMenu,
   inlineKb,
   kb,
-  backMain,
-} = require("../keyboards/menus");const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
+} = require("../keyboards/menus");
+const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
 const { statusLabel } = require("../utils/order");
 const { notifyOrderStatus } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
@@ -130,11 +131,12 @@ async function showSalesStats(user, chatId) {
       user,
       chatId,
       "📊 آمار فروش\n\nماه مورد نظر را انتخاب کنید:",
-      inlineKb(rows)
+      adminBackMenu()
     );
+    await bale.sendKeyboard(chatId, "ماه مورد نظر را انتخاب کنید:", inlineKb(rows));
   } catch (err) {
     console.error("SALES STATS:", err);
-    await reply(user, chatId, "خواندن آمار فروش ممکن نشد.", adminMenu());
+    await reply(user, chatId, "خواندن آمار فروش ممکن نشد.", adminBackMenu());
   }
 }
 
@@ -154,7 +156,7 @@ module.exports.showMonthStats = async function showMonthStats(
         where: { yearMonth },
       });
       if (!report) {
-        await reply(user, chatId, "❌ آمار این ماه موجود نیست.", adminMenu());
+        await reply(user, chatId, "❌ آمار این ماه موجود نیست.", adminBackMenu());
         return;
       }
       stats = report;
@@ -175,22 +177,187 @@ module.exports.showMonthStats = async function showMonthStats(
       `✅ سود خالص: ${netProfit.toLocaleString("fa-IR")} تومان`,
     ].join("\n");
 
-    await reply(user, chatId, text, adminMenu());
+    await reply(user, chatId, text, adminBackMenu());
   } catch (err) {
     console.error("MONTH STATS:", err);
-    await reply(user, chatId, "خواندن آمار این ماه ممکن نشد.", adminMenu());
+    await reply(user, chatId, "خواندن آمار این ماه ممکن نشد.", adminBackMenu());
   }
 };
+
+async function showInvoicesMenu(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
+  });
+  user.adminStep = "ADMIN_INVOICES";
+  user.pendingOrderId = null;
+  await reply(user, chatId, "🧾 فاکتورها", adminInvoicesMenu());
+}
+
+async function replayInvoiceList(user, chatId, step) {
+  if (step === "ADMIN_PENDING") {
+    await showOrdersInline(user, chatId, { status: "WAITING_APPROVAL" }, "🧾 فاکتورهای در انتظار تایید", null, 0, "ADMIN_PENDING");
+    return;
+  }
+  if (step === "ADMIN_APPROVED") {
+    await showOrdersInline(user, chatId, { status: { in: ["APPROVED", "PACKAGING"] } }, "✅ فاکتورهای تایید شده", null, 0, "ADMIN_APPROVED");
+    return;
+  }
+  if (step === "ADMIN_REJECTED") {
+    await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
+    return;
+  }
+  if (step === "ADMIN_SHIPPED") {
+    await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", 0, "ADMIN_SHIPPED");
+    return;
+  }
+  await showInvoicesMenu(user, chatId);
+}
+
+async function goAdminBack(user, chatId) {
+  const step = user.adminStep || "";
+
+  if (step === "REJECT_REASON" && user.pendingOrderId) {
+    const order = await prisma.order.findUnique({
+      where: { id: user.pendingOrderId },
+      select: ORDER_WITH_ITEMS_SELECT,
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_PENDING" },
+    });
+    user.adminStep = "ADMIN_PENDING";
+    if (order) await showAdminOrderDetail(user, chatId, order);
+    else await replayInvoiceList(user, chatId, "ADMIN_PENDING");
+    return true;
+  }
+
+  if ((step === "SHIP_SNAPP" || step === "SHIP_POST" || step === "SHIP_INFO") && user.pendingOrderId) {
+    const order = await prisma.order.findUnique({
+      where: { id: user.pendingOrderId },
+      select: ORDER_WITH_ITEMS_SELECT,
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_APPROVED" },
+    });
+    user.adminStep = "ADMIN_APPROVED";
+    if (order) await showAdminOrderDetail(user, chatId, order);
+    else await replayInvoiceList(user, chatId, "ADMIN_APPROVED");
+    return true;
+  }
+
+  if (step.startsWith("REPLY_TICKET:")) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKETS" },
+    });
+    const support = require("./support");
+    await support.adminListTickets(user, chatId);
+    return true;
+  }
+
+  if (step === "SET_IMAGE_UPLOAD") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "SET_IMAGE_CODE" },
+    });
+    await reply(user, chatId, "کد محصول را وارد کنید:", adminBackMenu());
+    return true;
+  }
+
+  if (step === "SET_IMAGE_CODE") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_PRODUCTS", lastProductCode: null },
+    });
+    await replyProductAdmin(user, chatId);
+    return true;
+  }
+
+  if (user.pendingOrderId && ["ADMIN_PENDING", "ADMIN_APPROVED", "ADMIN_REJECTED", "ADMIN_SHIPPED"].includes(step)) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { pendingOrderId: null },
+    });
+    user.pendingOrderId = null;
+    await replayInvoiceList(user, chatId, step);
+    return true;
+  }
+
+  if (["ADMIN_PENDING", "ADMIN_APPROVED", "ADMIN_REJECTED", "ADMIN_SHIPPED"].includes(step)) {
+    await showInvoicesMenu(user, chatId);
+    return true;
+  }
+
+  if (step === "ADMIN_TICKET_OPEN" || step === "ADMIN_TICKET_ANSWERED") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKETS" },
+    });
+    const support = require("./support");
+    await support.adminListTickets(user, chatId);
+    return true;
+  }
+
+  if (step === "CONFIRM_WITHDRAWAL" || step.startsWith("CONFIRM_WITHDRAWAL:")) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_WITHDRAWALS" },
+    });
+    await showPendingWithdrawals(user, chatId);
+    return true;
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: null, pendingOrderId: null },
+  });
+  await module.exports.showAdminPanel(user, chatId);
+  return true;
+}
+
+async function replyProductAdmin(user, chatId) {
+  await reply(
+    user,
+    chatId,
+    `📦 مدیریت محصولات
+
+• برای تغییر موجودی: PL-کد محصول AVAILABLE یا UNAVAILABLE
+  مثال: JMK-001 AVAILABLE
+
+• برای تنظیم عکس: دکمه «🖼 تنظیم عکس محصول» سپس کد محصول سپس عکس`,
+    kb([
+      [{ text: BTN.SET_IMAGE }],
+      [{ text: BTN.BACK_PRODUCT_LIST }],
+    ])
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 module.exports.showAdminPanel = async function showAdminPanel(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: null, pendingOrderId: null },
+  });
+  user.adminStep = null;
+  user.pendingOrderId = null;
   await reply(user, chatId, "⚙️ پنل ادمین", adminMenu());
 };
 
-async function showOrdersInline(user, chatId, where, title, morePrefix = null, offset = 0) {
+async function showOrdersInline(user, chatId, where, title, morePrefix = null, offset = 0, listStep = null) {
   const take = 10;
   const paginated = !!morePrefix;
+
+  if (listStep) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: listStep, pendingOrderId: null },
+    });
+    user.adminStep = listStep;
+    user.pendingOrderId = null;
+  }
 
   let orders;
   try {
@@ -207,13 +374,13 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
     });
   } catch (err) {
     console.error("ADMIN ORDERS LIST:", err);
-    await reply(user, chatId, "خواندن فاکتورها ممکن نشد.", adminMenu());
+    await reply(user, chatId, "خواندن فاکتورها ممکن نشد.", adminBackMenu());
     return;
   }
 
   if (!orders.length) {
     const msg = offset > 0 ? "فاکتور دیگری وجود ندارد." : `${title}\n\nموردی وجود ندارد.`;
-    await reply(user, chatId, msg, adminMenu());
+    await reply(user, chatId, msg, adminBackMenu());
     return;
   }
 
@@ -230,7 +397,19 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
   }
 
   const pageInfo = paginated && offset > 0 ? ` — صفحه ${Math.floor(offset / take) + 1}` : "";
-  await reply(user, chatId, `${title}${pageInfo}\n\nروی فاکتور کلیک کنید:`, inlineKb(rows));
+  await reply(user, chatId, `${title}${pageInfo}`, adminBackMenu());
+  const result = await bale.sendKeyboard(
+    chatId,
+    "روی فاکتور کلیک کنید:",
+    inlineKb(rows)
+  );
+  const msgId = result?.result?.message_id;
+  if (msgId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastMessageId: msgId },
+    });
+  }
 }
 
 module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
@@ -239,69 +418,140 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.ADMIN_INVOICES) {
+    await showInvoicesMenu(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
+    await goAdminBack(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.APPROVE && user.pendingOrderId) {
+    await approveOrder(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.REJECT && user.pendingOrderId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "REJECT_REASON" },
+    });
+    user.adminStep = "REJECT_REASON";
+    await reply(user, chatId, "دلیل رد فاکتور را بنویسید:", adminBackMenu());
+    return true;
+  }
+
+  if (text === BTN.PACK && user.pendingOrderId) {
+    try {
+      const order = await prisma.order.update({
+        where: { id: user.pendingOrderId },
+        data: { status: "PACKAGING" },
+        select: ORDER_WITH_ITEMS_SELECT,
+      });
+      await notifyOrderStatus(order, "📦 سفارش در حال بسته‌بندی است.");
+      await reply(user, chatId, "وضعیت: بسته‌بندی", adminApprovedActions());
+    } catch (err) {
+      console.error("ADMIN PACK:", err);
+      await reply(user, chatId, "ثبت بسته‌بندی ممکن نشد.", adminApprovedActions());
+    }
+    return true;
+  }
+
+  if (text === BTN.SHIP && user.pendingOrderId) {
+    await reply(user, chatId, "نوع ارسال را انتخاب کنید:", adminBackMenu());
+    await bale.sendKeyboard(
+      chatId,
+      "اسنپ یا پست را انتخاب کنید:",
+      inlineKb([
+        [{ text: "🚗 ارسال با اسنپ", callback_data: `ship:snapp:${user.pendingOrderId}` }],
+        [{ text: "📦 ارسال با پست", callback_data: `ship:post:${user.pendingOrderId}` }],
+      ])
+    );
+    return true;
+  }
+
   if (text === BTN.ADMIN_PENDING) {
-    await showOrdersInline(user, chatId, { status: "WAITING_APPROVAL" }, "🧾 فاکتورهای در انتظار تایید");
+    await showOrdersInline(user, chatId, { status: "WAITING_APPROVAL" }, "🧾 فاکتورهای در انتظار تایید", null, 0, "ADMIN_PENDING");
     return true;
   }
 
   if (text === BTN.ADMIN_APPROVED) {
-    await showOrdersInline(user, chatId, { status: { in: ["APPROVED", "PACKAGING"] } }, "✅ فاکتورهای تایید شده");
+    await showOrdersInline(user, chatId, { status: { in: ["APPROVED", "PACKAGING"] } }, "✅ فاکتورهای تایید شده", null, 0, "ADMIN_APPROVED");
     return true;
   }
 
   if (text === BTN.ADMIN_REJECTED) {
-    await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more");
+    await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
     return true;
   }
 
   if (text === BTN.ADMIN_SHIPPED) {
-    await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more");
+    await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", 0, "ADMIN_SHIPPED");
     return true;
   }
 
   if (text === BTN.ADMIN_WITHDRAWALS) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_WITHDRAWALS" },
+    });
+    user.adminStep = "ADMIN_WITHDRAWALS";
     await showPendingWithdrawals(user, chatId);
     return true;
   }
 
   if (text === BTN.ADMIN_SALES) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_SALES" },
+    });
+    user.adminStep = "ADMIN_SALES";
     await showSalesStats(user, chatId);
     return true;
   }
 
   if (text === BTN.ADMIN_TICKETS) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKETS" },
+    });
+    user.adminStep = "ADMIN_TICKETS";
     const support = require("./support");
     await support.adminListTickets(user, chatId);
     return true;
   }
 
   if (text === BTN.TICKET_OPEN) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKET_OPEN" },
+    });
+    user.adminStep = "ADMIN_TICKET_OPEN";
     const support = require("./support");
     await support.adminOpenTickets(user, chatId);
     return true;
   }
 
   if (text === BTN.TICKET_ANSWERED) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKET_ANSWERED" },
+    });
+    user.adminStep = "ADMIN_TICKET_ANSWERED";
     const support = require("./support");
     await support.adminAnsweredTickets(user, chatId, 0);
     return true;
   }
 
   if (text === BTN.ADMIN_PRODUCTS) {
-    await reply(
-      user,
-      chatId,
-      `📦 مدیریت محصولات
-
-• برای تغییر موجودی: PL-کد محصول AVAILABLE یا UNAVAILABLE
-  مثال: JMK-001 AVAILABLE
-
-• برای تنظیم عکس: دکمه «🖼 تنظیم عکس محصول» سپس کد محصول سپس عکس`,
-      kb([
-        [{ text: BTN.SET_IMAGE }],
-        [{ text: BTN.ADMIN_PANEL }],
-      ])
-    );
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_PRODUCTS" },
+    });
+    user.adminStep = "ADMIN_PRODUCTS";
+    await replyProductAdmin(user, chatId);
     return true;
   }
 
@@ -310,7 +560,8 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
       where: { id: user.id },
       data: { adminStep: "SET_IMAGE_CODE" },
     });
-    await reply(user, chatId, "کد محصول را وارد کنید:");
+    user.adminStep = "SET_IMAGE_CODE";
+    await reply(user, chatId, "کد محصول را وارد کنید:", adminBackMenu());
     return true;
   }
 
@@ -324,7 +575,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     });
 
     if (!product) {
-      await reply(user, chatId, "محصول پیدا نشد.");
+      await reply(user, chatId, "محصول پیدا نشد.", adminBackMenu());
       return true;
     }
 
@@ -336,7 +587,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
       },
     });
 
-    await reply(user, chatId, "عکس محصول را ارسال کنید:");
+    await reply(user, chatId, "عکس محصول را ارسال کنید:", adminBackMenu());
     return true;
   }
 
@@ -351,7 +602,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
       .catch(() => null);
 
     if (!product) {
-      await reply(user, chatId, "محصول پیدا نشد.");
+      await reply(user, chatId, "محصول پیدا نشد.", adminBackMenu());
       return true;
     }
 
@@ -407,21 +658,27 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (user.adminStep === "REJECT_REASON" && user.pendingOrderId) {
-    const order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
-      data: {
-        status: "REJECTED",
-        rejectReason: text,
-      },
-    });
+    try {
+      const order = await prisma.order.update({
+        where: { id: user.pendingOrderId },
+        data: {
+          status: "REJECTED",
+          rejectReason: text,
+        },
+        select: ORDER_WITH_ITEMS_SELECT,
+      });
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: null, pendingOrderId: null },
-    });
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
+      });
 
-    await notifyOrderStatus(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
-    await reply(user, chatId, "فاکتور رد شد.", adminMenu());
+      await notifyOrderStatus(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
+      await reply(user, chatId, "فاکتور رد شد.", adminInvoicesMenu());
+    } catch (err) {
+      console.error("ADMIN REJECT:", err);
+      await reply(user, chatId, "رد فاکتور ممکن نشد.", adminBackMenu());
+    }
     return true;
   }
 
@@ -434,11 +691,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { adminStep: null, pendingOrderId: null },
+      data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
     });
 
     await notifyOrderStatus(order, `🚚 سفارش ارسال شد.\n${text}`);
-    await reply(user, chatId, "✅ ارسال ثبت شد.", adminMenu());
+    await reply(user, chatId, "✅ ارسال ثبت شد.", adminInvoicesMenu());
     return true;
   }
 
@@ -451,11 +708,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { adminStep: null, pendingOrderId: null },
+      data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
     });
 
     await notifyOrderStatus(order, `🚗 سفارش شما با اسنپ ارسال شد.\n${text}`);
-    await reply(user, chatId, "✅ ارسال با اسنپ ثبت شد.", adminMenu());
+    await reply(user, chatId, "✅ ارسال با اسنپ ثبت شد.", adminInvoicesMenu());
     return true;
   }
 
@@ -468,49 +725,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { adminStep: null, pendingOrderId: null },
+      data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
     });
 
     await notifyOrderStatus(order, `📦 سفارش شما با پست ارسال شد.\nکد پیگیری مرسوله: ${text}`);
-    await reply(user, chatId, "✅ ارسال با پست ثبت شد.", adminMenu());
-    return true;
-  }
-
-  if (text === BTN.APPROVE && user.pendingOrderId) {
-    await approveOrder(user, chatId);
-    return true;
-  }
-
-  if (text === BTN.REJECT && user.pendingOrderId) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: "REJECT_REASON" },
-    });
-    await reply(user, chatId, "دلیل رد فاکتور را بنویسید:");
-    return true;
-  }
-
-  if (text === BTN.PACK && user.pendingOrderId) {
-    const order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
-      data: { status: "PACKAGING" },
-    });
-
-    await notifyOrderStatus(order, "📦 سفارش در حال بسته‌بندی است.");
-    await reply(user, chatId, "وضعیت: بسته‌بندی", adminApprovedActions());
-    return true;
-  }
-
-  if (text === BTN.SHIP && user.pendingOrderId) {
-    await reply(
-      user,
-      chatId,
-      "نوع ارسال را انتخاب کنید:",
-      inlineKb([
-        [{ text: "🚗 ارسال با اسنپ", callback_data: `ship:snapp:${user.pendingOrderId}` }],
-        [{ text: "📦 ارسال با پست", callback_data: `ship:post:${user.pendingOrderId}` }],
-      ])
-    );
+    await reply(user, chatId, "✅ ارسال با پست ثبت شد.", adminInvoicesMenu());
     return true;
   }
 
@@ -524,7 +743,7 @@ async function showAdminOrderDetail(user, chatId, order) {
   });
 
   const invoice = buildInvoiceText(order, order.items);
-  let keyboard = adminMenu();
+  let keyboard = adminBackMenu();
 
   if (order.status === "WAITING_APPROVAL") {
     keyboard = adminOrderActions();
@@ -545,11 +764,18 @@ async function showAdminOrderDetail(user, chatId, order) {
 }
 
 async function approveOrder(user, chatId) {
-  const order = await prisma.order.update({
-    where: { id: user.pendingOrderId },
-    data: { status: "PACKAGING" },
-    select: ORDER_WITH_ITEMS_SELECT,
-  });
+  let order;
+  try {
+    order = await prisma.order.update({
+      where: { id: user.pendingOrderId },
+      data: { status: "PACKAGING" },
+      select: ORDER_WITH_ITEMS_SELECT,
+    });
+  } catch (err) {
+    console.error("ADMIN APPROVE:", err);
+    await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminOrderActions());
+    return;
+  }
 
   await notifyOrderStatus(order, "✅ فاکتور تایید شد. در حال آماده‌سازی.");
 
@@ -604,18 +830,18 @@ module.exports.viewOrderById = async function viewOrderById(user, chatId, orderI
     select: ORDER_WITH_ITEMS_SELECT,
   });
   if (!order) {
-    await reply(user, chatId, "فاکتور پیدا نشد.", adminMenu());
+    await reply(user, chatId, "فاکتور پیدا نشد.", adminBackMenu());
     return;
   }
   await showAdminOrderDetail(user, chatId, order);
 };
 
 module.exports.showRejectedOrders = async function showRejectedOrders(user, chatId, offset) {
-  await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", offset);
+  await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", offset, "ADMIN_REJECTED");
 };
 
 module.exports.showShippedOrders = async function showShippedOrders(user, chatId, offset) {
-  await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", offset);
+  await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", offset, "ADMIN_SHIPPED");
 };
 
 async function showPendingWithdrawals(user, chatId) {
@@ -626,7 +852,7 @@ async function showPendingWithdrawals(user, chatId) {
   });
 
   if (!withdrawals.length) {
-    await reply(user, chatId, "💸 درخواست‌های پورسانت\n\nدرخواست برداشت در انتظاری وجود ندارد.", adminMenu());
+    await reply(user, chatId, "💸 درخواست‌های پورسانت\n\nدرخواست برداشت در انتظاری وجود ندارد.", adminBackMenu());
     return;
   }
 
@@ -635,7 +861,8 @@ async function showPendingWithdrawals(user, chatId) {
     callback_data: `wdr:${w.id}`,
   }]);
 
-  await reply(user, chatId, `💸 درخواست‌های پورسانت (${withdrawals.length} مورد)\n\nروی هر درخواست کلیک کنید:`, inlineKb(rows));
+  await reply(user, chatId, `💸 درخواست‌های پورسانت (${withdrawals.length} مورد)`, adminBackMenu());
+  await bale.sendKeyboard(chatId, "روی هر درخواست کلیک کنید:", inlineKb(rows));
 }
 
 module.exports.showWithdrawalDetail = async function showWithdrawalDetail(user, chatId, withdrawalId) {
@@ -645,7 +872,7 @@ module.exports.showWithdrawalDetail = async function showWithdrawalDetail(user, 
   });
 
   if (!w) {
-    await reply(user, chatId, "درخواست پیدا نشد.", adminMenu());
+    await reply(user, chatId, "درخواست پیدا نشد.", adminBackMenu());
     return;
   }
 
@@ -664,7 +891,7 @@ module.exports.showWithdrawalDetail = async function showWithdrawalDetail(user, 
   ].join("\n");
 
   if (w.status === "PAID") {
-    await reply(user, chatId, `${detail}\n🔖 کد رهگیری: ${w.trackingCode}`, adminMenu());
+    await reply(user, chatId, `${detail}\n🔖 کد رهگیری: ${w.trackingCode}`, adminBackMenu());
     return;
   }
 
@@ -677,7 +904,7 @@ module.exports.showWithdrawalDetail = async function showWithdrawalDetail(user, 
     user,
     chatId,
     `${detail}\n\nپس از واریز مبلغ، کد رهگیری تراکنش را وارد کنید:`,
-    backMain()
+    adminBackMenu()
   );
 };
 
@@ -692,7 +919,7 @@ async function confirmWithdrawal(user, chatId, withdrawalId, trackingCode) {
       where: { id: user.id },
       data: { adminStep: null },
     });
-    await reply(user, chatId, "این درخواست قبلاً تایید شده یا پیدا نشد.", adminMenu());
+    await reply(user, chatId, "این درخواست قبلاً تایید شده یا پیدا نشد.", adminBackMenu());
     return;
   }
 
@@ -712,7 +939,7 @@ async function confirmWithdrawal(user, chatId, withdrawalId, trackingCode) {
     `🎉 تبریک! پورسانت شما واریز شد.\n\n💰 مبلغ: ${w.amount.toLocaleString("fa-IR")} تومان\n💳 شماره کارت: ${w.cardNumber}\n🔖 کد رهگیری: ${trackingCode.trim()}\n\nمبلغ با موفقیت به حساب شما واریز گردید.`
   );
 
-  await reply(user, chatId, `✅ تایید شد. کد رهگیری برای کاربر ارسال گردید.`, adminMenu());
+  await reply(user, chatId, `✅ تایید شد. کد رهگیری برای کاربر ارسال گردید.`, adminBackMenu());
 }
 
 module.exports.handleAdminPhoto = async function handleAdminPhoto(
@@ -733,9 +960,9 @@ module.exports.handleAdminPhoto = async function handleAdminPhoto(
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: null, lastProductCode: null },
+    data: { adminStep: "ADMIN_PRODUCTS", lastProductCode: null },
   });
 
-  await reply(user, chatId, "✅ عکس محصول ذخیره شد.", adminMenu());
+  await reply(user, chatId, "✅ عکس محصول ذخیره شد.", adminBackMenu());
   return true;
 };

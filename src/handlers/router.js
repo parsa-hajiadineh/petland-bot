@@ -1,7 +1,7 @@
 const prisma = require("../database/prisma");
 const { reloadUser } = require("../services/user");
 const { isAdmin } = require("../services/user");
-const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES } = require("../keyboards/menus");
+const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES, adminBackMenu } = require("../keyboards/menus");
 const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
 const { isMother } = require("../bot/context");
@@ -412,7 +412,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     });
     await reply(user, chatId,
       "🚗 ارسال با اسنپ\n\nاطلاعات را در یک پیام ارسال کنید:\nشماره تماس راننده، پلاک، مدل ماشین",
-      backMain()
+      adminBackMenu()
     );
     return;
   }
@@ -423,7 +423,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
       where: { id: user.id },
       data: { adminStep: "SHIP_POST", pendingOrderId: orderId },
     });
-    await reply(user, chatId, "📦 ارسال با پست\n\nکد پیگیری مرسوله را وارد کنید:", backMain());
+    await reply(user, chatId, "📦 ارسال با پست\n\nکد پیگیری مرسوله را وارد کنید:", adminBackMenu());
     return;
   }
 };

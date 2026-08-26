@@ -142,6 +142,7 @@ const BTN = {
   MY_TICKETS: "📋 تیکت‌های من",
   CLOSE_TICKET: "🔒 بستن تیکت",
   ADMIN_PANEL: "⚙️ پنل ادمین",
+  ADMIN_INVOICES: "🧾 فاکتورها",
   ADMIN_PENDING: "🧾 فاکتورهای در انتظار",
   ADMIN_APPROVED: "✅ فاکتورهای تایید شده",
   ADMIN_REJECTED: "❌ فاکتورهای رد شده",
@@ -263,10 +264,7 @@ function walletMenu() {
 
 function adminMenu() {
   return kb([
-    [{ text: BTN.ADMIN_PENDING }],
-    [{ text: BTN.ADMIN_APPROVED }],
-    [{ text: BTN.ADMIN_REJECTED }],
-    [{ text: BTN.ADMIN_SHIPPED }],
+    [{ text: BTN.ADMIN_INVOICES }],
     [{ text: BTN.ADMIN_TICKETS }],
     [{ text: BTN.ADMIN_PRODUCTS }],
     [{ text: BTN.ADMIN_WITHDRAWALS }],
@@ -275,10 +273,24 @@ function adminMenu() {
   ]);
 }
 
+function adminInvoicesMenu() {
+  return kb([
+    [{ text: BTN.ADMIN_PENDING }],
+    [{ text: BTN.ADMIN_APPROVED }],
+    [{ text: BTN.ADMIN_REJECTED }],
+    [{ text: BTN.ADMIN_SHIPPED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminBackMenu() {
+  return kb([[{ text: BTN.BACK_PRODUCT_LIST }]]);
+}
+
 function adminOrderActions() {
   return kb([
     [{ text: BTN.APPROVE }, { text: BTN.REJECT }],
-    [{ text: BTN.ADMIN_PANEL }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -286,14 +298,14 @@ function adminApprovedActions() {
   return kb([
     [{ text: BTN.PACK }],
     [{ text: BTN.SHIP }],
-    [{ text: BTN.ADMIN_PANEL }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
 function adminTicketsMenu() {
   return kb([
     [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
-    [{ text: BTN.ADMIN_PANEL }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -347,6 +359,8 @@ module.exports = {
   paymentMenu,
   walletMenu,
   adminMenu,
+  adminInvoicesMenu,
+  adminBackMenu,
   adminOrderActions,
   adminApprovedActions,
   adminTicketsMenu,
