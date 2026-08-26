@@ -498,6 +498,10 @@ async function ensureShopRuntimeTables() {
         "bankName" TEXT,
         "profitPercent" INTEGER,
         "minOrderAmount" INTEGER,
+        "logoFileId" TEXT,
+        "shopDescription" TEXT,
+        "shopAddress" TEXT,
+        "openingHours" TEXT,
         "tenantId" TEXT NOT NULL,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -529,6 +533,23 @@ async function ensureShopRuntimeTables() {
     );
     console.log("TENANT MEMBER TABLE READY");
   }
+
+  const settingsCols = [
+    "logoFileId",
+    "shopDescription",
+    "shopAddress",
+    "openingHours",
+  ];
+  for (const col of settingsCols) {
+    await execSql(
+      `SETTINGS COL ${col} SKIP:`,
+      `ALTER TABLE "TenantSettings" ADD COLUMN IF NOT EXISTS "${col}" TEXT`
+    );
+  }
+  await execSql(
+    "CATEGORY TENANT COL SKIP:",
+    `ALTER TABLE "Category" ADD COLUMN IF NOT EXISTS "tenantId" TEXT`
+  );
 }
 
 async function persistColleagueShop(user, profile) {
@@ -701,6 +722,7 @@ module.exports = {
   provisionShop,
   findOwnedTenant,
   persistColleagueShop,
+  ensureShopRuntimeTables,
   tenantWebhookUrl,
   publicBaseUrl,
 };

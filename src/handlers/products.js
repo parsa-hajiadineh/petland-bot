@@ -11,11 +11,8 @@ const {
   productCategoriesMenu,
   subMenuKb,
 } = require("../keyboards/menus");
-const {
-  getUnitPrice,
-  formatPrice,
-  isWholesaleUser,
-} = require("../utils/price");
+const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
+const { isMother } = require("../bot/context");
 
 const PRODUCT_LIST_SELECT = {
   id: true,
@@ -171,7 +168,8 @@ module.exports.loadProductByCode = loadProductByCode;
 module.exports.showTenantProducts = async function showTenantProducts(
   user,
   chatId,
-  tenantId
+  tenantId,
+  categoryTitle
 ) {
   if (!tenantId) {
     await reply(user, chatId, "فروشگاه شناسایی نشد.");
@@ -183,38 +181,88 @@ module.exports.showTenantProducts = async function showTenantProducts(
     products = await prisma.product.findMany({
       where: { tenantId, status: "AVAILABLE" },
       orderBy: { title: "asc" },
-      select: PRODUCT_LIST_SELECT,
+      select: {
+        ...PRODUCT_LIST_SELECT,
+        category: { select: { id: true, title: true } },
+      },
     });
   } catch (err) {
     console.error("TENANT PRODUCTS:", err);
-    await reply(
-      user,
-      chatId,
-      "خواندن محصولات این فروشگاه ممکن نشد."
-    );
-    return;
+    try {
+      products = await prisma.product.findMany({
+        where: { tenantId, status: "AVAILABLE" },
+        orderBy: { title: "asc" },
+        select: PRODUCT_LIST_SELECT,
+      });
+    } catch (err2) {
+      console.error("TENANT PRODUCTS FALLBACK:", err2);
+      await reply(user, chatId, "خواندن محصولات این فروشگاه ممکن نشد.");
+      return;
+    }
   }
 
   if (products.length === 0) {
     await reply(
       user,
       chatId,
-      "هنوز محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود."
+      "هنوز محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود.",
+      kb([[{ text: BTN.BACK_MAIN }]])
     );
     return;
   }
 
-  await reply(
-    user,
-    chatId,
-    `🛍 ${products.length} محصول`,
-    kb([[{ text: BTN.BACK_MAIN }]])
-  );
+  const categories = [];
+  const seen = new Set();
+  for (const product of products) {
+    const title = product.category?.title;
+    if (title && !seen.has(title)) {
+      seen.add(title);
+      categories.push(title);
+    }
+  }
 
+  const chosen =
+    categoryTitle && categories.includes(categoryTitle) ? categoryTitle : null;
+
+  if (!chosen && categories.length > 1) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: "TSC:WAIT" },
+    });
+    user.orderStep = "TSC:WAIT";
+    const rows = categories.map((title) => [{ text: title }]);
+    rows.push([{ text: BTN.BACK_MAIN }]);
+    await reply(
+      user,
+      chatId,
+      "📂 دسته مورد نظر را انتخاب کنید:",
+      kb(rows)
+    );
+    return;
+  }
+
+  const filtered = chosen
+    ? products.filter((p) => p.category?.title === chosen)
+    : products;
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: null },
+  });
+  user.orderStep = null;
+
+  const header = chosen ? `🛍 ${chosen}` : `🛍 ${filtered.length} محصول`;
+  const menuRows = [];
+  if (categories.length > 1) {
+    menuRows.push([{ text: BTN.BACK_PRODUCTS }]);
+  }
+  menuRows.push([{ text: BTN.BACK_MAIN }]);
+
+  await reply(user, chatId, `${header}\n${filtered.length} کالا`, kb(menuRows));
   await sendProductInlineList(
     user,
     chatId,
-    products,
+    filtered,
     "روی هر محصول برای جزئیات کلیک کنید:"
   );
 };
@@ -394,15 +442,17 @@ module.exports.showProduct = async function showProduct(
 🔖 کد: ${product.code}
 🏷 دسته: ${product.category?.title || "—"}
 💰 قیمت: ${formatPrice(price)}
-${wholesale ? "🤝 قیمت همکار" : "🛒 قیمت مصرف‌کننده"}
+${wholesale && isMother() ? "🤝 قیمت همکار" : "🛒 قیمت"}
 ${status}
 
-📝 ${product.description || "بدون توضیحات"}
-
-${
-  product.status === "AVAILABLE"
-    ? "برای انتخاب محصول از دکمه \"افزودن به سبد\" استفاده نمایید."
-    : "این محصول ناموجود است."
+📝 ${product.description || "بدون توضیحات"}${
+  isMother()
+    ? product.status === "AVAILABLE"
+      ? `\n\nبرای انتخاب محصول از دکمه "افزودن به سبد" استفاده نمایید.`
+      : "\n\nاین محصول ناموجود است."
+    : product.status === "AVAILABLE"
+      ? ""
+      : "\n\nاین محصول ناموجود است."
 }`;
 
   const menu = productDetailMenu(product);

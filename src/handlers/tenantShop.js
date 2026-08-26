@@ -1,40 +1,58 @@
-const { reply } = require("../bot/messenger");
+const { reply, replyPhoto } = require("../bot/messenger");
 const { getBotContext } = require("../bot/context");
-const { BTN, tenantMainMenu } = require("../keyboards/menus");
+const { reloadUser } = require("../services/user");
+const {
+  BTN,
+  tenantMainMenu,
+} = require("../keyboards/menus");
 const productsHandler = require("./products");
+const tenantAdmin = require("./tenantAdmin");
+const { ensureShopRuntimeTables } = require("../services/shopProvision");
 
-function welcomeText(ctx) {
-  const name = ctx.name || "فروشگاه";
-  const extra = ctx.welcomeMessage ? `\n\n${ctx.welcomeMessage}` : "";
-  return `🌿 به ${name} خوش آمدید${extra}
-
-از منوی زیر استفاده کنید:`;
+async function shopMenu(user) {
+  const ctx = getBotContext();
+  const owner = await tenantAdmin.isShopOwner(user, ctx.tenantId);
+  return tenantMainMenu(owner);
 }
 
 async function showStart(user, chatId) {
   const ctx = getBotContext();
-  await reply(user, chatId, welcomeText(ctx), tenantMainMenu());
+  await ensureShopRuntimeTables().catch((err) => {
+    console.error("SHOP TABLES START:", err.message);
+  });
+  await tenantAdmin.clearTenantAdminState(user);
+  const shop = await tenantAdmin.loadShopView(ctx.tenantId);
+  const text = tenantAdmin.shopIntroText(shop);
+  const menu = await shopMenu(user);
+  if (shop.logoFileId) {
+    try {
+      const sent = await replyPhoto(user, chatId, shop.logoFileId, text, menu);
+      if (sent?.ok || sent?.result?.message_id) return;
+    } catch (err) {
+      console.error("SHOP LOGO START:", err.message);
+    }
+  }
+  await reply(user, chatId, text, menu);
 }
 
 async function showHelp(user, chatId) {
   const ctx = getBotContext();
-  const phone = ctx.supportPhone ? `\n📞 ${ctx.supportPhone}` : "";
+  const shop = await tenantAdmin.loadShopView(ctx.tenantId);
+  const phone = shop.phone ? `\n📞 ${shop.phone}` : "";
+  const address = shop.address ? `\n📍 ${shop.address}` : "";
+  const hours = shop.openingHours ? `\n🕐 ${shop.openingHours}` : "";
   await reply(
     user,
     chatId,
-    `📖 راهنما\n\nاز دکمه محصولات برای دیدن کالاهای این فروشگاه استفاده کنید.${phone}`,
-    tenantMainMenu()
+    `📖 راهنما\n\nاز دکمه محصولات، کالاهای همین فروشگاه را ببینید.${phone}${address}${hours}`,
+    await shopMenu(user)
   );
-}
-
-async function showProducts(user, chatId) {
-  const ctx = getBotContext();
-  await productsHandler.showTenantProducts(user, chatId, ctx.tenantId);
 }
 
 async function handleMessage(message, user) {
   const text = (message.text || "").trim();
   const chatId = message.chat.id;
+  user = (await reloadUser(user.id)) || user;
 
   if (
     text === BTN.BACK_MAIN ||
@@ -58,6 +76,10 @@ async function handleMessage(message, user) {
     return;
   }
 
+  if (await tenantAdmin.handleAdminText(user, chatId, text)) {
+    return;
+  }
+
   if (text === BTN.HELP) {
     await showHelp(user, chatId);
     return;
@@ -65,10 +87,37 @@ async function handleMessage(message, user) {
 
   if (
     text === BTN.PRODUCTS ||
-    text === BTN.BACK_PRODUCTS ||
-    text === BTN.BACK_PRODUCT_LIST
+    text === BTN.BACK_PRODUCTS
   ) {
-    await showProducts(user, chatId);
+    await productsHandler.showTenantProducts(user, chatId, getBotContext().tenantId);
+    return;
+  }
+
+  if (text === BTN.BACK_PRODUCT_LIST) {
+    let categoryTitle;
+    if (user.lastProductCode) {
+      const product = await productsHandler.loadTenantProductByCode(
+        user.lastProductCode,
+        getBotContext().tenantId
+      );
+      categoryTitle = product?.category?.title;
+    }
+    await productsHandler.showTenantProducts(
+      user,
+      chatId,
+      getBotContext().tenantId,
+      categoryTitle
+    );
+    return;
+  }
+
+  if (user.orderStep && String(user.orderStep).startsWith("TSC:")) {
+    await productsHandler.showTenantProducts(
+      user,
+      chatId,
+      getBotContext().tenantId,
+      text
+    );
     return;
   }
 
@@ -76,7 +125,7 @@ async function handleMessage(message, user) {
     user,
     chatId,
     "لطفاً از دکمه‌های منو استفاده کنید.",
-    tenantMainMenu()
+    await shopMenu(user)
   );
 }
 
@@ -84,6 +133,11 @@ async function handleCallbackQuery(cq, user) {
   const data = (cq.data || "").trim();
   const chatId = cq.message.chat.id;
   const ctx = getBotContext();
+  user = (await reloadUser(user.id)) || user;
+
+  if (await tenantAdmin.handleAdminCallback(user, chatId, data)) {
+    return;
+  }
 
   if (data.startsWith("product:")) {
     const code = data.replace("product:", "");
@@ -99,11 +153,37 @@ async function handleCallbackQuery(cq, user) {
     return;
   }
 
+  if (data.startsWith("tcat:")) {
+    const categoryTitle = data.slice(5);
+    await productsHandler.showTenantProducts(
+      user,
+      chatId,
+      ctx.tenantId,
+      categoryTitle
+    );
+    return;
+  }
+
   await showStart(user, chatId);
+}
+
+async function handlePhoto(message, user) {
+  const chatId = message.chat.id;
+  user = (await reloadUser(user.id)) || user;
+  const photo = message.photo;
+  if (!photo?.length) return;
+  if (await tenantAdmin.handleAdminPhoto(user, chatId, photo)) return;
+  await reply(
+    user,
+    chatId,
+    "عکس دریافت شد ولی در این مرحله نیاز نیست.",
+    await shopMenu(user)
+  );
 }
 
 module.exports = {
   handleMessage,
   handleCallbackQuery,
+  handlePhoto,
   showStart,
 };

@@ -429,7 +429,9 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 };
 
 module.exports.handlePhoto = async function handlePhoto(message, user) {
-  if (!isMother()) return;
+  if (!isMother()) {
+    return tenantShop.handlePhoto(message, user);
+  }
 
   const chatId = message.chat.id;
   user = await reloadUser(user.id);

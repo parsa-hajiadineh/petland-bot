@@ -129,7 +129,12 @@ model Category {
   title        String
   createdAt    DateTime  @default(now())
 
+  tenantId     String?
+  tenant       Tenant?   @relation("TenantCategories", fields: [tenantId], references: [id])
+
   products     Product[]
+
+  @@index([tenantId])
 }
 
 model Product {
@@ -366,6 +371,7 @@ model Tenant {
   customers       Customer[]
   products        TenantProduct[]
   ownProducts     Product[]        @relation("TenantOwnProducts")
+  categories      Category[]       @relation("TenantCategories")
   orders          Order[]
   settings        TenantSettings?
   bot             Bot?
@@ -454,6 +460,11 @@ model TenantSettings {
 
   profitPercent  Int?
   minOrderAmount Int?
+
+  logoFileId       String?
+  shopDescription  String?
+  shopAddress      String?
+  openingHours     String?
 
   tenantId       String   @unique
   tenant         Tenant   @relation(fields: [tenantId], references: [id])

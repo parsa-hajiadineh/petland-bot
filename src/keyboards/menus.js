@@ -156,6 +156,15 @@ const BTN = {
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
+  SHOP_ADMIN: "⚙️ مدیریت فروشگاه",
+  SHOP_PROFILE: "🏪 مشخصات فروشگاه",
+  SHOP_LOGO: "🖼 لوگو",
+  SHOP_WELCOME: "💬 پیام خوش‌آمد",
+  SHOP_BANK: "💳 کارت بانکی",
+  SHOP_CATEGORIES: "📂 دسته‌بندی‌ها",
+  SHOP_PRODUCTS: "📦 کالاهای فروشگاه",
+  SHOP_ADD_CATEGORY: "➕ دسته جدید",
+  SHOP_ADD_PRODUCT: "➕ کالای جدید",
   APPROVE: "✅ تایید فاکتور",
   REJECT: "❌ رد فاکتور",
   PACK: "📦 بسته‌بندی شد",
@@ -206,11 +215,54 @@ function mainMenu(user) {
   return kb(rows);
 }
 
-function tenantMainMenu() {
+function tenantMainMenu(isOwner) {
+  const rows = [[{ text: BTN.PRODUCTS }], [{ text: BTN.HELP }]];
+  if (isOwner) rows.push([{ text: BTN.SHOP_ADMIN }]);
+  rows.push([{ text: BTN.BACK_MAIN }]);
+  return kb(rows);
+}
+
+function tenantAdminMenu() {
   return kb([
-    [{ text: BTN.PRODUCTS }],
-    [{ text: BTN.HELP }],
+    [{ text: BTN.SHOP_PROFILE }, { text: BTN.SHOP_LOGO }],
+    [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_BANK }],
+    [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
     [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function tenantProfileMenu() {
+  return kb([
+    [{ text: "✏️ نام فروشگاه" }],
+    [{ text: "✏️ توضیحات" }],
+    [{ text: "✏️ شماره تماس" }],
+    [{ text: "✏️ آدرس" }],
+    [{ text: "✏️ ساعات کاری" }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function tenantBankMenu() {
+  return kb([
+    [{ text: "✏️ شماره کارت" }],
+    [{ text: "✏️ شبا" }],
+    [{ text: "✏️ صاحب حساب" }],
+    [{ text: "✏️ نام بانک" }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function tenantProductsMenu() {
+  return kb([
+    [{ text: BTN.SHOP_ADD_PRODUCT }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function tenantCategoriesMenu() {
+  return kb([
+    [{ text: BTN.SHOP_ADD_CATEGORY }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -357,6 +409,11 @@ module.exports = {
   inlineKb,
   mainMenu,
   tenantMainMenu,
+  tenantAdminMenu,
+  tenantProfileMenu,
+  tenantBankMenu,
+  tenantProductsMenu,
+  tenantCategoriesMenu,
   backMain,
   productDetailMenu,
   productCategoriesMenu,
