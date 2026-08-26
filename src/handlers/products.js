@@ -75,7 +75,7 @@ function productRow(product, wholesale) {
 async function sendProductInlineList(user, chatId, products, header) {
   const wholesale = isWholesaleUser(user);
   const rows = products.map((product) => productRow(product, wholesale));
-    const chunkSize = 10;
+  const chunkSize = 10;
   let lastId = null;
 
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -254,14 +254,24 @@ module.exports.showProduct = async function showProduct(
   product
 ) {
   const wholesale = isWholesaleUser(user);
-  const price = getUnitPrice(product, wholesale);
+  let price = 0;
+  try {
+    price = getUnitPrice(product, wholesale) || 0;
+  } catch (err) {
+    console.error("PRODUCT PRICE:", err);
+    price = Number(product.costPrice) || 0;
+  }
   const status =
     product.status === "AVAILABLE" ? "🟢 موجود" : "🔴 ناموجود";
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastProductCode: product.code },
-  });
+  try {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastProductCode: product.code },
+    });
+  } catch (err) {
+    console.error("LAST PRODUCT CODE:", err);
+  }
 
   const caption = `📦 ${product.title}
 
@@ -279,21 +289,32 @@ ${
     : "این محصول ناموجود است."
 }`;
 
+  const menu = productDetailMenu(product);
+
   if (product.imageUrl) {
-    await replyPhoto(
-      user,
-      chatId,
-      product.imageUrl,
-      caption,
-      productDetailMenu(product)
-    );
-  } else {
-    await reply(
-      user,
-      chatId,
-      caption,
-      productDetailMenu(product)
-    );
+    try {
+      const photoCaption =
+        caption.length > 1000 ? `${caption.slice(0, 997)}…` : caption;
+      const photoResult = await replyPhoto(
+        user,
+        chatId,
+        product.imageUrl,
+        photoCaption,
+        menu
+      );
+      if (photoResult?.ok || photoResult?.result?.message_id) {
+        return;
+      }
+    } catch (err) {
+      console.error("PRODUCT PHOTO:", err);
+    }
+  }
+
+  try {
+    await reply(user, chatId, caption, menu);
+  } catch (err) {
+    console.error("PRODUCT TEXT:", err);
+    await bale.sendMessage(chatId, caption);
   }
 };
 
