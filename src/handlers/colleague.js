@@ -6,7 +6,11 @@ const {
 const { reply } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
-const { provisionShop } = require("../services/shopProvision");
+const {
+  provisionShop,
+  findOwnedTenant,
+  persistColleagueShop,
+} = require("../services/shopProvision");
 
 const PROFILE_STEPS = [
   "COLLEAGUE_NAME",
@@ -47,11 +51,6 @@ function shopModeLabel(mode) {
   return "نامشخص";
 }
 
-function tenantTypeFor(mode) {
-  if (mode === "ONLINE") return "ONLINE_SHOP";
-  return "PET_SHOP";
-}
-
 function profileData(user) {
   const mode = user.tempProvince || "";
   return {
@@ -84,25 +83,8 @@ function summaryText(user) {
   return lines.join("\n");
 }
 
-async function getOwnedTenant(userId) {
-  try {
-    const tenant = await prisma.tenant.findUnique({
-      where: { ownerUserId: userId },
-    });
-    if (!tenant) return null;
-    try {
-      tenant.bot = await prisma.bot.findUnique({
-        where: { tenantId: tenant.id },
-      });
-    } catch (err) {
-      console.error("BOT LOOKUP SKIP:", err.message);
-      tenant.bot = null;
-    }
-    return tenant;
-  } catch (err) {
-    console.error("TENANT LOOKUP SKIP:", err.message);
-    return null;
-  }
+async function persistColleague(user) {
+  return persistColleagueShop(user, profileData(user));
 }
 
 async function askStep(user, chatId, step) {
@@ -188,153 +170,6 @@ async function goProfileBack(user, chatId) {
   return askStep(user, chatId, "COLLEAGUE_NAME");
 }
 
-async function persistColleague(user) {
-  const d = profileData(user);
-  if (!d.fullName || !d.phone || !d.brand) {
-    return { ok: false };
-  }
-
-  const tenantFields = {
-    name: d.brand,
-    type: tenantTypeFor(d.mode),
-    status: "ACTIVE",
-    ownerName: d.fullName,
-    phone: d.phone,
-    address: d.mode === "ONLINE" ? null : d.address || null,
-    pageName: d.mode === "PHYSICAL" ? null : d.page || null,
-    pageDetails: d.mode === "PHYSICAL" ? null : d.page || null,
-    description: d.mode === "BOTH" ? "ONLINE+PHYSICAL" : null,
-  };
-
-  const coreFields = {
-    name: d.brand,
-    type: "PET_SHOP",
-    status: "ACTIVE",
-    ownerName: d.fullName,
-    phone: d.phone,
-    address: d.address || null,
-    ownerUserId: user.id,
-  };
-
-  let tenant = null;
-  try {
-    tenant = await prisma.tenant.findUnique({
-      where: { ownerUserId: user.id },
-    });
-  } catch (err) {
-    console.error("TENANT FIND SKIP:", err.message);
-  }
-
-  try {
-    if (tenant) {
-      try {
-        tenant = await prisma.tenant.update({
-          where: { id: tenant.id },
-          data: tenantFields,
-        });
-      } catch (err) {
-        console.error("TENANT UPDATE FULL:", err.message);
-        tenant = await prisma.tenant.update({
-          where: { id: tenant.id },
-          data: {
-            name: d.brand,
-            ownerName: d.fullName,
-            phone: d.phone,
-            address: d.address || null,
-          },
-        });
-      }
-    } else {
-      try {
-        tenant = await prisma.tenant.create({
-          data: {
-            ...tenantFields,
-            ownerUserId: user.id,
-          },
-        });
-      } catch (err) {
-        console.error("TENANT CREATE FULL:", err.message);
-        tenant = await prisma.tenant.create({
-          data: coreFields,
-        });
-      }
-    }
-  } catch (err) {
-    console.error("COLLEAGUE PROFILE SAVE:", err);
-    try {
-      tenant = await prisma.tenant.findFirst({
-        where: { ownerUserId: user.id },
-      });
-    } catch (findErr) {
-      console.error("TENANT FIND AFTER SAVE SKIP:", findErr.message);
-    }
-    if (!tenant) return { ok: false };
-  }
-
-  try {
-    await prisma.tenantSettings.upsert({
-      where: { tenantId: tenant.id },
-      create: {
-        tenantId: tenant.id,
-        shopName: d.brand,
-        supportPhone: d.phone,
-      },
-      update: {
-        shopName: d.brand,
-        supportPhone: d.phone,
-      },
-    });
-  } catch (err) {
-    console.error("COLLEAGUE SETTINGS SKIP:", err.message);
-  }
-
-  try {
-    await prisma.tenantMember.upsert({
-      where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
-      create: {
-        tenantId: tenant.id,
-        userId: user.id,
-        role: "OWNER",
-      },
-      update: { role: "OWNER" },
-    });
-  } catch (err) {
-    console.error("COLLEAGUE MEMBER SKIP:", err.message);
-  }
-
-  try {
-    const existingCustomer = await prisma.customer.findFirst({
-      where: { userId: user.id, tenantId: tenant.id, type: "COLLEAGUE" },
-    });
-    const customerData = {
-      fullName: d.fullName,
-      phone: d.phone,
-      shopName: d.brand,
-      address: d.mode === "ONLINE" ? null : d.address || null,
-      notes: d.mode === "PHYSICAL" ? null : d.page || null,
-    };
-    if (existingCustomer) {
-      await prisma.customer.update({
-        where: { id: existingCustomer.id },
-        data: customerData,
-      });
-    } else {
-      await prisma.customer.create({
-        data: {
-          type: "COLLEAGUE",
-          userId: user.id,
-          tenantId: tenant.id,
-          ...customerData,
-        },
-      });
-    }
-  } catch (err) {
-    console.error("COLLEAGUE CUSTOMER SKIP:", err.message);
-  }
-
-  return { ok: true, tenant };
-}
-
 async function startProfile(user, chatId) {
   const d = profileData(user);
   if (!d.fullName) return askStep(user, chatId, "COLLEAGUE_NAME");
@@ -357,22 +192,16 @@ async function finishProfile(user, chatId) {
   );
   const saved = await persistColleague(user);
 
-  const hint =
-    "\n\nاگر ربات فروشگاهی می‌خواهید از دکمه «🤖 ساخت ربات فروشگاهی» استفاده کنید.";
-
   if (!saved.ok) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: null },
-    });
-    user.orderStep = null;
     await reply(
       user,
       chatId,
       `اطلاعات روی حساب شما ماند، ولی فروشگاه در دیتابیس ذخیره نشد.
 
-${snapshot}${hint}`,
-      mainMenu(user)
+${snapshot}
+
+دوباره «تأیید و ثبت» را بزنید. اگر باز هم همین پیام آمد، روی سرور باید prisma db push اجرا شود.`,
+      confirmMenu()
     );
     return;
   }
@@ -380,31 +209,33 @@ ${snapshot}${hint}`,
   await prisma.user.update({
     where: { id: user.id },
     data: {
-      orderStep: null,
       tempDescription: null,
       tempAddress: null,
       tempProvince: null,
       tempCity: null,
     },
   });
-  user.orderStep = null;
 
   await reply(
     user,
     chatId,
     `✅ اطلاعات همکار ثبت شد.
 
-${snapshot}${hint}`,
-    mainMenu(user)
+${snapshot}`
   );
+  await startBotCreate(user, chatId, saved.tenant.id);
 }
 
-async function startBotCreate(user, chatId) {
+async function startBotCreate(user, chatId, tenantId) {
   await prisma.user.update({
     where: { id: user.id },
-    data: { orderStep: "BOT_CREATE_TOKEN" },
+    data: {
+      orderStep: "BOT_CREATE_TOKEN",
+      ...(tenantId ? { pendingOrderId: tenantId } : {}),
+    },
   });
   user.orderStep = "BOT_CREATE_TOKEN";
+  if (tenantId) user.pendingOrderId = tenantId;
 
   await reply(
     user,
@@ -433,7 +264,7 @@ async function registerBot(user, chatId, rawToken) {
   if (result.code === "ALREADY_HAS_BOT") {
     await prisma.user.update({
       where: { id: user.id },
-      data: { orderStep: null },
+      data: { orderStep: null, pendingOrderId: null },
     });
     const at = result.username ? `: @${result.username}` : "";
     await reply(
@@ -461,7 +292,7 @@ async function registerBot(user, chatId, rawToken) {
     if (clearStep) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { orderStep: null },
+        data: { orderStep: null, pendingOrderId: null },
       });
     }
     await reply(user, chatId, msg, clearStep ? mainMenu(user) : backMain());
@@ -470,7 +301,7 @@ async function registerBot(user, chatId, rawToken) {
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { orderStep: null },
+    data: { orderStep: null, pendingOrderId: null },
   });
 
   const at = result.username ? `@${result.username}` : "ربات شما";
@@ -545,7 +376,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   if (text === BTN.CREATE_SHOP_BOT) {
     if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
 
-    const tenant = await getOwnedTenant(user.id);
+    const tenant = await findOwnedTenant(user.id);
     if (tenant?.bot) {
       await reply(
         user,
@@ -558,7 +389,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       return true;
     }
     if (tenant) {
-      await startBotCreate(user, chatId);
+      await startBotCreate(user, chatId, tenant.id);
       return true;
     }
 
@@ -566,7 +397,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     if (d.fullName && d.phone && d.brand) {
       const saved = await persistColleague(user);
       if (saved.ok) {
-        await startBotCreate(user, chatId);
+        await startBotCreate(user, chatId, saved.tenant.id);
         return true;
       }
     }
@@ -616,7 +447,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 • فاکتور برای مشتریان همکاران ارسال نمی‌شود — فاکتور فقط در همین چت قابل مشاهده است`
     );
 
-    const tenant = await getOwnedTenant(user.id);
+    const tenant = await findOwnedTenant(user.id);
     if (!tenant) {
       await startProfile(user, chatId);
     } else {

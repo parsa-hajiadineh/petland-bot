@@ -147,8 +147,9 @@ src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
 - پاک کردن همهٔ پیام‌های اینلاین با برگشت / منو / محصولات / سبد / جستجو / راهنما / پشتیبانی / سفارش‌ها
 - `select` صریح روی Product
 - ادمین نباید دکمهٔ منوی اصلی را به‌عنوان کد سفارش قورت بدهد
-- همکار: کد دسترسی → نام، تلفن، برند، آنلاین یا آدرس → Tenant + Customer + TenantSettings + TenantMember OWNER
-- `🤖 ساخت ربات فروشگاهی` → پروفایل (اگر نبود) → توکن → `provisionShop` → ربات آماده تحویل
+- همکار: کد دسترسی → نام، تلفن، برند، آنلاین/حضوری/هر دو → تأیید → `Tenant` (اگر ستون `ownerUserId`/`pageName` روی لیارا نباشد، بدون آن‌ها ذخیره و با TenantMember وصل می‌شود) + Customer + TenantSettings + TenantMember OWNER
+- بعد از تأیید موفق، همان لحظه توکن BotFather خواسته می‌شود
+- `🤖 ساخت ربات فروشگاهی` → اگر Tenant باشد توکن؛ وگرنه پروفایل → توکن → `provisionShop`
 - `loadProductByCode` باید **بعد از** `module.exports = async function productsHandler` ست شود
 
 ### تننت
