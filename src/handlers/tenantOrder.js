@@ -29,12 +29,6 @@ const {
   buildTenantShippingInfo,
 } = require("../utils/invoice");
 
-const SHOP_ORDER_SELECT = {
-  ...ORDER_WITH_ITEMS_SELECT,
-  tenantId: true,
-  botId: true,
-};
-
 const QTY_STEP = "TCK:QTY";
 const RECEIPT_STEP = "TCK:RECEIPT";
 
@@ -118,6 +112,71 @@ async function notifyCustomer(order, message) {
   } catch (err) {
     console.error("SHOP CUSTOMER NOTIFY:", err.message);
   }
+}
+
+function tsOrderQueries(whereExtra) {
+  const ctx = getBotContext();
+  const base = {
+    trackingCode: { startsWith: "TS-" },
+    ...whereExtra,
+  };
+  const queries = [];
+  if (ctx.tenantId) {
+    queries.push({ ...base, tenantId: ctx.tenantId });
+    queries.push({
+      ...base,
+      items: { some: { product: { tenantId: ctx.tenantId } } },
+    });
+  }
+  queries.push(base);
+  return { queries, tenantId: ctx.tenantId };
+}
+
+async function findTsOrders(whereExtra, select, take = 20) {
+  const { queries, tenantId } = tsOrderQueries(whereExtra);
+  let lastErr;
+  let scopedOk = false;
+  for (let i = 0; i < queries.length; i++) {
+    const isLast = i === queries.length - 1;
+    if (isLast && scopedOk && tenantId) return [];
+    try {
+      const rows = await prisma.order.findMany({
+        where: queries[i],
+        orderBy: { createdAt: "desc" },
+        take,
+        select,
+      });
+      if (!isLast) scopedOk = true;
+      if (rows.length || isLast) return rows;
+    } catch (err) {
+      lastErr = err;
+      console.error("TENANT ORDERS QUERY SKIP:", err.message);
+    }
+  }
+  if (lastErr) throw lastErr;
+  return [];
+}
+
+async function findTsOrder(whereExtra, select) {
+  const { queries } = tsOrderQueries(whereExtra);
+  let lastErr;
+  let ok = false;
+  for (const where of queries) {
+    try {
+      const row = await prisma.order.findFirst({
+        where,
+        orderBy: { createdAt: "desc" },
+        select,
+      });
+      ok = true;
+      if (row) return row;
+    } catch (err) {
+      lastErr = err;
+      console.error("TENANT ORDER QUERY SKIP:", err.message);
+    }
+  }
+  if (!ok && lastErr) throw lastErr;
+  return null;
 }
 
 async function createTenantOrder(user, data, retries = 4) {
@@ -556,21 +615,13 @@ module.exports.startNewAddress = async function startNewAddress(user, chatId) {
 };
 
 module.exports.promptReceipt = async function promptReceipt(user, chatId) {
-  const ctx = getBotContext();
   let pendingId = user.pendingOrderId;
   if (!pendingId) {
-    const pending = await prisma.order.findFirst({
-      where: {
-        userId: user.id,
-        status: "WAITING_PAYMENT",
-        trackingCode: { startsWith: "TS-" },
-      },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, tenantId: true },
-    });
-    if (pending && (!pending.tenantId || pending.tenantId === ctx.tenantId)) {
-      pendingId = pending.id;
-    }
+    const pending = await findTsOrder(
+      { userId: user.id, status: "WAITING_PAYMENT" },
+      { id: true }
+    );
+    pendingId = pending?.id;
   }
   if (!pendingId) {
     await reply(user, chatId, "سفارشی در انتظار پرداخت ندارید.", await shopMenu(user));
@@ -580,6 +631,8 @@ module.exports.promptReceipt = async function promptReceipt(user, chatId) {
     where: { id: user.id },
     data: { orderStep: RECEIPT_STEP, pendingOrderId: pendingId },
   });
+  user.orderStep = RECEIPT_STEP;
+  user.pendingOrderId = pendingId;
   await reply(user, chatId, "📸 لطفاً اسکرین‌شات رسید پرداخت را ارسال کنید.");
 };
 
@@ -588,21 +641,32 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
   chatId,
   photo
 ) {
-  if (user.orderStep !== RECEIPT_STEP || !user.pendingOrderId) return false;
   const ctx = getBotContext();
-  const fileId = photo[photo.length - 1].file_id;
+  const fileId =
+    photo[photo.length - 1]?.file_id || photo[photo.length - 1]?.fileId;
+  if (!fileId) return false;
+
+  const waitingReceipt =
+    user.orderStep === RECEIPT_STEP || user.orderStep === "UPLOAD_RECEIPT";
+  if (!waitingReceipt) return false;
+
+  let pendingId = user.pendingOrderId;
+  if (!pendingId) {
+    const pending = await findTsOrder(
+      { userId: user.id, status: "WAITING_PAYMENT" },
+      { id: true }
+    );
+    if (!pending) return false;
+    pendingId = pending.id;
+  }
+
   let order;
   try {
-    const existing = await prisma.order.findFirst({
-      where: {
-        id: user.pendingOrderId,
-        userId: user.id,
-        trackingCode: { startsWith: "TS-" },
-      },
-      select: { id: true, tenantId: true },
-    });
+    const existing = await findTsOrder(
+      { id: pendingId, userId: user.id },
+      { id: true }
+    );
     if (!existing) return false;
-    if (existing.tenantId && existing.tenantId !== ctx.tenantId) return false;
     order = await prisma.order.update({
       where: { id: existing.id },
       data: { receiptImage: fileId, status: "WAITING_APPROVAL" },
@@ -640,36 +704,17 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
 };
 
 module.exports.showMyOrders = async function showMyOrders(user, chatId) {
-  const ctx = getBotContext();
   let orders;
   try {
-    orders = await prisma.order.findMany({
-      where: {
-        userId: user.id,
-        trackingCode: { startsWith: "TS-" },
-        ...(ctx.tenantId ? { tenantId: ctx.tenantId } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-      select: ORDER_WITH_ITEMS_SELECT,
-    });
+    orders = await findTsOrders(
+      { userId: user.id },
+      ORDER_WITH_ITEMS_SELECT,
+      10
+    );
   } catch (err) {
     console.error("TENANT MY ORDERS:", err);
-    try {
-      orders = await prisma.order.findMany({
-        where: {
-          userId: user.id,
-          trackingCode: { startsWith: "TS-" },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-        select: ORDER_WITH_ITEMS_SELECT,
-      });
-    } catch (err2) {
-      console.error("TENANT MY ORDERS FALLBACK:", err2);
-      await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد.", await shopMenu(user));
-      return;
-    }
+    await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد.", await shopMenu(user));
+    return;
   }
 
   if (!orders.length) {
@@ -751,18 +796,15 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
 
 async function loadShopOrder(orderId, tenantId) {
   try {
-    const order = await prisma.order.findFirst({
-      where: {
-        id: orderId,
-        trackingCode: { startsWith: "TS-" },
-      },
-      select: {
-        ...SHOP_ORDER_SELECT,
+    const order = await findTsOrder(
+      { id: orderId },
+      {
+        ...ORDER_WITH_ITEMS_SELECT,
         user: { select: { fullName: true, baleId: true } },
-      },
-    });
+      }
+    );
     if (!order) return null;
-    if (order.tenantId && order.tenantId !== tenantId) return null;
+    if (order.tenantId && tenantId && order.tenantId !== tenantId) return null;
     return order;
   } catch (err) {
     console.error("LOAD SHOP ORDER:", err.message);
@@ -779,7 +821,6 @@ function ownerActions(order) {
 }
 
 module.exports.showShopOrders = async function showShopOrders(user, chatId) {
-  const ctx = getBotContext();
   await prisma.user.update({
     where: { id: user.id },
     data: { adminStep: "TS:ORDERS", pendingOrderId: null },
@@ -789,21 +830,17 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
 
   let orders = [];
   try {
-    orders = await prisma.order.findMany({
-      where: {
-        trackingCode: { startsWith: "TS-" },
-        ...(ctx.tenantId ? { tenantId: ctx.tenantId } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
+    orders = await findTsOrders(
+      {},
+      {
         id: true,
         trackingCode: true,
         status: true,
         totalAmount: true,
         fullName: true,
       },
-    });
+      20
+    );
   } catch (err) {
     console.error("SHOP ORDERS LIST:", err);
     await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد.", tenantAdminMenu());
