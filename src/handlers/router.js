@@ -179,6 +179,7 @@ module.exports = async function messageHandler(message, user) {
           status: "WAITING_PAYMENT",
         },
         orderBy: { createdAt: "desc" },
+        select: { id: true },
       });
       pendingId = pending?.id;
     }

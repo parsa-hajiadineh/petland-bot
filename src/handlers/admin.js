@@ -1,5 +1,6 @@
 const fs = require("fs");
 const prisma = require("../database/prisma");
+const { ORDER_WITH_ITEMS_SELECT } = require("../database/selects");
 const bale = require("../bot/bale");
 const { reply, notify, replyPhoto } = require("../bot/messenger");
 const {
@@ -38,9 +39,16 @@ async function calcMonthStats(yearMonth) {
       createdAt: { gte: start, lt: end },
       status: { in: ["APPROVED", "PACKAGING", "SHIPPED", "DELIVERED"] },
     },
-    include: {
-      items: { include: { product: { select: { costPrice: true } } } },
+    select: {
+      totalAmount: true,
       user: { select: { referrerId: true } },
+      items: {
+        select: {
+          quantity: true,
+          unitPrice: true,
+          product: { select: { costPrice: true } },
+        },
+      },
     },
   });
 
@@ -93,38 +101,41 @@ async function archiveOldMonths() {
 }
 
 async function showSalesStats(user, chatId) {
-  await archiveOldMonths();
+  try {
+    await archiveOldMonths();
 
-  const now = new Date();
-  const currentYM = toYearMonth(now);
+    const now = new Date();
+    const currentYM = toYearMonth(now);
 
-  const reports = await prisma.monthlySalesReport.findMany({
-    orderBy: { yearMonth: "desc" },
-    take: 6,
-  });
+    const reports = await prisma.monthlySalesReport.findMany({
+      orderBy: { yearMonth: "desc" },
+      take: 6,
+    });
 
-  const rows = [];
+    const rows = [];
 
-  // Current month (live)
-  rows.push([{
-    text: `📊 ${formatMonthLabel(currentYM)} (جاری)`,
-    callback_data: `stats:${currentYM}:live`,
-  }]);
-
-  // Archived months
-  for (const r of reports) {
     rows.push([{
-      text: `📅 ${formatMonthLabel(r.yearMonth)}`,
-      callback_data: `stats:${r.yearMonth}:arch`,
+      text: `📊 ${formatMonthLabel(currentYM)} (جاری)`,
+      callback_data: `stats:${currentYM}:live`,
     }]);
-  }
 
-  await reply(
-    user,
-    chatId,
-    "📊 آمار فروش\n\nماه مورد نظر را انتخاب کنید:",
-    inlineKb(rows)
-  );
+    for (const r of reports) {
+      rows.push([{
+        text: `📅 ${formatMonthLabel(r.yearMonth)}`,
+        callback_data: `stats:${r.yearMonth}:arch`,
+      }]);
+    }
+
+    await reply(
+      user,
+      chatId,
+      "📊 آمار فروش\n\nماه مورد نظر را انتخاب کنید:",
+      inlineKb(rows)
+    );
+  } catch (err) {
+    console.error("SALES STATS:", err);
+    await reply(user, chatId, "خواندن آمار فروش ممکن نشد.", adminMenu());
+  }
 }
 
 module.exports.showMonthStats = async function showMonthStats(
@@ -133,37 +144,42 @@ module.exports.showMonthStats = async function showMonthStats(
   yearMonth,
   isLive
 ) {
-  let stats;
+  try {
+    let stats;
 
-  if (isLive) {
-    stats = await calcMonthStats(yearMonth);
-  } else {
-    const report = await prisma.monthlySalesReport.findUnique({
-      where: { yearMonth },
-    });
-    if (!report) {
-      await reply(user, chatId, "❌ آمار این ماه موجود نیست.", adminMenu());
-      return;
+    if (isLive) {
+      stats = await calcMonthStats(yearMonth);
+    } else {
+      const report = await prisma.monthlySalesReport.findUnique({
+        where: { yearMonth },
+      });
+      if (!report) {
+        await reply(user, chatId, "❌ آمار این ماه موجود نیست.", adminMenu());
+        return;
+      }
+      stats = report;
     }
-    stats = report;
+
+    const label = formatMonthLabel(yearMonth);
+    const currentNote = isLive ? " (در جریان)" : "";
+
+    const netProfit = stats.totalProfit - stats.totalCommission;
+
+    const text = [
+      `📊 آمار فروش — ${label}${currentNote}`,
+      "━━━━━━━━━━━━━━━━━━",
+      `🛒 تعداد سفارشات: ${stats.orderCount}`,
+      `💰 حجم فروش: ${stats.totalRevenue.toLocaleString("fa-IR")} تومان`,
+      `📈 سود ناخالص: ${stats.totalProfit.toLocaleString("fa-IR")} تومان`,
+      `🎁 مجموع پورسانت: ${stats.totalCommission.toLocaleString("fa-IR")} تومان`,
+      `✅ سود خالص: ${netProfit.toLocaleString("fa-IR")} تومان`,
+    ].join("\n");
+
+    await reply(user, chatId, text, adminMenu());
+  } catch (err) {
+    console.error("MONTH STATS:", err);
+    await reply(user, chatId, "خواندن آمار این ماه ممکن نشد.", adminMenu());
   }
-
-  const label = formatMonthLabel(yearMonth);
-  const currentNote = isLive ? " (در جریان)" : "";
-
-  const netProfit = stats.totalProfit - stats.totalCommission;
-
-  const text = [
-    `📊 آمار فروش — ${label}${currentNote}`,
-    "━━━━━━━━━━━━━━━━━━",
-    `🛒 تعداد سفارشات: ${stats.orderCount}`,
-    `💰 حجم فروش: ${stats.totalRevenue.toLocaleString("fa-IR")} تومان`,
-    `📈 سود ناخالص: ${stats.totalProfit.toLocaleString("fa-IR")} تومان`,
-    `🎁 مجموع پورسانت: ${stats.totalCommission.toLocaleString("fa-IR")} تومان`,
-    `✅ سود خالص: ${netProfit.toLocaleString("fa-IR")} تومان`,
-  ].join("\n");
-
-  await reply(user, chatId, text, adminMenu());
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,13 +192,24 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
   const take = 10;
   const paginated = !!morePrefix;
 
-  const orders = await prisma.order.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    skip: offset,
-    take: paginated ? take + 1 : 50,
-    include: { user: true },
-  });
+  let orders;
+  try {
+    orders = await prisma.order.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: offset,
+      take: paginated ? take + 1 : 50,
+      select: {
+        id: true,
+        totalAmount: true,
+        user: { select: { fullName: true, baleId: true } },
+      },
+    });
+  } catch (err) {
+    console.error("ADMIN ORDERS LIST:", err);
+    await reply(user, chatId, "خواندن فاکتورها ممکن نشد.", adminMenu());
+    return;
+  }
 
   if (!orders.length) {
     const msg = offset > 0 ? "فاکتور دیگری وجود ندارد." : `${title}\n\nموردی وجود ندارد.`;
@@ -362,7 +389,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   try {
     order = await prisma.order.findUnique({
       where: { trackingCode: text.trim() },
-      include: { items: { include: { product: true } } },
+      select: ORDER_WITH_ITEMS_SELECT,
     });
   } catch (err) {
     console.error("ADMIN ORDER LOOKUP SKIP:", err.message);
@@ -402,7 +429,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     const order = await prisma.order.update({
       where: { id: user.pendingOrderId },
       data: { status: "SHIPPED", shipmentInfo: text },
-      include: { items: { include: { product: true } } },
+      select: ORDER_WITH_ITEMS_SELECT,
     });
 
     await prisma.user.update({
@@ -419,7 +446,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     const order = await prisma.order.update({
       where: { id: user.pendingOrderId },
       data: { status: "SHIPPED", shipmentInfo: `اسنپ | ${text}` },
-      include: { items: { include: { product: true } } },
+      select: ORDER_WITH_ITEMS_SELECT,
     });
 
     await prisma.user.update({
@@ -436,7 +463,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     const order = await prisma.order.update({
       where: { id: user.pendingOrderId },
       data: { status: "SHIPPED", shipmentInfo: `پست | کد پیگیری: ${text}` },
-      include: { items: { include: { product: true } } },
+      select: ORDER_WITH_ITEMS_SELECT,
     });
 
     await prisma.user.update({
@@ -521,7 +548,7 @@ async function approveOrder(user, chatId) {
   const order = await prisma.order.update({
     where: { id: user.pendingOrderId },
     data: { status: "PACKAGING" },
-    include: { items: { include: { product: true } } },
+    select: ORDER_WITH_ITEMS_SELECT,
   });
 
   await notifyOrderStatus(order, "✅ فاکتور تایید شد. در حال آماده‌سازی.");
@@ -574,7 +601,7 @@ async function approveOrder(user, chatId) {
 module.exports.viewOrderById = async function viewOrderById(user, chatId, orderId) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    include: { items: { include: { product: true } } },
+    select: ORDER_WITH_ITEMS_SELECT,
   });
   if (!order) {
     await reply(user, chatId, "فاکتور پیدا نشد.", adminMenu());

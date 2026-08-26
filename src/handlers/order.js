@@ -1,4 +1,5 @@
 const prisma = require("../database/prisma");
+const { ORDER_WITH_ITEMS_SELECT, CART_ITEMS_SELECT } = require("../database/selects");
 const { ADMIN_BALE_IDS } = require("../config");
 const { reply, notify } = require("../bot/messenger");
 const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu } = require("../keyboards/menus");
@@ -163,7 +164,7 @@ async function finalizeOrder(user, chatId, description) {
     include: {
       cart: {
         include: {
-          items: { include: { product: true } },
+          items: { select: CART_ITEMS_SELECT },
         },
       },
     },
@@ -201,9 +202,7 @@ async function finalizeOrder(user, chatId, description) {
         })),
       },
     },
-    include: {
-      items: { include: { product: true } },
-    },
+    select: ORDER_WITH_ITEMS_SELECT,
   });
 
   await prisma.cartItem.deleteMany({
@@ -370,9 +369,7 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
       receiptImage: fileId,
       status: "WAITING_APPROVAL",
     },
-    include: {
-      items: { include: { product: true } },
-    },
+    select: ORDER_WITH_ITEMS_SELECT,
   });
 
   await prisma.user.update({
@@ -407,14 +404,19 @@ ${summary}
 };
 
 module.exports.showMyOrders = async function showMyOrders(user, chatId) {
-  const orders = await prisma.order.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    take: 10,
-    include: {
-      items: { include: { product: true } },
-    },
-  });
+  let orders;
+  try {
+    orders = await prisma.order.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      select: ORDER_WITH_ITEMS_SELECT,
+    });
+  } catch (err) {
+    console.error("SHOW MY ORDERS:", err);
+    await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد. لطفاً دوباره تلاش کنید.", backMain());
+    return;
+  }
 
   if (!orders.length) {
     await reply(user, chatId, "📦 هنوز سفارشی ثبت نکرده‌اید.", backMain());
@@ -455,9 +457,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
       trackingCode: code.trim(),
       userId: user.id,
     },
-    include: {
-      items: { include: { product: true } },
-    },
+    select: ORDER_WITH_ITEMS_SELECT,
   });
 
   if (!order) return false;

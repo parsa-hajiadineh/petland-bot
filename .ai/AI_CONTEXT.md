@@ -208,7 +208,7 @@ PUBLIC_BASE_URL            # مثلا https://YOUR-APP.liara.run — اگر خا
 2. ربات تننت هرگز درخت محصول / منوی همکار / ادمین پت‌لند را نبیند.
 3. اول `module.exports = function`، بعد exportهای کمکی (`loadProductByCode`, `clearProductListMessages`, …).
 4. روی شل زندهٔ لیارا `prisma generate` نزن.
-5. کاتالوگ مادر را با `motherCatalogWhere` فیلتر کن.
+5. کاتالوگ مادر را با `motherCatalogWhere` فیلتر کن. سبد/سفارش/فاکتور ادمین هم `select` صریح بدون `tenantId` (`src/database/selects.js`).
 6. توکن ربات را لاگ نکن.
 7. اسکیما را additive نگه دار مگر اینکه صریحاً خواسته شود.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان استفاده نشود.

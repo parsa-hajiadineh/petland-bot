@@ -1,4 +1,5 @@
 const prisma = require("../database/prisma");
+const { CART_ITEMS_SELECT } = require("../database/selects");
 const { reply } = require("../bot/messenger");
 const { BTN, cartMenu, backMain } = require("../keyboards/menus");
 const {
@@ -15,7 +16,7 @@ async function getCartWithItems(userId) {
       cart: {
         include: {
           items: {
-            include: { product: true },
+            select: CART_ITEMS_SELECT,
           },
         },
       },
@@ -33,7 +34,14 @@ function calcCartTotal(items, wholesale) {
 module.exports.getCartTotal = calcCartTotal;
 
 module.exports.showCart = async function showCart(user, chatId) {
-  const data = await getCartWithItems(user.id);
+  let data;
+  try {
+    data = await getCartWithItems(user.id);
+  } catch (err) {
+    console.error("SHOW CART:", err);
+    await reply(user, chatId, "خواندن سبد خرید ممکن نشد. لطفاً دوباره تلاش کنید.", backMain());
+    return;
+  }
 
   if (!data?.cart?.items?.length) {
     await reply(user, chatId, "🛒 سبد خرید شما خالی است.", backMain());
