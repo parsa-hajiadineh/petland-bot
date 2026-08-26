@@ -16,23 +16,33 @@ async function shopMenu(user) {
 }
 
 async function showStart(user, chatId) {
-  const ctx = getBotContext();
-  await ensureShopRuntimeTables().catch((err) => {
-    console.error("SHOP TABLES START:", err.message);
-  });
-  await tenantAdmin.clearTenantAdminState(user);
-  const shop = await tenantAdmin.loadShopView(ctx.tenantId);
-  const text = tenantAdmin.shopIntroText(shop);
-  const menu = await shopMenu(user);
-  if (shop.logoFileId) {
-    try {
-      const sent = await replyPhoto(user, chatId, shop.logoFileId, text, menu);
-      if (sent?.ok || sent?.result?.message_id) return;
-    } catch (err) {
-      console.error("SHOP LOGO START:", err.message);
+  try {
+    const ctx = getBotContext();
+    await ensureShopRuntimeTables().catch((err) => {
+      console.error("SHOP TABLES START:", err.message);
+    });
+    await tenantAdmin.clearTenantAdminState(user);
+    const shop = await tenantAdmin.loadShopView(ctx.tenantId);
+    const text = tenantAdmin.shopIntroText(shop);
+    const menu = await shopMenu(user);
+    if (shop.logoFileId) {
+      try {
+        const sent = await replyPhoto(user, chatId, shop.logoFileId, text, menu);
+        if (sent?.ok || sent?.result?.message_id) return;
+      } catch (err) {
+        console.error("SHOP LOGO START:", err.message);
+      }
     }
+    await reply(user, chatId, text, menu);
+  } catch (err) {
+    console.error("TENANT START:", err);
+    await reply(
+      user,
+      chatId,
+      "🌿 به فروشگاه خوش آمدید\n\nاز منوی زیر استفاده کنید:",
+      tenantMainMenu(false)
+    );
   }
-  await reply(user, chatId, text, menu);
 }
 
 async function showHelp(user, chatId) {
@@ -50,6 +60,24 @@ async function showHelp(user, chatId) {
 }
 
 async function handleMessage(message, user) {
+  try {
+    await handleMessageInner(message, user);
+  } catch (err) {
+    console.error("TENANT MESSAGE:", err);
+    try {
+      await reply(
+        user,
+        message.chat.id,
+        "فروشگاه الان پاسخ داد، ولی یک خطا رخ داد. دوباره /start بزنید.",
+        tenantMainMenu(false)
+      );
+    } catch (replyErr) {
+      console.error("TENANT REPLY FAIL:", replyErr.message);
+    }
+  }
+}
+
+async function handleMessageInner(message, user) {
   const text = (message.text || "").trim();
   const chatId = message.chat.id;
   user = (await reloadUser(user.id)) || user;

@@ -113,7 +113,7 @@ Token → Validate → Ensure Tenant → Create Bot → Load Default Settings
 - پروفایل همکار باید از قبل Tenant را ساخته باشد (نام برند، تلفن، آدرس/پیج). بعد از پروفایل، همان لحظه توکن خواسته می‌شود.
 - Validate: `getMe` — توکن مادر و توکن تکراری رد می‌شوند.
 - Default settings: `shopName`, `welcomeMessage`, `supportPhone`, `profitPercent`.
-- Webhook: اگر `PUBLIC_BASE_URL` ست باشد → `setWebhook(PUBLIC_BASE_URL/webhook/bot/:botId)` و Engine دیگر آن ربات را poll نمی‌کند. اگر نباشد یا setWebhook شکست بخورد → `deleteWebhook` + long polling (ربات باز هم تحویل می‌شود).
+- Webhook: مسیر `/webhook/bot/:botId` هست؛ فعلاً تننت‌ها **long polling** می‌شوند (`deleteWebhook` + `getUpdates`) تا اگر `PUBLIC_BASE_URL` به بله نرسد ربات ساکت نماند.
 - مادر همیشه long polling است.
 - پیام تحویل: «فروشگاه آماده است، @username را /start کنید».
 

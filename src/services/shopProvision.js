@@ -610,22 +610,7 @@ async function connectBot(token, botId) {
     console.error("SET COMMANDS SKIP:", err.message);
   }
 
-  const webhookUrl = tenantWebhookUrl(botId);
-  if (!webhookUrl) {
-    return "poll";
-  }
-
-  try {
-    const result = await bale.setWebhook(token, webhookUrl);
-    if (!result?.ok) {
-      console.error("SET WEBHOOK FAIL:", botId, result?.description || result);
-      return "poll";
-    }
-    return "webhook";
-  } catch (err) {
-    console.error("SET WEBHOOK ERROR:", botId, err.message);
-    return "poll";
-  }
+  return "poll";
 }
 
 async function provisionShop(user, rawToken) {

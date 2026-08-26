@@ -16,7 +16,39 @@ let lastLiveCount = -1;
 
 function tenantWebhookUrl(botId) {
   if (!PUBLIC_BASE_URL) return null;
-  return `${PUBLIC_BASE_URL}/webhook/bot/${botId}`;
+  return `${PUBLIC_BASE_URL.replace(/\/$/, "")}/webhook/bot/${botId}`;
+}
+
+async function loadBotTenant(bot) {
+  let tenant = bot.tenant || null;
+  if (!tenant && bot.tenantId) {
+    try {
+      tenant = await prisma.tenant.findUnique({
+        where: { id: bot.tenantId },
+      });
+    } catch (err) {
+      console.error("TENANT LOAD SKIP:", bot.id, err.message);
+      return null;
+    }
+  }
+  if (!tenant) return null;
+  if (tenant.status === "SUSPENDED" || tenant.status === "INACTIVE") {
+    return null;
+  }
+
+  let settings = tenant.settings || null;
+  if (!settings) {
+    try {
+      settings = await prisma.tenantSettings.findUnique({
+        where: { tenantId: tenant.id },
+      });
+    } catch (err) {
+      console.error("SETTINGS LOAD SKIP:", bot.id, err.message);
+      settings = null;
+    }
+  }
+
+  return { ...tenant, settings };
 }
 
 async function processUpdate(update) {
@@ -87,6 +119,12 @@ async function pollLoop(ctx, state) {
               state.offset = update.update_id + 1;
             }
           }
+        } else {
+          console.error(
+            "GET UPDATES FAIL:",
+            ctx.name,
+            updates?.description || updates?.error_code || "unknown"
+          );
         }
       });
     } catch (err) {
@@ -98,11 +136,15 @@ async function pollLoop(ctx, state) {
   console.log("POLL STOP:", ctx.name);
 }
 
-function startPoller(ctx) {
+async function startPoller(ctx) {
   if (pollers.has(ctx.botId)) return;
   if (!ctx.isMother) {
     hooked.delete(ctx.botId);
-    bale.deleteWebhook(ctx.token).catch(() => {});
+    try {
+      await bale.deleteWebhook(ctx.token);
+    } catch (err) {
+      console.error("DELETE WEBHOOK BEFORE POLL:", err.message);
+    }
   }
   const state = { stopped: false, offset: 0 };
   pollers.set(ctx.botId, { ctx, state });
@@ -120,14 +162,21 @@ function stopPoller(botId) {
 }
 
 async function loadTenantContexts() {
-  const bots = await prisma.bot.findMany({
-    where: { isEnabled: true, status: "ACTIVE" },
-    include: { tenant: { include: { settings: true } } },
-  });
+  let bots = [];
+  try {
+    bots = await prisma.bot.findMany({
+      where: { isEnabled: true, status: "ACTIVE" },
+    });
+  } catch (err) {
+    console.error("BOT LIST SKIP:", err.message);
+    return [];
+  }
 
   const contexts = [];
   for (const bot of bots) {
-    if (!bot.tenant || bot.tenant.status !== "ACTIVE") continue;
+    const tenant = await loadBotTenant(bot);
+    if (!tenant) continue;
+    bot.tenant = tenant;
     try {
       const token = decryptToken(bot.token);
       contexts.push(contextFromTenantBot(bot, token));
@@ -161,7 +210,6 @@ async function syncTenantBots() {
   }
 
   const liveIds = new Set(contexts.map((c) => c.botId));
-  const preferWebhook = Boolean(PUBLIC_BASE_URL);
 
   for (const [botId] of pollers) {
     if (botId === "mother") continue;
@@ -172,43 +220,36 @@ async function syncTenantBots() {
   }
 
   for (const ctx of contexts) {
-    if (preferWebhook) {
-      if (!hooked.has(ctx.botId)) {
-        const ok = await hookTenantBot(ctx);
-        if (ok) continue;
-      } else {
-        continue;
-      }
-    }
-
     const running = pollers.get(ctx.botId);
     if (running) {
       running.ctx.token = ctx.token;
       Object.assign(running.ctx, ctx);
       continue;
     }
-    startPoller(ctx);
+    await startPoller(ctx);
   }
 
   if (liveIds.size !== lastLiveCount) {
     lastLiveCount = liveIds.size;
-    console.log(
-      "TENANT BOTS LIVE:",
-      liveIds.size,
-      preferWebhook ? "(webhook)" : "(poll)"
-    );
+    console.log("TENANT BOTS LIVE:", liveIds.size, "(poll)");
   }
 }
 
 async function handleWebhook(botId, update) {
   if (!botId || !update) return;
 
-  const bot = await prisma.bot.findUnique({
-    where: { id: botId },
-    include: { tenant: { include: { settings: true } } },
-  });
+  let bot;
+  try {
+    bot = await prisma.bot.findUnique({ where: { id: botId } });
+  } catch (err) {
+    console.error("WEBHOOK BOT LOAD:", botId, err.message);
+    return;
+  }
   if (!bot?.isEnabled || bot.status !== "ACTIVE") return;
-  if (!bot.tenant || bot.tenant.status !== "ACTIVE") return;
+
+  const tenant = await loadBotTenant(bot);
+  if (!tenant) return;
+  bot.tenant = tenant;
 
   let token;
   try {
@@ -231,8 +272,14 @@ async function handleWebhook(botId, update) {
 }
 
 async function start() {
+  try {
+    await require("../services/shopProvision").ensureShopRuntimeTables();
+  } catch (err) {
+    console.error("SHOP TABLES START SKIP:", err.message);
+  }
+
   const mother = motherContext();
-  startPoller(mother);
+  await startPoller(mother);
   await runWithContext(mother, () => bale.testBot());
   await syncTenantBots();
   console.log(
@@ -252,4 +299,5 @@ module.exports = {
   syncTenantBots,
   processUpdate,
   handleWebhook,
+  tenantWebhookUrl,
 };
