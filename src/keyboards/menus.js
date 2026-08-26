@@ -121,6 +121,9 @@ const BTN = {
   SUPPORT: "🎫 پشتیبانی",
   HELP: "📖 راهنما",
   COLLEAGUE: "🤝 خرید همکار",
+  CREATE_SHOP_BOT: "🤖 ساخت ربات فروشگاهی",
+  SHOP_ONLINE: "🌐 آنلاین شاپ",
+  SHOP_PHYSICAL: "🏪 فروشگاه حضوری",
   MARKETING: "📣 بازاریابی",
   WALLET: "💰 کیف پول",
   WITHDRAW_NEW: "💳 درخواست برداشت جدید",
@@ -182,6 +185,9 @@ function mainMenu(user) {
   }
 
   if (user.role === "COLLEAGUE") {
+    if (user.ownedTenant) {
+      rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
+    }
     rows.push([{ text: BTN.RETAIL_MODE }]);
   } else {
     rows.push([{ text: BTN.COLLEAGUE }]);

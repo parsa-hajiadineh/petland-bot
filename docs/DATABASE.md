@@ -289,8 +289,11 @@ model Tenant {
   postalCode  String?
   nationalId  String?
   description String?
+  pageName    String?          // نام/مشخصات پیج (آنلاین شاپ)
+  pageDetails String?
 
   ownerUserId String?  @unique   // User همکار مالک
+  ownProducts Product[]          // کاتالوگ اختصاصی Tenant (هر محصولی، نه لزوماً کاتالوگ مادر)
   ...
 }
 ```
@@ -313,15 +316,23 @@ model TenantMember {
 | type | tenantId | معنی |
 |------|----------|------|
 | `RETAIL` | `null` | خریدار خرد از ربات مادر |
-| `COLLEAGUE` | `null` | همکار؛ خرید عمده از ربات مادر |
+| `COLLEAGUE` | Tenant خود همکار | همکار؛ خرید عمده از ربات مادر + پرونده کسب‌وکار |
 | `TENANT_CUSTOMER` | id کلینیک | مشتریِ ربات همان کلینیک |
 
 فیلدهای پروفایل (نام، تلفن، آدرس، نام فروشگاه) برای ثبت اطلاعات بعد از فعال‌سازی حالت همکار اینجا ذخیره می‌شوند.
 
-### TenantProduct — ارتباط Tenant با Product
-کاتالوگ مادر (`Product`) دست‌نخورده است. این جدول مشخص می‌کند کدام محصول مادر در فروشگاه Tenant فروخته می‌شود و با چه قیمت خرده‌فروشی.
+### TenantProduct و Product.tenantId
+کاتالوگ مادر (`Product` با `tenantId = null`) دست‌نخورده است.
+
+ربات Tenant لزوماً از محصولات مادر پر نیست؛ هر Tenant می‌تواند محصول خودش را با `Product.tenantId` بسازد.
+
+`TenantProduct` فقط برای حالتی است که Tenant بخواهد محصول مادر را هم در فروشگاهش بفروشد.
 
 ```prisma
+model Product {
+  tenantId String?   // null = کاتالوگ مادر ؛ مقدار = محصول اختصاصی همان Tenant
+}
+
 model TenantProduct {
   isActive      Boolean @default(true)
   retailPrice   Int?
@@ -331,8 +342,6 @@ model TenantProduct {
   @@unique([tenantId, productId])
 }
 ```
-
-روی جدول `Product` ستونی اضافه نشده؛ فقط رابطهٔ معکوس `tenantProducts` تعریف شده است.
 
 ### Order (ستون‌های اختیاری جدید)
 فیلدهای قبلی سفارش تغییر نکرده‌اند. سه FK اختیاری اضافه شده:
@@ -349,6 +358,10 @@ Handlerهای فعلی این فیلدها را نمی‌فرستند → Prisma
 ### Bot
 ربات اختصاصی Tenant. ربات مادر در `BOT_TOKEN` env می‌ماند و ردیفی در این جدول ندارد.
 
+- `token` به صورت AES-256-GCM رمزنگاری می‌شود (کلید: `BOT_TOKEN_ENCRYPTION_KEY`)
+- `tokenHash` هش SHA-256 برای یکتایی، بدون نگهداری متن خام
+- هر Bot متعلق به دقیقاً یک Tenant است (`tenantId` یکتا)
+
 ### اشتراک (آماده‌سازی تخفیف حجمی)
 
 - `TenantSubscription` — هزینه فعال‌سازی، حق اشتراک ماهانه، درصد تخفیف دوره، حجم خرید ماهانه از مادر (`lastPurchaseVolume`)
@@ -361,7 +374,7 @@ Handlerهای فعلی این فیلدها را نمی‌فرستند → Prisma
 
 ### آنچه عمداً تغییر نکرد
 - هیچ فیلد اجباری روی `User` / `Product` / `Cart` / `Order` (به‌جز FKهای nullable روی Order)
-- `User.role` و جریان `COLLEAGUE_ACCESS_CODE` بدون تغییر
+- `User.role` و ورود با `COLLEAGUE_ACCESS_CODE` حفظ شده؛ بعد از کد، اطلاعات همکار گرفته می‌شود
 - `Cart` همچنان 1:1 با User است (سبد Tenant در مرحلهٔ بعد جدا طراحی می‌شود)
 - Cascade حذف روی داده‌های فعلی تعریف نشده است
 

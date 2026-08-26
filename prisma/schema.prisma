@@ -154,7 +154,11 @@ model Product {
   cartItems       CartItem[]
   tenantProducts  TenantProduct[]
 
+  tenantId        String?
+  tenant          Tenant?  @relation("TenantOwnProducts", fields: [tenantId], references: [id])
+
   @@index([categoryId])
+  @@index([tenantId])
 }
 
 model Cart {
@@ -349,6 +353,8 @@ model Tenant {
   postalCode  String?
   nationalId  String?
   description String?
+  pageName    String?
+  pageDetails String?
 
   ownerUserId String?      @unique
   ownerUser   User?        @relation("TenantOwner", fields: [ownerUserId], references: [id])
@@ -356,14 +362,15 @@ model Tenant {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  members       TenantMember[]
-  customers     Customer[]
-  products      TenantProduct[]
-  orders        Order[]
-  settings      TenantSettings?
-  bot           Bot?
-  subscriptions TenantSubscription[]
-  messages      TenantMessage[]
+  members         TenantMember[]
+  customers       Customer[]
+  products        TenantProduct[]
+  ownProducts     Product[]        @relation("TenantOwnProducts")
+  orders          Order[]
+  settings        TenantSettings?
+  bot             Bot?
+  subscriptions   TenantSubscription[]
+  messages        TenantMessage[]
 
   @@index([status])
   @@index([type])
@@ -458,6 +465,7 @@ model TenantSettings {
 model Bot {
   id          String    @id @default(cuid())
   token       String
+  tokenHash   String    @unique
   username    String?
   baleBotId   String?
 

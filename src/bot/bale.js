@@ -28,6 +28,18 @@ async function testBot() {
   return data;
 }
 
+async function getMeWithToken(token) {
+  const response = await fetch(`https://tapi.bale.ai/bot${token}/getMe`, {
+    method: "POST",
+  });
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, description: text };
+  }
+}
+
 async function getUpdates(offset = 0) {
   const response = await fetch(
     `${API_URL}/getUpdates?offset=${offset}&timeout=30`
@@ -128,6 +140,7 @@ async function answerCallbackQuery(callbackQueryId, text = "") {
 
 module.exports = {
   testBot,
+  getMeWithToken,
   getUpdates,
   sendMessage,
   sendKeyboard,

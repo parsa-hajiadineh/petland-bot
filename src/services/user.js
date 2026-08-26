@@ -6,6 +6,7 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
 
   let user = await prisma.user.findUnique({
     where: { baleId },
+    include: { ownedTenant: { include: { bot: true } } },
   });
 
   if (!user) {
@@ -25,6 +26,7 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
         role: ADMIN_BALE_IDS.includes(baleId) ? "ADMIN" : "CUSTOMER",
         ...(referrerId ? { referrerId } : {}),
       },
+      include: { ownedTenant: { include: { bot: true } } },
     });
   } else if (
     ADMIN_BALE_IDS.includes(baleId) &&
@@ -33,6 +35,7 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
     user = await prisma.user.update({
       where: { id: user.id },
       data: { role: "ADMIN" },
+      include: { ownedTenant: { include: { bot: true } } },
     });
   }
 
@@ -40,7 +43,10 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
 }
 
 async function reloadUser(userId) {
-  return prisma.user.findUnique({ where: { id: userId } });
+  return prisma.user.findUnique({
+    where: { id: userId },
+    include: { ownedTenant: { include: { bot: true } } },
+  });
 }
 
 function isAdmin(user) {
