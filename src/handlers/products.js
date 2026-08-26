@@ -26,6 +26,30 @@ const PRODUCT_LIST_SELECT = {
   brand: true,
 };
 
+const PRODUCT_DETAIL_SELECT = {
+  ...PRODUCT_LIST_SELECT,
+  description: true,
+  imageUrl: true,
+  categoryId: true,
+  category: {
+    select: { id: true, title: true },
+  },
+};
+
+async function loadProductByCode(code) {
+  try {
+    return await prisma.product.findUnique({
+      where: { code },
+      select: PRODUCT_DETAIL_SELECT,
+    });
+  } catch (err) {
+    console.error("PRODUCT LOAD:", err);
+    return null;
+  }
+}
+
+module.exports.loadProductByCode = loadProductByCode;
+
 function productRow(product, wholesale) {
   const price = getUnitPrice(product, wholesale);
   const availability = product.status === "AVAILABLE" ? "🟢" : "🔴";
@@ -265,10 +289,7 @@ module.exports.backToProductList = async function backToProductList(user, chatId
     return;
   }
 
-  const product = await prisma.product.findUnique({
-    where: { code: user.lastProductCode },
-    include: { category: true },
-  });
+  const product = await loadProductByCode(user.lastProductCode);
 
   if (!product?.category?.title || !product.brand) {
     await module.exports(user, chatId);
@@ -349,9 +370,7 @@ module.exports.startAddToCart = async function startAddToCart(user, chatId) {
     return;
   }
 
-  const product = await prisma.product.findUnique({
-    where: { code: user.lastProductCode },
-  });
+  const product = await loadProductByCode(user.lastProductCode);
 
   if (!product || product.status !== "AVAILABLE") {
     await reply(user, chatId, "این محصول موجود نیست.");
@@ -376,9 +395,7 @@ module.exports.addToCartWithQty = async function addToCartWithQty(
   chatId,
   quantity
 ) {
-  const product = await prisma.product.findUnique({
-    where: { code: user.lastProductCode },
-  });
+  const product = await loadProductByCode(user.lastProductCode);
 
   if (!product || product.status !== "AVAILABLE") {
     await reply(user, chatId, "محصول موجود نیست.");

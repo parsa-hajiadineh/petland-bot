@@ -235,10 +235,7 @@ module.exports = async function messageHandler(message, user) {
 
   let product = null;
   try {
-    product = await prisma.product.findUnique({
-      where: { code: text.trim().toUpperCase() },
-      include: { category: true },
-    });
+    product = await productsHandler.loadProductByCode(text.trim().toUpperCase());
   } catch (err) {
     console.error("PRODUCT CODE LOOKUP SKIP:", err.message);
   }
@@ -321,15 +318,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   if (data.startsWith("product:")) {
     const code = data.replace("product:", "");
-    let product = null;
-    try {
-      product = await prisma.product.findUnique({
-        where: { code },
-        include: { category: true },
-      });
-    } catch (err) {
-      console.error("PRODUCT CALLBACK LOOKUP:", err);
-    }
+    const product = await productsHandler.loadProductByCode(code);
     if (product) {
       await productsHandler.showProduct(user, chatId, product);
     } else {
