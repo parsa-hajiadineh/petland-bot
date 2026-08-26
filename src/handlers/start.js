@@ -1,15 +1,16 @@
-const { SHOP_NAME } = require("../config");
 const { reply } = require("../bot/messenger");
+const { getBotContext } = require("../bot/context");
 const { mainMenu } = require("../keyboards/menus");
 
 module.exports = async function startHandler(user, msg) {
+  const ctx = getBotContext();
   const wholesale =
     user.role === "COLLEAGUE" ? "\n🤝 حالت خرید همکار فعال است." : "";
 
   await reply(
     user,
     msg.chat.id,
-    `🌿 به ${SHOP_NAME} خوش آمدید
+    `🌿 به ${ctx.name} خوش آمدید
 
 فروشگاه تخصصی محصولات سگ و گربه 🐶🐱
 ${wholesale}

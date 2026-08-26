@@ -72,6 +72,14 @@ async function finishProfile(user, chatId, extra) {
         },
       });
 
+      await tx.tenantSettings.create({
+        data: {
+          tenantId: tenant.id,
+          shopName: brand,
+          supportPhone: phone,
+        },
+      });
+
       await tx.tenantMember.create({
         data: {
           tenantId: tenant.id,
@@ -231,6 +239,16 @@ async function registerBot(user, chatId, rawToken) {
         activatedAt: new Date(),
       },
     });
+
+    await prisma.tenantSettings.upsert({
+      where: { tenantId: tenant.id },
+      create: {
+        tenantId: tenant.id,
+        shopName: tenant.name,
+        supportPhone: tenant.phone,
+      },
+      update: {},
+    });
   } catch (err) {
     console.error("BOT REGISTER:", err);
     await prisma.user.update({
@@ -261,6 +279,14 @@ ${username}
 این ربات متعلق به فروشگاه «${tenant.name}» است.`,
     mainMenu(user)
   );
+
+  setImmediate(() => {
+    require("../bot/engine")
+      .syncTenantBots()
+      .catch((err) => {
+        console.error("BOT SYNC AFTER REGISTER:", err.message);
+      });
+  });
 }
 
 module.exports = async function colleagueHandler(user, chatId, text) {

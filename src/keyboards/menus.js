@@ -198,19 +198,30 @@ function mainMenu(user) {
   return kb(rows);
 }
 
+function tenantMainMenu() {
+  return kb([
+    [{ text: BTN.PRODUCTS }],
+    [{ text: BTN.HELP }],
+    [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
 function backMain() {
   return kb([[{ text: BTN.BACK_MAIN }]]);
 }
 
 function productDetailMenu(product) {
   const rows = [];
+  const { isMother } = require("../bot/context");
 
-  if (product.status === "AVAILABLE") {
-    rows.push([{ text: BTN.ADD_CART }]);
+  if (isMother()) {
+    if (product.status === "AVAILABLE") {
+      rows.push([{ text: BTN.ADD_CART }]);
+    }
+    rows.push([{ text: BTN.CART }]);
   }
 
   rows.push(
-    [{ text: BTN.CART }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
     [{ text: BTN.BACK_PRODUCTS }],
     [{ text: BTN.BACK_MAIN }]
@@ -326,6 +337,7 @@ module.exports = {
   PRODUCT_CATEGORIES,
   inlineKb,
   mainMenu,
+  tenantMainMenu,
   backMain,
   productDetailMenu,
   productCategoriesMenu,

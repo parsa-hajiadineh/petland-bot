@@ -1,189 +1,204 @@
-# AI_CONTEXT.md — PetLand v22
-> Project management summary for AI chat sessions. Load this file at the start of each conversation.
+# AI_CONTEXT.md — PetLand
+> این فایل را در شروع هر چت جدید بخوان. حافظهٔ پروژه است تا کار در پنجرهٔ دیگر ادامه پیدا کند.
 
 ---
 
-## What is this project?
-**PetLand** is a shop bot on the **Bale** messenger (Iranian Telegram alternative) that sells pet products. This is **not** a traditional web app — the entire UI is driven by Bale bot keyboards.
+## این پروژه چیست؟
+فروشگاه روی **پیام‌رسان بله** (نه وب، نه تلگرام وب). UI فقط کیبورد فارسی بله است.
 
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Language | JavaScript (Node.js, CommonJS) |
-| HTTP | Express 5 (health check only) |
-| Database | PostgreSQL + Prisma 6 ORM |
-| Messaging | Bale Bot API (long polling) |
-| PDF | PDFKit (Persian rendering incomplete) |
-| Deployment | Liara (Iranian PaaS) |
-| UI | Bale inline + reply keyboards — fully in Persian |
-
----
-
-## Code Structure (30 files)
+الان از یک ربات تکی به این مدل رفته:
 
 ```
-src/
-  index.js          ← entry point (Express + polling loop)
-  config/index.js   ← env variables
-  database/prisma.js← Prisma singleton
-  bot/
-    bale.js         ← Bale API client (sendMessage, getUpdates, ...)
-    messenger.js    ← reply helpers
-    webhook.js      ← stub (unused)
-  handlers/
-    router.js       ← message dispatcher
-    start.js        ← main menu
-    products.js     ← browse & add to cart
-    cart.js         ← cart view
-    order.js        ← checkout & receipts
-    admin.js        ← admin panel
-    colleague.js    ← wholesale mode
-    support.js      ← tickets
-    help.js         ← help text
-    marketing.js    ← referral system & marketing info
-    wallet.js       ← wallet, withdrawal request & history
-  keyboards/menus.js← Persian keyboard buttons
-  utils/
-    price.js        ← retail vs wholesale pricing
-    order.js        ← tracking code generation
-    invoice.js      ← PDF invoice + text invoice builder
-  data/products.js  ← static catalog (~130+ products, 14 categories)
-  seed.js           ← DB seeder
-prisma/schema.prisma← DB schema
-setup-assets.js     ← one-time script for font/logo setup
+ Shared Bot Engine  (یک پروسه Node)
+              │
+      ┌───────┼───────┐
+      ▼       ▼       ▼
+   Mother   Bot A   Bot B   …
+  (پت‌لند)  (کلینیک) (پت‌شاپ)
+```
+
+کد فروشگاه **یکی** است. هر ربات فقط `runtime context` خودش را می‌گیرد.
+
+---
+
+## Tech stack
+- Node.js **CommonJS** + Express 5 (فقط health)
+- PostgreSQL + Prisma 6
+- Bale long polling (`tapi.bale.ai`)
+- دیپلوی: **Liara**
+
+---
+
+## تنظیمات Tenant — لیست واقعی (نه مثال)
+
+سه لایه جدا، قاطی‌شان نکن:
+
+### 1) `Tenant` — هویت فروشگاه / همکار
+مالک و مشخصات کسب‌وکار (از فرم همکار پر می‌شود):
+
+| فیلد | نقش |
+|------|------|
+| `id` | tenant_id |
+| `name` | نام برند |
+| `type` | CLINIC / VET / PET_SHOP / ONLINE_SHOP / OTHER |
+| `status` | PENDING / ACTIVE / SUSPENDED / INACTIVE — موتور فقط `ACTIVE` را poll می‌کند |
+| `ownerName`, `phone` | صاحب |
+| `address` / `pageName`+`pageDetails` | حضوری یا صفحه آنلاین |
+| `province`, `city`, `postalCode`, `nationalId`, `description` | رزرو |
+
+### 2) `Bot` — هویت ربات بله
+یک Tenant = حداکثر یک Bot (`tenantId` unique):
+
+| فیلد | نقش |
+|------|------|
+| `id` | botId در runtime |
+| `token` | AES-256-GCM (هرگز لاگ نشود) |
+| `tokenHash` | یکتایی توکن |
+| `username`, `baleBotId` | از `getMe` |
+| `status` + `isEnabled` | موتور: `ACTIVE` و `isEnabled=true` |
+| `activatedAt`, `lastSeenAt` | heartbeat حدود هر ۶۰ ثانیه |
+
+توکن مادر در env است (`BOT_TOKEN`)، در جدول `Bot` نیست.
+
+### 3) `TenantSettings` — ظاهر و پرداخت ربات
+این همان چیزی است که Engine موقع پاسخ به مشتری می‌خواند:
+
+| فیلد | نقش |
+|------|------|
+| `shopName` | نام نمایشی (fallback: `Tenant.name`) |
+| `welcomeMessage` | متن خوش‌آمد سفارشی |
+| `supportPhone` | راهنما |
+| `bankCard`, `bankIban`, `bankHolder`, `bankName` | کارت‌به‌کارت تننت (checkout هنوز وصل نشده) |
+| `profitPercent` | سود فروش کالاهای پت‌لند روی ربات تننت (فاز بعد) |
+| `minOrderAmount` | حداقل سفارش |
+
+`logoFileId` در اسکیما **هنوز نیست**؛ در runtime از `settings.logoFileId` خوانده می‌شود و فعلاً `null` است. ستون را وقتی پنل تنظیمات لوگو ساخته شد اضافه کن.
+
+### 4) کاتالوگ (جدا از settings)
+| منبع | معنی |
+|------|------|
+| `catalogMode = MOTHER` | ربات مادر: درخت دسته/برند پت‌لند |
+| `catalogMode = TENANT_OWN` | ربات تننت: فقط `Product.tenantId = این tenant` |
+| `TenantProduct` | فروش مجدد SKU پت‌لند با قیمت تننت — **هنوز استفاده نشده** |
+| `Category` | فعلاً سراسری است؛ دستهٔ اختصاصی تننت فاز بعد است |
+
+کالای کلینیک **نباید** در منوی پت‌لند دیده شود. کوئری‌های مادر با `motherCatalogWhere()` فیلتر می‌شوند (`tenantId` مادر یا `null`).
+
+### 5) پیام‌ها
+| منبع | معنی |
+|------|------|
+| `TenantSettings.welcomeMessage` | کپی داخل ربات فروشگاه |
+| `TenantMessage` | پیام مادر → تننت (پنل مادر، فاز بعد) |
+
+### Runtime object (`src/bot/context.js`)
+هر آپدیت داخل `AsyncLocalStorage` این را دارد:
+
+```
+isMother, tenantId, botId, token, catalogMode
+identity  { tenantId, botId, name, username }
+branding  { name, welcomeMessage, supportPhone, logoFileId }
+payment   { bank{card,iban,holder,name}, profitPercent, minOrderAmount }
++ alias تخت: name, username, welcomeMessage, supportPhone, bank, …
+```
+
+`src/bot/bale.js` توکن را از `getToken()` می‌گیرد. Handlerها توکن پاس نمی‌دهند.
+
+---
+
+## فایل‌های Engine
+
+```
+src/index.js              Express + ensureMotherCatalog + engine.start()
+src/bot/engine.js         poller مادر + poller هر Bot فعال (sync هر ۳۰ث / فوری بعد از ثبت توکن)
+src/bot/context.js        ALS + طراحی تنظیمات بالا
+src/bot/bale.js           API بله با توکن context
+src/bot/messenger.js      reply / replyPhoto (پاک کردن lastMessageId)
+src/handlers/router.js    اگر !isMother() → tenantShop
+src/handlers/tenantShop.js فروشگاه تننت: start / help / محصولات خود
+src/handlers/colleague.js پروفایل همکار + ثبت Bot + TenantSettings + sync فوری
+src/handlers/products.js  کاتالوگ مادر (فیلتر شده) + showTenantProducts
+src/utils/tokenCrypto.js  encrypt / decrypt / hash
+src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
+```
+
+مادر: handlerهای قبلی (سبد، سفارش، ادمین، همکار، بازاریابی) دست نخورده می‌مانند.
+تننت: منوی `tenantMainMenu` — محصولات + راهنما. سبد/چک‌اوت/ادمین/همکار **ندارد**.
+
+---
+
+## چه چیزی کار می‌کند (نشکن)
+
+### ربات مادر
+- دسته → برند → لیست اینلاین ۱۰تایی → جزئیات (عکس با fallback متن) → سبد → تسویه / رسید
+- پاک کردن همهٔ پیام‌های اینلاین با برگشت / منو / محصولات / سبد / جستجو / راهنما / پشتیبانی / سفارش‌ها
+- `select` صریح روی Product
+- ادمین نباید دکمهٔ منوی اصلی را به‌عنوان کد سفارش قورت بدهد
+- همکار: کد دسترسی → نام، تلفن، برند، آنلاین یا آدرس → Tenant + Customer + TenantSettings + TenantMember OWNER
+- `🤖 ساخت ربات فروشگاهی` → آموزش BotFather → توکن → getMe → Bot فعال
+- `loadProductByCode` باید **بعد از** `module.exports = async function productsHandler` ست شود
+
+### تننت
+- بعد از ثبت توکن، poller همان لحظه (و حداکثر ۳۰ث) بالا می‌آید
+- `/start` با `shopName` / `welcomeMessage`
+- محصولات فقط کالای `Product.tenantId` خودش (اگر خالی باشد کاتالوگ پت‌لند نشان داده **نمی‌شود**)
+- دکمه سبد روی جزئیات محصول تننت مخفی است
+
+---
+
+## Liara / Prisma — حیاتی
+
+- **هرگز** داخل کانتینر در حال اجرا `prisma generate` نزن → `EROFS` روی `node_modules`.
+- Generate فقط در **build**: `"build": "prisma generate"`.
+- `db:push` از **کنسول اپ لیارا** (`petshop-db`). ویندوز به هاست داخلی نمی‌رسد.
+- آینهٔ مرده `prisma.storage.iran.liara.site` استفاده نشود.
+- بعد از تغییر اسکیما: `db:push` روی لیارا، بعد **redeploy**.
+
+---
+
+## Env
+
+```
+BOT_TOKEN
+BOT_TOKEN_ENCRYPTION_KEY   # برای decrypt توکن تننت؛ بی‌دلیل عوض نکن
+DATABASE_URL
+ADMIN_BALE_IDS
+COLLEAGUE_ACCESS_CODE
+MARKETING_ACCESS_CODE
+DEFAULT_PROFIT_PERCENT
+WHOLESALE_MIN_ORDER
+BANK_*   SHOP_NAME   BOT_USERNAME
 ```
 
 ---
 
-## Database (13 models + additive multi-tenant)
+## محدودیت مهم (فاز بعد)
 
-**Current bot (unchanged):**
-| Model | Key Role |
-|-------|---------|
-| `User` | user + state machine + `referrerId` + `marketingEnabled` + `tempAddressId` |
-| `Category` | product categories |
-| `Product` | unique code, `costPrice`, `profitPercent`, Bale `file_id` for photo |
-| `Cart` / `CartItem` | one-to-one cart with User |
-| `Order` / `OrderItem` | order with full status lifecycle |
-| `Ticket` / `TicketMessage` | support tickets |
-| `Wallet` | user wallet (commission balance) |
-| `Withdrawal` | wallet withdrawal requests |
-| `SavedAddress` | saved delivery addresses (max 3) |
-| `MonthlySalesReport` | monthly sales archive (max 6 months) |
-
-**Multi-tenant (schema only — not used by handlers yet):**
-| Model | Key Role |
-|-------|---------|
-| `Tenant` | clinic / pet shop / online shop (colleague business) |
-| `TenantMember` | Tenant ↔ User membership |
-| `Customer` | profile for retail, colleague, or tenant's customer |
-| `TenantProduct` | which mother products a tenant sells |
-| `TenantSettings` | per-tenant shop/payment settings |
-| `Bot` | tenant-owned Bale bot (mother bot stays in env) |
-| `TenantSubscription` | activation + monthly fee + volume discount |
-| `SubscriptionDiscountTier` | platform discount brackets |
-| `TenantMessage` | messages from mother admin to a tenant |
-
-`Order` gained optional `tenantId`, `customerId`, `botId` (nullable; existing rows stay mother-bot orders). No required columns were added to existing tables.
-
-**Order lifecycle:**
-```
-WAITING_PAYMENT → WAITING_APPROVAL → APPROVED → PACKAGING → SHIPPED → DELIVERED
-                                          ↘ REJECTED
-```
+`User.baleId` سراسری است. یک نفر که هم به مادر پیام بدهد هم به ربات کلینیک، **یک ردیف User** دارد (`orderStep`, `lastMessageId`, `Cart` مشترک). تا وقتی تننت سبد/سفارش ندارد مشکلی نیست. قبل از checkout تننت باید session/سبد را per-bot جدا کرد.
 
 ---
 
-## User Roles
+## کار بعدی (انجام نشده)
 
-| Role | Authentication |
-|------|---------------|
-| `CUSTOMER` | any Bale user (automatic) |
-| `ADMIN` | `baleId` in `ADMIN_BALE_IDS` env |
-| `COLLEAGUE` | entering `COLLEAGUE_ACCESS_CODE` |
-
----
-
-## Key Business Logic
-
-- **Retail price** = `costPrice × (1 + profitPercent/100)` (default 20% from env)
-- **Wholesale price** = `costPrice` (no markup, for COLLEAGUE)
-- **Minimum wholesale order** = 10,000,000 Toman (configurable)
-- **Payment** = manual, card-to-card or IBAN wire, receipt upload in bot
-- **Tracking code** = format `PL-YYYYMMDD-####`
-- **PDF invoice** = PDFKit — sent to admin on order approval
-- **Marketing** = referral link `/start ref_<baleId>` — referrer is permanently recorded
-- **Commission** = 5% of approved invoice amount credited to referrer's wallet
-- **Withdrawal** = min 50,000 Toman, max 10,000,000 Toman — admin must approve
-- **Saved addresses** = after first order, address is saved; shown inline at next checkout (max 3)
-- **Marketing/wallet** = hidden behind `MARKETING_ACCESS_CODE` — default `petland-vip`
-- **Sales stats** = monthly auto-archive in admin panel (max 6 months)
+1. پنل تنظیمات داخل ربات تننت: کالا/دسته، welcome، لوگو، کارت بانکی (`TenantSettings`)
+2. سبد و تسویه تننت با `Order.tenantId` + `botId` + جداسازی User state
+3. اشتراک ماهانه + تخفیف حجمی خرید از مادر
+4. ادمین مادر: خاموش/روشن کردن Bot، پیام به تننت‌ها (`TenantMessage`)
+5. حالت `TENANT_RESELL` از روی `TenantProduct` (اختیاری؛ کلینیک می‌تواند صفر کالای پت‌لند بفروشد)
 
 ---
 
-## Environment Variables
+## قوانین برای چت بعدی
 
-```env
-BOT_TOKEN              # Bale bot token (required)
-DATABASE_URL           # PostgreSQL connection string (required)
-PORT                   # default 3000
-ADMIN_BALE_IDS         # comma-separated Bale admin IDs
-COLLEAGUE_ACCESS_CODE  # wholesale access code (default: petland1404)
-MARKETING_ACCESS_CODE  # marketing+wallet unlock code (default: petland-vip)
-DEFAULT_PROFIT_PERCENT # default: 20
-WHOLESALE_MIN_ORDER    # default: 10000000
-BANK_CARD              # bank card number
-BANK_IBAN              # IBAN number (optional)
-BANK_HOLDER            # account holder name
-BANK_NAME              # bank name
-BOT_USERNAME           # bot username without @ (for referral links)
-SHOP_NAME              # default: پت لند
-```
+1. فروشگاه مادر (سبد، تسویه، ادمین، عمده) را نشکن.
+2. ربات تننت هرگز درخت محصول / منوی همکار / ادمین پت‌لند را نبیند.
+3. اول `module.exports = function`، بعد exportهای کمکی (`loadProductByCode`, `clearProductListMessages`, …).
+4. روی شل زندهٔ لیارا `prisma generate` نزن.
+5. کاتالوگ مادر را با `motherCatalogWhere` فیلتر کن.
+6. توکن ربات را لاگ نکن.
+7. اسکیما را additive نگه دار مگر اینکه صریحاً خواسته شود.
 
 ---
 
-## Setup Scripts
-
-```bash
-npm run build    # prisma generate (with Iran mirror)
-npm run db:push  # sync schema
-npm run seed     # load products
-npm start        # run (persistent process)
-node setup-assets.js  # copy logo and font (run once)
-```
-
----
-
-## Known Gaps
-
-| Gap | Severity |
-|-----|---------|
-| Persian PDF invoice | PDFKit does not render Persian correctly |
-| PDF sent to admin only | not delivered to customer after approval |
-| `webhook.js` is a stub | unused |
-| `axios` installed but unused | |
-| No tests | |
-| No rate limiting | |
-| `profitPercent` change requires direct DB access | no admin bot command |
-
----
-
-## AI Rules
-
-1. **Do not modify any source file without an explicit instruction**
-2. Only answer based on actual source — do not guess
-3. If information is unavailable, write `Unknown`
-4. Schema change = edit `prisma/schema.prisma` + run `db:push`
-5. Products come from `src/data/products.js` — catalog change = edit file + `npm run seed`
-6. Documentation files are in `docs/`
-
----
-
-## Detailed Documentation
-- `docs/PROJECT.md` — project overview
-- `docs/ARCHITECTURE.md` — architecture and diagrams
-- `docs/DATABASE.md` — full schema
-- `docs/API.md` — endpoints and bot flow
+## Docs دیگر
+- `.ai/CURRENT_STATUS.md` و `ROADMAP.md` مربوط به v22 تکی هستند و **قدیمی‌اند**؛ این فایل منبع حقیقت است.
+- `docs/DATABASE.md` اسکیما را تا حدی پوشش می‌دهد.

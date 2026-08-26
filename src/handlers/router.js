@@ -4,8 +4,10 @@ const { isAdmin } = require("../services/user");
 const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES } = require("../keyboards/menus");
 const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
+const { isMother } = require("../bot/context");
 
 const productsHandler = require("./products");
+const tenantShop = require("./tenantShop");
 const cartHandler = require("./cart");
 const orderHandler = require("./order");
 const colleagueHandler = require("./colleague");
@@ -17,6 +19,10 @@ const marketingHandler = require("./marketing");
 const walletHandler = require("./wallet");
 
 module.exports = async function messageHandler(message, user) {
+  if (!isMother()) {
+    return tenantShop.handleMessage(message, user);
+  }
+
   const text = (message.text || "").trim();
   const chatId = message.chat.id;
 
@@ -283,6 +289,10 @@ module.exports = async function messageHandler(message, user) {
 };
 
 module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user) {
+  if (!isMother()) {
+    return tenantShop.handleCallbackQuery(cq, user);
+  }
+
   const data = (cq.data || "").trim();
   const chatId = cq.message.chat.id;
 
@@ -418,6 +428,8 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 };
 
 module.exports.handlePhoto = async function handlePhoto(message, user) {
+  if (!isMother()) return;
+
   const chatId = message.chat.id;
   user = await reloadUser(user.id);
   const photo = message.photo;

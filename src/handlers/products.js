@@ -1,4 +1,5 @@
 const prisma = require("../database/prisma");
+const { getMotherTenantId } = require("../database/prisma");
 const { reply, replyPhoto } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const {
@@ -36,19 +37,33 @@ const PRODUCT_DETAIL_SELECT = {
   },
 };
 
+function motherCatalogWhere(extra = {}) {
+  const motherId = getMotherTenantId();
+  if (!motherId) return extra;
+  return {
+    ...extra,
+    OR: [{ tenantId: null }, { tenantId: motherId }],
+  };
+}
+
 async function loadProductByCode(code) {
   if (!code) return null;
+  const motherId = getMotherTenantId();
+  const where = motherId
+    ? { code, OR: [{ tenantId: null }, { tenantId: motherId }] }
+    : { code };
+
   try {
-    return await prisma.product.findUnique({
-      where: { code },
+    return await prisma.product.findFirst({
+      where,
       select: PRODUCT_DETAIL_SELECT,
     });
   } catch (err) {
     console.error("PRODUCT LOAD:", err);
   }
   try {
-    return await prisma.product.findUnique({
-      where: { code },
+    return await prisma.product.findFirst({
+      where,
       select: {
         ...PRODUCT_LIST_SELECT,
         description: true,
@@ -153,6 +168,72 @@ module.exports = async function productsHandler(user, chatId) {
 module.exports.clearProductListMessages = clearProductListMessages;
 module.exports.loadProductByCode = loadProductByCode;
 
+module.exports.showTenantProducts = async function showTenantProducts(
+  user,
+  chatId,
+  tenantId
+) {
+  if (!tenantId) {
+    await reply(user, chatId, "فروشگاه شناسایی نشد.");
+    return;
+  }
+
+  let products = [];
+  try {
+    products = await prisma.product.findMany({
+      where: { tenantId, status: "AVAILABLE" },
+      orderBy: { title: "asc" },
+      select: PRODUCT_LIST_SELECT,
+    });
+  } catch (err) {
+    console.error("TENANT PRODUCTS:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن محصولات این فروشگاه ممکن نشد."
+    );
+    return;
+  }
+
+  if (products.length === 0) {
+    await reply(
+      user,
+      chatId,
+      "هنوز محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود."
+    );
+    return;
+  }
+
+  await reply(
+    user,
+    chatId,
+    `🛍 ${products.length} محصول`,
+    kb([[{ text: BTN.BACK_MAIN }]])
+  );
+
+  await sendProductInlineList(
+    user,
+    chatId,
+    products,
+    "روی هر محصول برای جزئیات کلیک کنید:"
+  );
+};
+
+module.exports.loadTenantProductByCode = async function loadTenantProductByCode(
+  code,
+  tenantId
+) {
+  try {
+    return await prisma.product.findFirst({
+      where: { code, tenantId },
+      select: PRODUCT_DETAIL_SELECT,
+    });
+  } catch (err) {
+    console.error("TENANT PRODUCT LOAD:", err);
+    return null;
+  }
+};
+
 module.exports.showSubMenu = async function showSubMenu(user, chatId, categoryBtn) {
   const cat = PRODUCT_CATEGORIES.find((c) => c.btn === categoryBtn);
   if (!cat) {
@@ -184,7 +265,7 @@ module.exports.showBrandProducts = async function showBrandProducts(
       return;
     }
     products = await prisma.product.findMany({
-      where: { categoryId: category.id, brand },
+      where: motherCatalogWhere({ categoryId: category.id, brand }),
       orderBy: { title: "asc" },
       select: PRODUCT_LIST_SELECT,
     });
@@ -245,7 +326,7 @@ module.exports.showCategory = async function showCategory(
       return;
     }
     products = await prisma.product.findMany({
-      where: { categoryId: category.id },
+      where: motherCatalogWhere({ categoryId: category.id }),
       orderBy: { title: "asc" },
       select: PRODUCT_LIST_SELECT,
     });
@@ -399,10 +480,10 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
   let products;
   try {
     products = await prisma.product.findMany({
-      where: {
+      where: motherCatalogWhere({
         title: { contains: term, mode: "insensitive" },
         status: "AVAILABLE",
-      },
+      }),
       orderBy: { title: "asc" },
       take: 30,
       select: PRODUCT_LIST_SELECT,

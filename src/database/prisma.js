@@ -2,6 +2,12 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
+let motherTenantId = null;
+
+function getMotherTenantId() {
+  return motherTenantId;
+}
+
 async function ensureMotherCatalog() {
   try {
     let tenant = await prisma.tenant.findFirst({
@@ -17,6 +23,17 @@ async function ensureMotherCatalog() {
         },
       });
     }
+    motherTenantId = tenant.id;
+
+    await prisma.tenantSettings.upsert({
+      where: { tenantId: tenant.id },
+      create: {
+        tenantId: tenant.id,
+        shopName: "پت لند",
+      },
+      update: {},
+    });
+
     const result = await prisma.product.updateMany({
       where: { tenantId: null },
       data: { tenantId: tenant.id },
@@ -29,3 +46,4 @@ async function ensureMotherCatalog() {
 
 module.exports = prisma;
 module.exports.ensureMotherCatalog = ensureMotherCatalog;
+module.exports.getMotherTenantId = getMotherTenantId;

@@ -1,9 +1,12 @@
-const fetch = require("node-fetch");
 const { BOT_TOKEN } = require("../config");
+const { getToken } = require("./context");
+const fetch = require("node-fetch");
 
-const API_URL = `https://tapi.bale.ai/bot${BOT_TOKEN}`;
+function botApiUrl(token) {
+  return `https://tapi.bale.ai/bot${token || getToken() || BOT_TOKEN}`;
+}
 
-async function apiCall(method, body) {
+async function apiCall(method, body, token) {
   const options = { method: "POST" };
 
   if (body) {
@@ -11,7 +14,7 @@ async function apiCall(method, body) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`${API_URL}/${method}`, options);
+  const response = await fetch(`${botApiUrl(token)}/${method}`, options);
   const text = await response.text();
 
   try {
@@ -22,27 +25,19 @@ async function apiCall(method, body) {
   }
 }
 
-async function testBot() {
-  const data = await apiCall("getMe");
+async function testBot(token) {
+  const data = await apiCall("getMe", undefined, token);
   console.log("BALE getMe:", data);
   return data;
 }
 
 async function getMeWithToken(token) {
-  const response = await fetch(`https://tapi.bale.ai/bot${token}/getMe`, {
-    method: "POST",
-  });
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { ok: false, description: text };
-  }
+  return apiCall("getMe", undefined, token);
 }
 
-async function getUpdates(offset = 0) {
+async function getUpdates(offset = 0, token) {
   const response = await fetch(
-    `${API_URL}/getUpdates?offset=${offset}&timeout=30`
+    `${botApiUrl(token)}/getUpdates?offset=${offset}&timeout=30`
   );
   const text = await response.text();
 
@@ -113,7 +108,7 @@ async function sendDocument(chatId, document, caption) {
     form.append("caption", caption);
   }
 
-  const response = await fetch(`${API_URL}/sendDocument`, {
+  const response = await fetch(`${botApiUrl()}/sendDocument`, {
     method: "POST",
     body: form,
     headers: form.getHeaders(),
@@ -149,5 +144,4 @@ module.exports = {
   sendDocument,
   getFile,
   answerCallbackQuery,
-  API_URL,
 };
