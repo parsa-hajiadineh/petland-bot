@@ -39,6 +39,7 @@ async function calcMonthStats(yearMonth) {
     where: {
       createdAt: { gte: start, lt: end },
       status: { in: ["APPROVED", "PACKAGING", "SHIPPED", "DELIVERED"] },
+      trackingCode: { startsWith: "PL-" },
     },
     select: {
       totalAmount: true,
@@ -362,7 +363,7 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
   let orders;
   try {
     orders = await prisma.order.findMany({
-      where,
+      where: { ...where, trackingCode: { startsWith: "PL-" } },
       orderBy: { createdAt: "desc" },
       skip: offset,
       take: paginated ? take + 1 : 50,
@@ -646,9 +647,13 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     console.error("ADMIN ORDER LOOKUP SKIP:", err.message);
   }
 
-  if (order && user.role === "ADMIN") {
+  if (order && user.role === "ADMIN" && String(order.trackingCode).startsWith("PL-")) {
     await showAdminOrderDetail(user, chatId, order);
     return true;
+  }
+
+  if (order && String(order.trackingCode).startsWith("TS-")) {
+    order = null;
   }
 
   if (user.adminStep?.startsWith("CONFIRM_WITHDRAWAL:")) {
@@ -829,7 +834,7 @@ module.exports.viewOrderById = async function viewOrderById(user, chatId, orderI
     where: { id: orderId },
     select: ORDER_WITH_ITEMS_SELECT,
   });
-  if (!order) {
+  if (!order || !String(order.trackingCode).startsWith("PL-")) {
     await reply(user, chatId, "فاکتور پیدا نشد.", adminBackMenu());
     return;
   }

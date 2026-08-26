@@ -560,6 +560,62 @@ async function ensureShopRuntimeTables() {
     "PRODUCT TENANT INDEX SKIP:",
     `CREATE INDEX IF NOT EXISTS "Product_tenantId_idx" ON "Product"("tenantId")`
   );
+  await execSql(
+    "ORDER TENANT COL SKIP:",
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "tenantId" TEXT`
+  );
+  await execSql(
+    "ORDER BOT COL SKIP:",
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "botId" TEXT`
+  );
+  await execSql(
+    "ORDER TENANT INDEX SKIP:",
+    `CREATE INDEX IF NOT EXISTS "Order_tenantId_idx" ON "Order"("tenantId")`
+  );
+
+  if (!(await tableExists("ShopCart"))) {
+    await execSql(
+      "SHOP CART TABLE FAIL:",
+      `CREATE TABLE IF NOT EXISTS "ShopCart" (
+        "id" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "tenantId" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "ShopCart_pkey" PRIMARY KEY ("id")
+      )`
+    );
+    await execSql(
+      "SHOP CART UNIQUE SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "ShopCart_userId_tenantId_key" ON "ShopCart"("userId", "tenantId")`
+    );
+    await execSql(
+      "SHOP CART TENANT INDEX SKIP:",
+      `CREATE INDEX IF NOT EXISTS "ShopCart_tenantId_idx" ON "ShopCart"("tenantId")`
+    );
+    console.log("SHOP CART TABLE READY");
+  }
+
+  if (!(await tableExists("ShopCartItem"))) {
+    await execSql(
+      "SHOP CART ITEM TABLE FAIL:",
+      `CREATE TABLE IF NOT EXISTS "ShopCartItem" (
+        "id" TEXT NOT NULL,
+        "quantity" INTEGER NOT NULL DEFAULT 1,
+        "cartId" TEXT NOT NULL,
+        "productId" TEXT NOT NULL,
+        CONSTRAINT "ShopCartItem_pkey" PRIMARY KEY ("id")
+      )`
+    );
+    await execSql(
+      "SHOP CART ITEM UNIQUE SKIP:",
+      `CREATE UNIQUE INDEX IF NOT EXISTS "ShopCartItem_cartId_productId_key" ON "ShopCartItem"("cartId", "productId")`
+    );
+    await execSql(
+      "SHOP CART ITEM CART INDEX SKIP:",
+      `CREATE INDEX IF NOT EXISTS "ShopCartItem_cartId_idx" ON "ShopCartItem"("cartId")`
+    );
+    console.log("SHOP CART ITEM TABLE READY");
+  }
 }
 
 async function persistColleagueShop(user, profile) {

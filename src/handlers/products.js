@@ -165,6 +165,53 @@ module.exports = async function productsHandler(user, chatId) {
 module.exports.clearProductListMessages = clearProductListMessages;
 module.exports.loadProductByCode = loadProductByCode;
 
+async function loadTenantCategoryTitles(tenantId) {
+  const titles = [];
+  const seen = new Set();
+  try {
+    const cats = await prisma.category.findMany({
+      where: { tenantId },
+      orderBy: { title: "asc" },
+      select: { title: true },
+    });
+    for (const cat of cats) {
+      if (cat.title && !seen.has(cat.title)) {
+        seen.add(cat.title);
+        titles.push(cat.title);
+      }
+    }
+  } catch (err) {
+    console.error("TENANT CATEGORY LIST:", err.message);
+  }
+  try {
+    const products = await prisma.product.findMany({
+      where: { tenantId },
+      select: { category: { select: { title: true } } },
+    });
+    for (const product of products) {
+      const title = product.category?.title;
+      if (title && !seen.has(title)) {
+        seen.add(title);
+        titles.push(title);
+      }
+    }
+  } catch (err) {
+    console.error("TENANT CATEGORY FROM PRODUCTS:", err.message);
+  }
+  return titles;
+}
+
+async function showTenantCategoryKeyboard(user, chatId, categories) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "TSC:WAIT" },
+  });
+  user.orderStep = "TSC:WAIT";
+  const rows = categories.map((title) => [{ text: title }]);
+  rows.push([{ text: BTN.CART }, { text: BTN.BACK_MAIN }]);
+  await reply(user, chatId, "📂 دسته مورد نظر را انتخاب کنید:", kb(rows));
+}
+
 module.exports.showTenantProducts = async function showTenantProducts(
   user,
   chatId,
@@ -182,10 +229,32 @@ module.exports.showTenantProducts = async function showTenantProducts(
     console.error("TENANT PRODUCTS SCHEMA:", err.message);
   }
 
+  const categories = await loadTenantCategoryTitles(tenantId);
+  const chosen =
+    categoryTitle && categories.includes(categoryTitle) ? categoryTitle : null;
+
+  if (!chosen) {
+    if (!categories.length) {
+      await reply(
+        user,
+        chatId,
+        "هنوز دسته‌بندی یا محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود.",
+        kb([[{ text: BTN.BACK_MAIN }]])
+      );
+      return;
+    }
+    await showTenantCategoryKeyboard(user, chatId, categories);
+    return;
+  }
+
   let products = [];
   try {
     products = await prisma.product.findMany({
-      where: { tenantId, status: "AVAILABLE" },
+      where: {
+        tenantId,
+        status: "AVAILABLE",
+        category: { title: chosen },
+      },
       orderBy: { title: "asc" },
       select: {
         ...PRODUCT_LIST_SELECT,
@@ -195,11 +264,15 @@ module.exports.showTenantProducts = async function showTenantProducts(
   } catch (err) {
     console.error("TENANT PRODUCTS:", err);
     try {
-      products = await prisma.product.findMany({
+      const all = await prisma.product.findMany({
         where: { tenantId, status: "AVAILABLE" },
         orderBy: { title: "asc" },
-        select: PRODUCT_LIST_SELECT,
+        select: {
+          ...PRODUCT_LIST_SELECT,
+          category: { select: { id: true, title: true } },
+        },
       });
+      products = all.filter((p) => p.category?.title === chosen);
     } catch (err2) {
       console.error("TENANT PRODUCTS FALLBACK:", err2);
       await reply(user, chatId, "خواندن محصولات این فروشگاه ممکن نشد.");
@@ -207,68 +280,32 @@ module.exports.showTenantProducts = async function showTenantProducts(
     }
   }
 
-  if (products.length === 0) {
-    await reply(
-      user,
-      chatId,
-      "هنوز محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود.",
-      kb([[{ text: BTN.BACK_MAIN }]])
-    );
-    return;
-  }
-
-  const categories = [];
-  const seen = new Set();
-  for (const product of products) {
-    const title = product.category?.title;
-    if (title && !seen.has(title)) {
-      seen.add(title);
-      categories.push(title);
-    }
-  }
-
-  const chosen =
-    categoryTitle && categories.includes(categoryTitle) ? categoryTitle : null;
-
-  if (!chosen && categories.length > 1) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: "TSC:WAIT" },
-    });
-    user.orderStep = "TSC:WAIT";
-    const rows = categories.map((title) => [{ text: title }]);
-    rows.push([{ text: BTN.BACK_MAIN }]);
-    await reply(
-      user,
-      chatId,
-      "📂 دسته مورد نظر را انتخاب کنید:",
-      kb(rows)
-    );
-    return;
-  }
-
-  const filtered = chosen
-    ? products.filter((p) => p.category?.title === chosen)
-    : products;
-
   await prisma.user.update({
     where: { id: user.id },
     data: { orderStep: null },
   });
   user.orderStep = null;
 
-  const header = chosen ? `🛍 ${chosen}` : `🛍 ${filtered.length} محصول`;
-  const menuRows = [];
-  if (categories.length > 1) {
-    menuRows.push([{ text: BTN.BACK_PRODUCTS }]);
+  if (!products.length) {
+    await reply(
+      user,
+      chatId,
+      `📂 ${chosen}\n\nدر این دسته هنوز کالایی ثبت نشده است.`,
+      kb([[{ text: BTN.BACK_PRODUCTS }], [{ text: BTN.BACK_MAIN }]])
+    );
+    return;
   }
-  menuRows.push([{ text: BTN.BACK_MAIN }]);
 
-  await reply(user, chatId, `${header}\n${filtered.length} کالا`, kb(menuRows));
+  await reply(
+    user,
+    chatId,
+    `🛍 ${chosen}\n${products.length} کالا`,
+    kb([[{ text: BTN.BACK_PRODUCTS }], [{ text: BTN.CART }], [{ text: BTN.BACK_MAIN }]])
+  );
   await sendProductInlineList(
     user,
     chatId,
-    filtered,
+    products,
     "روی هر محصول برای جزئیات کلیک کنید:"
   );
 };
@@ -452,13 +489,9 @@ ${wholesale && isMother() ? "🤝 قیمت همکار" : "🛒 قیمت"}
 ${status}
 
 📝 ${product.description || "بدون توضیحات"}${
-  isMother()
-    ? product.status === "AVAILABLE"
-      ? `\n\nبرای انتخاب محصول از دکمه "افزودن به سبد" استفاده نمایید.`
-      : "\n\nاین محصول ناموجود است."
-    : product.status === "AVAILABLE"
-      ? ""
-      : "\n\nاین محصول ناموجود است."
+  product.status === "AVAILABLE"
+    ? `\n\nبرای انتخاب محصول از دکمه "افزودن به سبد" استفاده نمایید.`
+    : "\n\nاین محصول ناموجود است."
 }`;
 
   const menu = productDetailMenu(product);

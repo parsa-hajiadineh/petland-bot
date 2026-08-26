@@ -177,6 +177,7 @@ module.exports = async function messageHandler(message, user) {
         where: {
           userId: user.id,
           status: "WAITING_PAYMENT",
+          trackingCode: { startsWith: "PL-" },
         },
         orderBy: { createdAt: "desc" },
         select: { id: true },

@@ -571,6 +571,14 @@ async function handleAdminText(user, chatId, text) {
 
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
     if (
+      user.adminStep === "TS:ORDERS" ||
+      user.adminStep === "TS:O_REJECT" ||
+      user.adminStep === "TS:O_SHIP"
+    ) {
+      await require("./tenantOrder").showShopOrders(user, chatId);
+      return true;
+    }
+    if (
       user.adminStep === "TS:MENU" ||
       user.adminStep === "TS:PROFILE" ||
       user.adminStep === "TS:BANK" ||
@@ -609,6 +617,10 @@ async function handleAdminText(user, chatId, text) {
   }
   if (text === BTN.SHOP_PRODUCTS) {
     await showProducts(user, chatId, tenantId);
+    return true;
+  }
+  if (text === BTN.SHOP_ORDERS) {
+    await require("./tenantOrder").showShopOrders(user, chatId);
     return true;
   }
   if (text === BTN.SHOP_ADD_CATEGORY) {
@@ -974,6 +986,13 @@ async function handleAdminCallback(user, chatId, data) {
         } catch (err) {
           console.error("CAT DELETE CART ITEMS:", err.message);
         }
+        try {
+          await prisma.shopCartItem.deleteMany({
+            where: { productId: { in: ids } },
+          });
+        } catch (err) {
+          console.error("CAT DELETE SHOP CART ITEMS:", err.message);
+        }
         await prisma.product.deleteMany({
           where: { tenantId, categoryId },
         });
@@ -1074,6 +1093,13 @@ async function handleAdminCallback(user, chatId, data) {
     return true;
   }
   if (action === "del") {
+    try {
+      await prisma.shopCartItem.deleteMany({
+        where: { product: { code } },
+      });
+    } catch (err) {
+      console.error("PRODUCT DELETE SHOP CART:", err.message);
+    }
     try {
       await prisma.product.delete({ where: { code } });
       await reply(user, chatId, "🗑 کالا حذف شد.");

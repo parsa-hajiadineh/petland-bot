@@ -68,7 +68,7 @@
 | `shopName` | نام نمایشی (fallback: `Tenant.name`) |
 | `welcomeMessage` | متن خوش‌آمد سفارشی |
 | `supportPhone` | راهنما |
-| `bankCard`, `bankIban`, `bankHolder`, `bankName` | کارت‌به‌کارت تننت (checkout هنوز وصل نشده) |
+| `bankCard`, `bankIban`, `bankHolder`, `bankName` | کارت‌به‌کارت تننت در تسویه همین ربات |
 | `profitPercent` | سود فروش کالاهای پت‌لند روی ربات تننت (فاز بعد) |
 | `minOrderAmount` | حداقل سفارش |
 
@@ -80,9 +80,13 @@
 | `catalogMode = MOTHER` | ربات مادر: درخت دسته/برند پت‌لند |
 | `catalogMode = TENANT_OWN` | ربات تننت: فقط `Product.tenantId = این tenant` |
 | `TenantProduct` | فروش مجدد SKU پت‌لند با قیمت تننت — **هنوز استفاده نشده** |
-| `Category` | فعلاً سراسری است؛ دستهٔ اختصاصی تننت فاز بعد است |
+| `Category.tenantId` | دستهٔ اختصاصی همان فروشگاه همکار |
 
 کالای کلینیک **نباید** در منوی پت‌لند دیده شود. کوئری‌های مادر با `motherCatalogWhere()` فیلتر می‌شوند (`tenantId` مادر یا `null`).
+
+سبد تننت جدول جداست (`ShopCart` / `ShopCartItem`) با `@@unique([userId, tenantId])`. `Cart` مادر دست نخورده می‌ماند.
+
+سفارش تننت: `Order.tenantId` + `botId`، کد پیگیری `TS-YYYYMMDD-XXXX`. مادر فقط `PL-` را در فاکتور/آمار/سفارشات من می‌بیند.
 
 ### 5) پیام‌ها
 | منبع | معنی |
@@ -128,7 +132,10 @@ src/bot/context.js        ALS + تنظیمات runtime
 src/bot/bale.js           API بله با توکن context + setWebhook
 src/services/shopProvision.js  Validate → Bot → Settings → Webhook → Activate
 src/handlers/router.js    اگر !isMother() → tenantShop
-src/handlers/tenantShop.js فروشگاه تننت
+src/handlers/tenantShop.js فروشگاه تننت (کاتالوگ + سبد + تسویه)
+src/handlers/tenantOrder.js سبد/تسویه/رسید/پیگیری تننت + فاکتور مالک
+src/handlers/tenantAdmin.js پنل مدیریت فروشگاه همکار
+src/services/shopCart.js     سبد جدا per tenant
 src/handlers/colleague.js پروفایل همکار + توکن → provisionShop
 src/handlers/products.js  کاتالوگ مادر (فیلتر شده) + showTenantProducts
 src/utils/tokenCrypto.js  encrypt / decrypt / hash
@@ -136,7 +143,7 @@ src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
 ```
 
 مادر: handlerهای قبلی (سبد، سفارش، ادمین، همکار، بازاریابی) دست نخورده می‌مانند.
-تننت: منوی `tenantMainMenu` — محصولات + راهنما. مالک فروشگاه دکمه **⚙️ مدیریت فروشگاه** می‌بیند (مشخصات، لوگو، خوش‌آمد، کارت، دسته، کالا). سبد/چک‌اوت/همکار/ادمین پت‌لند **ندارد**.
+تننت: منوی `tenantMainMenu` — محصولات، سبد، سفارشات من، راهنما. مالک **⚙️ مدیریت فروشگاه** و **🧾 سفارش‌های فروشگاه** هم دارد. پرداخت از کارت `TenantSettings` است، نه `BANK_*` مادر.
 
 ---
 
@@ -158,8 +165,10 @@ src/database/prisma.js    ensureMotherCatalog + getMotherTenantId()
 - `/start` با `shopName` / `welcomeMessage` / لوگو / آدرس / ساعات اگر تنظیم شده باشند
 - مالک: پنل مدیریت داخل همان ربات — مشخصات، لوگو، پیام خوش‌آمد، **متن راهنما**، کارت بانکی، دسته (افزودن/حذف)، کالا
 - ستون `Product.tenantId` اگر روی لیارا نباشد در استارت با ALTER اضافه می‌شود؛ بدون آن کالا ثبت و خوانده نمی‌شود
-- محصولات فقط کالای `Product.tenantId` خودش، گروه‌بندی با دستهٔ همان فروشگاه
-- دکمه سبد روی جزئیات محصول تننت مخفی است
+- دکمه **محصولات** همیشه اول دسته‌بندی‌ها را نشان می‌دهد (حتی اگر یک دسته باشد)؛ بعد از انتخاب دسته، کالاها اینلاین ۱۰تایی
+- سبد جدا (`ShopCart`) → تعداد → تسویه آدرس → کارت همان فروشگاه → رسید → اطلاع به مالک
+- مشتری: **سفارشات من** فقط `TS-` همین فروشگاه. مالک: تایید / رد / بسته‌بندی / ارسال
+- جداول `ShopCart` / `ShopCartItem` اگر روی لیارا نباشند در `ensureShopRuntimeTables` ساخته می‌شوند؛ بعد از این اسکیما **redeploy** لازم است تا Prisma Client مدل جدید را داشته باشد
 
 ---
 
@@ -190,19 +199,18 @@ PUBLIC_BASE_URL            # مثلا https://YOUR-APP.liara.run — اگر خا
 
 ---
 
-## محدودیت مهم (فاز بعد)
+## محدودیت session کاربر
 
-`User.baleId` سراسری است. یک نفر که هم به مادر پیام بدهد هم به ربات کلینیک، **یک ردیف User** دارد (`orderStep`, `lastMessageId`, `Cart` مشترک). تا وقتی تننت سبد/سفارش ندارد مشکلی نیست. قبل از checkout تننت باید session/سبد را per-bot جدا کرد.
+`User.baleId` سراسری است. یک نفر در مادر و ربات کلینیک **یک ردیف User** دارد (`orderStep`, `pendingOrderId`). سبدها جدا هستند (`Cart` مادر / `ShopCart` تننت). قدم‌های تننت با پیشوند `TCK:` / `TSC:` / `TS:` هستند تا با checkout مادر قاطی نشوند؛ اگر وسط ثبت سفارش بین دو ربات جابه‌جا شود ممکن است state تداخل کند.
 
 ---
 
 ## کار بعدی (انجام نشده)
 
-1. سبد و تسویه تننت با `Order.tenantId` + `botId` + جداسازی User state
-2. اشتراک ماهانه + تخفیف حجمی خرید از مادر
-3. ادمین مادر: خاموش/روشن کردن Bot، پیام به تننت‌ها (`TenantMessage`)
-4. حالت `TENANT_RESELL` از روی `TenantProduct` (اختیاری)
-5. تیکت/سفارش داخل ربات تننت
+1. اشتراک ماهانه + تخفیف حجمی خرید از مادر
+2. ادمین مادر: خاموش/روشن کردن Bot، پیام به تننت‌ها (`TenantMessage`)
+3. حالت `TENANT_RESELL` از روی `TenantProduct` (اختیاری)
+4. تیکت پشتیبانی داخل ربات تننت
 
 ---
 
@@ -216,6 +224,7 @@ PUBLIC_BASE_URL            # مثلا https://YOUR-APP.liara.run — اگر خا
 6. توکن ربات را لاگ نکن.
 7. اسکیما را additive نگه دار مگر اینکه صریحاً خواسته شود.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان استفاده نشود.
+9. سفارش تننت کد `TS-` دارد؛ فاکتور/آمار/رسید مادر فقط `PL-` را لمس کند.
 
 ---
 

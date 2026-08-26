@@ -363,8 +363,18 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
 
   const fileId = photo[photo.length - 1].file_id;
 
+  const pending = await prisma.order.findFirst({
+    where: {
+      id: user.pendingOrderId,
+      userId: user.id,
+      trackingCode: { startsWith: "PL-" },
+    },
+    select: { id: true },
+  });
+  if (!pending) return false;
+
   const order = await prisma.order.update({
-    where: { id: user.pendingOrderId },
+    where: { id: pending.id },
     data: {
       receiptImage: fileId,
       status: "WAITING_APPROVAL",
@@ -407,7 +417,7 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
   let orders;
   try {
     orders = await prisma.order.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, trackingCode: { startsWith: "PL-" } },
       orderBy: { createdAt: "desc" },
       take: 10,
       select: ORDER_WITH_ITEMS_SELECT,
@@ -460,7 +470,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
     select: ORDER_WITH_ITEMS_SELECT,
   });
 
-  if (!order) return false;
+  if (!order || !String(order.trackingCode).startsWith("PL-")) return false;
 
   if (order.status === "WAITING_PAYMENT") {
     await prisma.user.update({

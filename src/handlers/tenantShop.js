@@ -1,3 +1,4 @@
+const prisma = require("../database/prisma");
 const { reply, replyPhoto } = require("../bot/messenger");
 const { getBotContext } = require("../bot/context");
 const { reloadUser } = require("../services/user");
@@ -7,12 +8,45 @@ const {
 } = require("../keyboards/menus");
 const productsHandler = require("./products");
 const tenantAdmin = require("./tenantAdmin");
+const tenantOrder = require("./tenantOrder");
 const { ensureShopRuntimeTables } = require("../services/shopProvision");
+
+const NAV_BUTTONS = new Set([
+  BTN.PRODUCTS,
+  BTN.CART,
+  BTN.ORDERS,
+  BTN.HELP,
+  BTN.ADD_CART,
+  BTN.CHECKOUT,
+  BTN.CLEAR_CART,
+  BTN.UPLOAD_RECEIPT,
+  BTN.BACK_PRODUCTS,
+  BTN.BACK_MAIN,
+]);
 
 async function shopMenu(user) {
   const ctx = getBotContext();
   const owner = await tenantAdmin.isShopOwner(user, ctx.tenantId);
   return tenantMainMenu(owner);
+}
+
+async function resetSession(user) {
+  await tenantAdmin.clearTenantAdminState(user);
+  try {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        orderStep: null,
+        pendingOrderId: null,
+        tempAddressId: null,
+      },
+    });
+    user.orderStep = null;
+    user.pendingOrderId = null;
+    user.tempAddressId = null;
+  } catch (err) {
+    console.error("TENANT RESET SESSION:", err.message);
+  }
 }
 
 async function showStart(user, chatId) {
@@ -21,7 +55,6 @@ async function showStart(user, chatId) {
     await ensureShopRuntimeTables().catch((err) => {
       console.error("SHOP TABLES START:", err.message);
     });
-    await tenantAdmin.clearTenantAdminState(user);
     const shop = await tenantAdmin.loadShopView(ctx.tenantId);
     const text = tenantAdmin.shopIntroText(shop);
     const menu = await shopMenu(user);
@@ -54,7 +87,7 @@ async function showHelp(user, chatId) {
   const custom = (shop.helpMessage || "").trim();
   const body = custom
     ? custom
-    : `از دکمه محصولات، کالاهای همین فروشگاه را ببینید.${phone}${address}${hours}`;
+    : `از دکمه محصولات، اول دسته‌بندی را ببینید و بعد کالای همان دسته را انتخاب کنید.\nسبد خرید و پیگیری سفارش هم از منوی اصلی در دسترس است.${phone}${address}${hours}`;
   await reply(user, chatId, `📖 راهنما\n\n${body}`, await shopMenu(user));
 }
 
@@ -82,11 +115,8 @@ async function handleMessageInner(message, user) {
   user = (await reloadUser(user.id)) || user;
 
   if (
-    text === BTN.BACK_MAIN ||
-    text === BTN.BACK_PRODUCTS ||
+    NAV_BUTTONS.has(text) ||
     text === BTN.BACK_PRODUCT_LIST ||
-    text === BTN.PRODUCTS ||
-    text === BTN.HELP ||
     text === "/start" ||
     text.startsWith("/start ")
   ) {
@@ -99,28 +129,68 @@ async function handleMessageInner(message, user) {
     text.startsWith("/start ") ||
     !text
   ) {
+    await resetSession(user);
+    user = (await reloadUser(user.id)) || user;
     await showStart(user, chatId);
     return;
   }
 
-  if (await tenantAdmin.handleAdminText(user, chatId, text)) {
-    return;
-  }
-
   if (text === BTN.HELP) {
+    await tenantAdmin.clearTenantAdminState(user);
     await showHelp(user, chatId);
     return;
   }
 
-  if (
-    text === BTN.PRODUCTS ||
-    text === BTN.BACK_PRODUCTS
-  ) {
+  if (text === BTN.PRODUCTS || text === BTN.BACK_PRODUCTS) {
+    await tenantAdmin.clearTenantAdminState(user);
     await productsHandler.showTenantProducts(user, chatId, getBotContext().tenantId);
     return;
   }
 
+  if (text === BTN.CART) {
+    await tenantAdmin.clearTenantAdminState(user);
+    await tenantOrder.showCart(user, chatId);
+    return;
+  }
+
+  if (text === BTN.CLEAR_CART) {
+    await tenantOrder.clearCart(user, chatId);
+    return;
+  }
+
+  if (text === BTN.CHECKOUT) {
+    await tenantOrder.startCheckout(user, chatId);
+    return;
+  }
+
+  if (text === BTN.ADD_CART) {
+    await tenantOrder.startAddToCart(user, chatId);
+    return;
+  }
+
+  if (text === BTN.ORDERS) {
+    await tenantAdmin.clearTenantAdminState(user);
+    await tenantOrder.showMyOrders(user, chatId);
+    return;
+  }
+
+  if (text === BTN.UPLOAD_RECEIPT) {
+    await tenantOrder.promptReceipt(user, chatId);
+    return;
+  }
+
+  if (text === BTN.CONFIRM_ADDRESS) {
+    await tenantOrder.confirmSavedAddress(user, chatId);
+    return;
+  }
+
+  if (text === BTN.DELETE_ADDRESS) {
+    await tenantOrder.deleteSavedAddress(user, chatId);
+    return;
+  }
+
   if (text === BTN.BACK_PRODUCT_LIST) {
+    if (await tenantAdmin.handleAdminText(user, chatId, text)) return;
     let categoryTitle;
     if (user.lastProductCode) {
       const product = await productsHandler.loadTenantProductByCode(
@@ -138,6 +208,14 @@ async function handleMessageInner(message, user) {
     return;
   }
 
+  if (await tenantOrder.handleQty(user, chatId, text)) return;
+
+  if (await tenantOrder.handleCheckoutStep(user, chatId, text)) return;
+
+  if (await tenantOrder.handleOwnerText(user, chatId, text)) return;
+
+  if (await tenantAdmin.handleAdminText(user, chatId, text)) return;
+
   if (user.orderStep && String(user.orderStep).startsWith("TSC:")) {
     await productsHandler.showTenantProducts(
       user,
@@ -145,6 +223,14 @@ async function handleMessageInner(message, user) {
       getBotContext().tenantId,
       text
     );
+    return;
+  }
+
+  if (text.startsWith("TS-")) {
+    const shown = await tenantOrder.showOrderByTracking(user, chatId, text);
+    if (!shown) {
+      await reply(user, chatId, "❌ سفارشی با این کد پیگیری یافت نشد.", await shopMenu(user));
+    }
     return;
   }
 
@@ -163,6 +249,29 @@ async function handleCallbackQuery(cq, user) {
   user = (await reloadUser(user.id)) || user;
 
   if (await tenantAdmin.handleAdminCallback(user, chatId, data)) {
+    return;
+  }
+
+  if (data.startsWith("tord:")) {
+    await tenantOrder.showShopOrderDetail(user, chatId, data.slice(5));
+    return;
+  }
+
+  if (data.startsWith("taddr:view:")) {
+    await tenantOrder.handleSavedAddressView(user, chatId, data.slice("taddr:view:".length));
+    return;
+  }
+
+  if (data === "taddr:new") {
+    await tenantOrder.startNewAddress(user, chatId);
+    return;
+  }
+
+  if (data.startsWith("TS-")) {
+    const shown = await tenantOrder.showOrderByTracking(user, chatId, data);
+    if (!shown) {
+      await reply(user, chatId, "❌ سفارشی با این کد پیگیری یافت نشد.", await shopMenu(user));
+    }
     return;
   }
 
@@ -200,6 +309,7 @@ async function handlePhoto(message, user) {
   const photo = message.photo;
   if (!photo?.length) return;
   if (await tenantAdmin.handleAdminPhoto(user, chatId, photo)) return;
+  if (await tenantOrder.handleReceiptPhoto(user, chatId, photo)) return;
   await reply(
     user,
     chatId,

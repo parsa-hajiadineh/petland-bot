@@ -5,9 +5,9 @@ const { formatPrice } = require("./price");
 const { statusLabel } = require("./order");
 const { SHOP_NAME, BANK_CARD, BANK_IBAN, BANK_HOLDER, BANK_NAME } = require("../config");
 
-function buildInvoiceText(order, items) {
+function buildInvoiceText(order, items, shopName = SHOP_NAME) {
   const lines = [
-    `🧾 فاکتور ${SHOP_NAME}`,
+    `🧾 فاکتور ${shopName}`,
     `━━━━━━━━━━━━━━━━━━`,
     `🔖 کد پیگیری: ${order.trackingCode}`,
     `📊 وضعیت: ${statusLabel(order.status)}`,
@@ -46,16 +46,20 @@ function buildInvoiceText(order, items) {
   return lines.join("\n");
 }
 
-function buildPaymentInfo() {
+function buildPaymentInfo(bank) {
+  const card = bank?.card ?? BANK_CARD;
+  const iban = bank?.iban ?? BANK_IBAN;
+  const holder = bank?.holder ?? BANK_HOLDER;
+  const name = bank?.name ?? BANK_NAME;
   const lines = [
     "💳 اطلاعات پرداخت",
     "━━━━━━━━━━━━━━━━━━",
   ];
 
-  if (BANK_CARD) lines.push(`💳 شماره کارت: ${BANK_CARD}`);
-  if (BANK_IBAN) lines.push(`🔢 شماره شبا: ${BANK_IBAN}`);
-  if (BANK_HOLDER) lines.push(`👤 به نام: ${BANK_HOLDER}`);
-  if (BANK_NAME) lines.push(`🏦 بانک: ${BANK_NAME}`);
+  if (card) lines.push(`💳 شماره کارت: ${card}`);
+  if (iban) lines.push(`🔢 شماره شبا: ${iban}`);
+  if (holder) lines.push(`👤 به نام: ${holder}`);
+  if (name) lines.push(`🏦 بانک: ${name}`);
 
   lines.push(
     "",
@@ -80,6 +84,14 @@ function buildShippingInfo() {
     "",
     "💰 هزینه ارسال به عهده مشتری است.",
   ].join("\n");
+}
+
+function buildTenantShippingInfo(shop) {
+  const lines = ["🚚 ارسال سفارش", "━━━━━━━━━━━━━━━━━━"];
+  if (shop?.address) lines.push(`📍 ${shop.address}`);
+  if (shop?.phone) lines.push(`📞 هماهنگی: ${shop.phone}`);
+  lines.push("", "هزینه و نحوه ارسال با همین فروشگاه هماهنگ می‌شود.");
+  return lines.join("\n");
 }
 
 async function generateInvoicePdf(order, items) {
@@ -124,5 +136,6 @@ module.exports = {
   buildInvoiceText,
   buildPaymentInfo,
   buildShippingInfo,
+  buildTenantShippingInfo,
   generateInvoicePdf,
 };

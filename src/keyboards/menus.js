@@ -166,6 +166,7 @@ const BTN = {
   SHOP_PRODUCTS: "📦 کالاهای فروشگاه",
   SHOP_ADD_CATEGORY: "➕ دسته جدید",
   SHOP_ADD_PRODUCT: "➕ کالای جدید",
+  SHOP_ORDERS: "🧾 سفارش‌های فروشگاه",
   APPROVE: "✅ تایید فاکتور",
   REJECT: "❌ رد فاکتور",
   PACK: "📦 بسته‌بندی شد",
@@ -217,9 +218,11 @@ function mainMenu(user) {
 }
 
 function tenantMainMenu(isOwner) {
-  const rows = [[{ text: BTN.PRODUCTS }], [{ text: BTN.HELP }]];
+  const rows = [
+    [{ text: BTN.PRODUCTS }, { text: BTN.CART }],
+    [{ text: BTN.ORDERS }, { text: BTN.HELP }],
+  ];
   if (isOwner) rows.push([{ text: BTN.SHOP_ADMIN }]);
-  rows.push([{ text: BTN.BACK_MAIN }]);
   return kb(rows);
 }
 
@@ -229,6 +232,7 @@ function tenantAdminMenu() {
     [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_HELP }],
     [{ text: BTN.SHOP_BANK }],
     [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
+    [{ text: BTN.SHOP_ORDERS }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }
@@ -274,14 +278,11 @@ function backMain() {
 
 function productDetailMenu(product) {
   const rows = [];
-  const { isMother } = require("../bot/context");
 
-  if (isMother()) {
-    if (product.status === "AVAILABLE") {
-      rows.push([{ text: BTN.ADD_CART }]);
-    }
-    rows.push([{ text: BTN.CART }]);
+  if (product.status === "AVAILABLE") {
+    rows.push([{ text: BTN.ADD_CART }]);
   }
+  rows.push([{ text: BTN.CART }]);
 
   rows.push(
     [{ text: BTN.BACK_PRODUCT_LIST }],

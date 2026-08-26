@@ -12,19 +12,38 @@ function statusLabel(status) {
   return STATUS_LABELS[status] || status;
 }
 
-function generateTrackingCode() {
+function dateStamp() {
   const now = new Date();
-  const date = [
+  return [
     now.getFullYear(),
     String(now.getMonth() + 1).padStart(2, "0"),
     String(now.getDate()).padStart(2, "0"),
   ].join("");
+}
+
+function generateTrackingCode() {
   const rand = Math.floor(1000 + Math.random() * 9000);
-  return `PL-${date}-${rand}`;
+  return `PL-${dateStamp()}-${rand}`;
+}
+
+function generateTenantTrackingCode() {
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `TS-${dateStamp()}-${rand}`;
+}
+
+function isMotherTrackingCode(code) {
+  return String(code || "").trim().startsWith("PL-");
+}
+
+function isTenantTrackingCode(code) {
+  return String(code || "").trim().startsWith("TS-");
 }
 
 module.exports = {
   statusLabel,
   generateTrackingCode,
+  generateTenantTrackingCode,
+  isMotherTrackingCode,
+  isTenantTrackingCode,
   STATUS_LABELS,
 };
