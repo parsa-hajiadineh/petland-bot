@@ -101,6 +101,11 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
+  if (text === BTN.BACK_PRODUCT_LIST) {
+    await productsHandler.backToProductList(user, chatId);
+    return;
+  }
+
   if (text === BTN.PRODUCTS || text === BTN.BACK_PRODUCTS) {
     if (user.orderStep && user.orderStep.startsWith("CAT:")) {
       await prisma.user.update({

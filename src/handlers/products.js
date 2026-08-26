@@ -214,6 +214,36 @@ ${
   }
 };
 
+module.exports.backToProductList = async function backToProductList(user, chatId) {
+  if (!user.lastProductCode) {
+    await module.exports(user, chatId);
+    return;
+  }
+
+  const product = await prisma.product.findUnique({
+    where: { code: user.lastProductCode },
+    include: { category: true },
+  });
+
+  if (!product?.category?.title || !product.brand) {
+    await module.exports(user, chatId);
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: `CAT:${product.category.title}` },
+  });
+  user.orderStep = `CAT:${product.category.title}`;
+
+  await module.exports.showBrandProducts(
+    user,
+    chatId,
+    product.category.title,
+    product.brand
+  );
+};
+
 module.exports.handleSearch = async function handleSearch(user, chatId, query) {
   const term = (query || "").trim();
   if (!term || term.length < 2) {

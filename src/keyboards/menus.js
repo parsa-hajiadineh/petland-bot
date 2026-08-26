@@ -128,6 +128,7 @@ const BTN = {
   SEARCH: "🔍 جستجوی سریع",
   BACK_MAIN: "🏠 بازگشت به منوی اصلی",
   BACK_PRODUCTS: "🔙 بازگشت به دسته‌بندی‌ها",
+  BACK_PRODUCT_LIST: "🔙 بازگشت به صفحه قبل",
   ADD_CART: "➕ افزودن به سبد",
   CLEAR_CART: "🗑 خالی کردن سبد",
   CHECKOUT: "✅ ثبت سفارش",
@@ -206,6 +207,7 @@ function productDetailMenu(product) {
 
   rows.push(
     [{ text: BTN.CART }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
     [{ text: BTN.BACK_PRODUCTS }],
     [{ text: BTN.BACK_MAIN }]
   );
