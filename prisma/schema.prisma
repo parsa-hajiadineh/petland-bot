@@ -377,6 +377,7 @@ model Tenant {
   bot             Bot?
   subscriptions   TenantSubscription[]
   messages        TenantMessage[]
+  serviceInvoices ServiceInvoice[]
 
   @@index([status])
   @@index([type])
@@ -551,6 +552,8 @@ model ServicePackage {
   title       String
   description String?
   priceToman  Int
+  kind        String   @default("SERVICE")
+  billing     String   @default("ONCE")
   isActive    Boolean  @default(true)
   isArchived  Boolean  @default(false)
   sortOrder   Int      @default(0)
@@ -574,4 +577,49 @@ model ServicePick {
 
   @@unique([userId, packageId])
   @@index([userId])
+}
+
+model ServiceInvoice {
+  id              String   @id @default(cuid())
+  trackingCode    String   @unique
+  kind            String
+  status          String   @default("WAITING_PAYMENT")
+
+  onceAmount      Int      @default(0)
+  monthlyAmount   Int      @default(0)
+  totalAmount     Int      @default(0)
+
+  periodStart     DateTime?
+  periodEnd       DateTime?
+
+  userId          String
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           ServiceInvoiceItem[]
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([kind, status])
+}
+
+model ServiceInvoiceItem {
+  id          String @id @default(cuid())
+
+  packageId   String?
+  code        String
+  title       String
+  description String?
+  unitPrice   Int
+  kind        String
+  billing     String
+  quantity    Int    @default(1)
+
+  invoiceId   String
+  invoice     ServiceInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
 }

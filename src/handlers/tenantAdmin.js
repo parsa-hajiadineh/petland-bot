@@ -569,7 +569,24 @@ async function handleAdminText(user, chatId, text) {
     return true;
   }
 
+  if (await require("./serviceBilling").handleText(user, chatId, text)) {
+    return true;
+  }
+
+  if (text === BTN.SHOP_SUBSCRIBE) {
+    await require("./serviceBilling").startTenantSubscribe(user, chatId, tenantId);
+    return true;
+  }
+  if (text === BTN.SHOP_SERVICE_INVOICES) {
+    await require("./serviceBilling").showInvoiceList(user, chatId, tenantId);
+    return true;
+  }
+
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
+    if (String(user.adminStep).startsWith("TS:SUB:")) {
+      await require("./serviceBilling").goBack(user, chatId);
+      return true;
+    }
     if (user.adminStep === "TS:ORDERS") {
       await showAdminHome(user, chatId);
       return true;

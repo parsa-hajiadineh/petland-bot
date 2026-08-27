@@ -2,6 +2,7 @@ const express = require("express");
 const { PORT } = require("./config");
 const { ensureMotherCatalog } = require("./database/prisma");
 const { ensureServicePackages } = require("./services/servicePackages");
+const { ensureServiceInvoices } = require("./services/serviceInvoices");
 const engine = require("./bot/engine");
 
 const app = express();
@@ -32,6 +33,7 @@ app.listen(PORT, async () => {
   await ensureMotherCatalog();
   try {
     await ensureServicePackages();
+    await ensureServiceInvoices();
   } catch (err) {
     console.error("SERVICE PACKAGES SKIP:", err.message);
   }

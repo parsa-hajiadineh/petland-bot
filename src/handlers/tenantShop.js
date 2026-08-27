@@ -248,6 +248,14 @@ async function handleCallbackQuery(cq, user) {
     return;
   }
 
+  if (
+    data.startsWith("sb") ||
+    data === "svcok"
+  ) {
+    await require("./serviceBilling").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (data.startsWith("tord:")) {
     await tenantOrder.showShopOrderDetail(user, chatId, data.slice(5));
     return;

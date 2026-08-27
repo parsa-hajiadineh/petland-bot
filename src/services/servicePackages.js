@@ -7,6 +7,8 @@ const DEFAULT_PACKAGES = [
     description: "راه‌اندازی ربات فروشگاهی و هزینه ماه اول",
     priceToman: 50000000,
     sortOrder: 10,
+    kind: "PACKAGE",
+    billing: "ONCE",
   },
   {
     code: "DATASHEET_SETUP",
@@ -14,6 +16,8 @@ const DEFAULT_PACKAGES = [
     description: "وارد کردن کالاها و تنظیمات اولیه از شیت داده",
     priceToman: 3000000,
     sortOrder: 20,
+    kind: "SERVICE",
+    billing: "ONCE",
   },
   {
     code: "FULL_SETUP",
@@ -21,6 +25,8 @@ const DEFAULT_PACKAGES = [
     description: "پیکربندی کامل فروشگاه توسط تیم پت‌لند",
     priceToman: 10000000,
     sortOrder: 30,
+    kind: "SERVICE",
+    billing: "ONCE",
   },
   {
     code: "MONTHLY_SUB",
@@ -28,6 +34,8 @@ const DEFAULT_PACKAGES = [
     description: "تمدید ماهانه اشتراک ربات فروشگاهی",
     priceToman: 10000000,
     sortOrder: 40,
+    kind: "PACKAGE",
+    billing: "MONTHLY",
   },
   {
     code: "MONTHLY_SUPPORT",
@@ -35,6 +43,8 @@ const DEFAULT_PACKAGES = [
     description: "پشتیبانی ماهانه تیم برای فروشگاه همکار",
     priceToman: 10000000,
     sortOrder: 50,
+    kind: "SERVICE",
+    billing: "MONTHLY",
   },
 ];
 
@@ -44,6 +54,8 @@ const PACKAGE_SELECT = {
   title: true,
   description: true,
   priceToman: true,
+  kind: true,
+  billing: true,
   isActive: true,
   isArchived: true,
   sortOrder: true,
@@ -107,6 +119,14 @@ async function ensureInner() {
     `CREATE UNIQUE INDEX IF NOT EXISTS "ServicePackage_code_key" ON "ServicePackage"("code")`
   );
   await execSql(
+    "SERVICE PACKAGE KIND SKIP:",
+    `ALTER TABLE "ServicePackage" ADD COLUMN IF NOT EXISTS "kind" TEXT NOT NULL DEFAULT 'SERVICE'`
+  );
+  await execSql(
+    "SERVICE PACKAGE BILLING SKIP:",
+    `ALTER TABLE "ServicePackage" ADD COLUMN IF NOT EXISTS "billing" TEXT NOT NULL DEFAULT 'ONCE'`
+  );
+  await execSql(
     "SERVICE PICK TABLE SKIP:",
     `CREATE TABLE IF NOT EXISTS "ServicePick" (
       "id" TEXT NOT NULL,
@@ -125,16 +145,31 @@ async function ensureInner() {
     try {
       await prisma.$executeRawUnsafe(
         `INSERT INTO "ServicePackage"
-          ("id","code","title","description","priceToman","isActive","isArchived","sortOrder","createdAt","updatedAt")
-         VALUES ($1,$2,$3,$4,$5,true,false,$6,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          ("id","code","title","description","priceToman","kind","billing","isActive","isArchived","sortOrder","createdAt","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true,false,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
          ON CONFLICT ("code") DO NOTHING`,
         newId(),
         pack.code,
         pack.title,
         pack.description,
         pack.priceToman,
+        pack.kind,
+        pack.billing,
         pack.sortOrder
       );
+    } catch (err) {
+      console.error("SERVICE SEED SKIP:", pack.code, err.message);
+    }
+    try {
+      if (pack.kind !== "SERVICE" || pack.billing !== "ONCE") {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "ServicePackage" SET "kind" = $1, "billing" = $2
+           WHERE "code" = $3 AND "kind" = 'SERVICE' AND "billing" = 'ONCE'`,
+          pack.kind,
+          pack.billing,
+          pack.code
+        );
+      }
     } catch (err) {
       console.error("SERVICE SEED SKIP:", pack.code, err.message);
     }
@@ -149,6 +184,8 @@ function mapRow(row) {
     title: row.title,
     description: row.description,
     priceToman: Number(row.priceToman),
+    kind: row.kind === "PACKAGE" ? "PACKAGE" : "SERVICE",
+    billing: row.billing === "MONTHLY" ? "MONTHLY" : "ONCE",
     isActive: Boolean(row.isActive),
     isArchived: Boolean(row.isArchived),
     sortOrder: Number(row.sortOrder),
@@ -170,20 +207,25 @@ async function listPackages({ includeArchived = false } = {}) {
   }
   const rows = includeArchived
     ? await prisma.$queryRawUnsafe(
-        `SELECT "id","code","title","description","priceToman","isActive","isArchived","sortOrder"
+        `SELECT "id","code","title","description","priceToman","kind","billing","isActive","isArchived","sortOrder"
          FROM "ServicePackage" ORDER BY "sortOrder" ASC, "createdAt" ASC`
       )
     : await prisma.$queryRawUnsafe(
-        `SELECT "id","code","title","description","priceToman","isActive","isArchived","sortOrder"
+        `SELECT "id","code","title","description","priceToman","kind","billing","isActive","isArchived","sortOrder"
          FROM "ServicePackage" WHERE "isArchived" = false
          ORDER BY "sortOrder" ASC, "createdAt" ASC`
       );
   return (rows || []).map(mapRow);
 }
 
-async function listActivePackages() {
+async function listActivePackages(filter = {}) {
   const all = await listPackages({ includeArchived: false });
-  return all.filter((pack) => pack.isActive && !pack.isArchived);
+  return all.filter((pack) => {
+    if (!pack.isActive || pack.isArchived) return false;
+    if (filter.kind && pack.kind !== filter.kind) return false;
+    if (filter.billing && pack.billing !== filter.billing) return false;
+    return true;
+  });
 }
 
 async function getPackage(id) {
@@ -200,14 +242,14 @@ async function getPackage(id) {
     }
   }
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT "id","code","title","description","priceToman","isActive","isArchived","sortOrder"
+    `SELECT "id","code","title","description","priceToman","kind","billing","isActive","isArchived","sortOrder"
      FROM "ServicePackage" WHERE "id" = $1 LIMIT 1`,
     id
   );
   return mapRow(rows?.[0]);
 }
 
-async function createPackage({ title, description, priceToman }) {
+async function createPackage({ title, description, priceToman, kind, billing }) {
   await ensureServicePackages();
   const id = newId();
   const code = `CUSTOM_${Date.now().toString(36)}`;
@@ -220,6 +262,8 @@ async function createPackage({ title, description, priceToman }) {
     title,
     description: description || null,
     priceToman,
+    kind: kind === "PACKAGE" ? "PACKAGE" : "SERVICE",
+    billing: billing === "MONTHLY" ? "MONTHLY" : "ONCE",
     isActive: true,
     isArchived: false,
     sortOrder,
@@ -232,6 +276,8 @@ async function createPackage({ title, description, priceToman }) {
           title: data.title,
           description: data.description,
           priceToman: data.priceToman,
+          kind: data.kind,
+          billing: data.billing,
           sortOrder: data.sortOrder,
         },
         select: PACKAGE_SELECT,
@@ -242,13 +288,15 @@ async function createPackage({ title, description, priceToman }) {
   }
   await prisma.$executeRawUnsafe(
     `INSERT INTO "ServicePackage"
-      ("id","code","title","description","priceToman","isActive","isArchived","sortOrder","createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,true,false,$6,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      ("id","code","title","description","priceToman","kind","billing","isActive","isArchived","sortOrder","createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,true,false,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
     data.id,
     data.code,
     data.title,
     data.description,
     data.priceToman,
+    data.kind,
+    data.billing,
     data.sortOrder
   );
   return getPackage(id);
@@ -262,6 +310,10 @@ async function updatePackage(id, patch) {
   if (patch.priceToman !== undefined) data.priceToman = patch.priceToman;
   if (patch.isActive !== undefined) data.isActive = patch.isActive;
   if (patch.isArchived !== undefined) data.isArchived = patch.isArchived;
+  if (patch.kind !== undefined) data.kind = patch.kind === "PACKAGE" ? "PACKAGE" : "SERVICE";
+  if (patch.billing !== undefined) {
+    data.billing = patch.billing === "MONTHLY" ? "MONTHLY" : "ONCE";
+  }
   if (hasPackageModel()) {
     try {
       return await prisma.servicePackage.update({

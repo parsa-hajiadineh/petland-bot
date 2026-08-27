@@ -314,7 +314,11 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   user = await reloadUser(user.id);
 
-  if (data.startsWith("svct:") || data === "svcok") {
+  if (
+    data.startsWith("sb") ||
+    data.startsWith("svct:") ||
+    data === "svcok"
+  ) {
     await colleagueHandler.handleServiceCallback(user, chatId, data);
     return;
   }

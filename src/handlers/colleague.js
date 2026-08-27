@@ -4,15 +4,14 @@ const {
   WHOLESALE_MIN_ORDER,
 } = require("../config");
 const { reply } = require("../bot/messenger");
-const { BTN, mainMenu, backMain, kb, inlineKb } = require("../keyboards/menus");
+const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const {
   provisionShop,
   findOwnedTenant,
   persistColleagueShop,
 } = require("../services/shopProvision");
-const services = require("../services/servicePackages");
-const bale = require("../bot/bale");
+const serviceBilling = require("./serviceBilling");
 
 const PROFILE_STEPS = [
   "COLLEAGUE_NAME",
@@ -83,161 +82,6 @@ function summaryText(user) {
   }
   lines.push("", "اگر موردی اشتباه است با بازگشت اصلاح کنید.");
   return lines.join("\n");
-}
-
-const PICK_STEP = "SVC_PICK";
-
-async function selectedPackages(user) {
-  const picks = await services.listPicks(user.id);
-  const ids = new Set(picks.map((row) => row.packageId));
-  const packs = await services.listActivePackages();
-  return packs.filter((pack) => ids.has(pack.id));
-}
-
-async function showServicePicker(user, chatId) {
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { orderStep: PICK_STEP },
-  });
-  user.orderStep = PICK_STEP;
-
-  let packs = [];
-  try {
-    packs = await services.listActivePackages();
-  } catch (err) {
-    console.error("COLLEAGUE SERVICES:", err);
-    await reply(
-      user,
-      chatId,
-      "خواندن خدمات ممکن نشد. بعداً دوباره تلاش کنید.",
-      mainMenu(user)
-    );
-    return;
-  }
-
-  if (!packs.length) {
-    await reply(
-      user,
-      chatId,
-      "فعلاً پکیج فعالی برای انتخاب نیست. ساخت ربات ادامه پیدا می‌کند.",
-      mainMenu(user)
-    );
-    await continueShopCreate(user, chatId);
-    return;
-  }
-
-  const picks = await services.listPicks(user.id);
-  const selected = new Set(picks.map((row) => row.packageId));
-  const chosen = packs.filter((pack) => selected.has(pack.id));
-  const total = chosen.reduce((sum, pack) => sum + pack.priceToman, 0);
-
-  const lines = [
-    "💼 خدمات ربات فروشگاهی",
-    "هیچ خدمتی رایگان نیست. موارد مدنظر را انتخاب کنید.",
-    "",
-  ];
-  for (const pack of packs) {
-    const mark = selected.has(pack.id) ? "✅" : "▫️";
-    lines.push(`${mark} ${pack.title}`);
-    lines.push(`   ${formatPrice(pack.priceToman)}`);
-    if (pack.description) lines.push(`   ${pack.description}`);
-    lines.push("");
-  }
-  lines.push(`جمع انتخاب‌ها: ${formatPrice(total)}`);
-
-  const rows = packs.map((pack) => [
-    {
-      text: `${selected.has(pack.id) ? "✅" : "➕"} ${pack.title}`,
-      callback_data: `svct:${pack.id}`.slice(0, 64),
-    },
-  ]);
-  rows.push([{ text: BTN.SVC_CONFIRM, callback_data: "svcok" }]);
-
-  await reply(user, chatId, lines.join("\n"), backMain());
-  const result = await bale.sendKeyboard(
-    chatId,
-    "روی هر خدمت بزنید تا انتخاب شود:",
-    inlineKb(rows)
-  );
-  const msgId = result?.result?.message_id;
-  if (msgId) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastMessageId: msgId },
-    });
-  }
-}
-
-async function toggleServicePick(user, chatId, packageId) {
-  const pack = await services.getPackage(packageId);
-  if (!pack || !pack.isActive || pack.isArchived) {
-    await reply(user, chatId, "این خدمت الان قابل انتخاب نیست.", backMain());
-    return;
-  }
-  const picks = await services.listPicks(user.id);
-  const ids = picks.map((row) => row.packageId);
-  const next = ids.includes(packageId)
-    ? ids.filter((id) => id !== packageId)
-    : [...ids, packageId];
-  await services.replacePicks(user.id, next);
-  await showServicePicker(user, chatId);
-}
-
-async function confirmServicePicks(user, chatId) {
-  const chosen = await selectedPackages(user);
-  if (!chosen.length) {
-    await reply(
-      user,
-      chatId,
-      "حداقل یک خدمت را انتخاب کنید. هیچ خدمتی رایگان نیست.",
-      backMain()
-    );
-    await showServicePicker(user, chatId);
-    return;
-  }
-  const total = chosen.reduce((sum, pack) => sum + pack.priceToman, 0);
-  const lines = ["✅ خدمات انتخاب‌شده:", ""];
-  for (const pack of chosen) {
-    lines.push(`• ${pack.title} — ${formatPrice(pack.priceToman)}`);
-  }
-  lines.push("", `جمع: ${formatPrice(total)}`);
-  lines.push("", "پرداخت و فاکتور این مرحله هنوز فعال نیست. ساخت ربات ادامه می‌یابد.");
-  await reply(user, chatId, lines.join("\n"));
-  await continueShopCreate(user, chatId);
-}
-
-async function continueShopCreate(user, chatId) {
-  const tenant = await findOwnedTenant(user.id);
-  if (tenant?.bot) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: null },
-    });
-    await reply(
-      user,
-      chatId,
-      `ربات این فروشگاه قبلاً ثبت شده است${
-        tenant.bot.username ? `: @${tenant.bot.username}` : ""
-      }.`,
-      mainMenu(user)
-    );
-    return;
-  }
-  if (tenant) {
-    await startBotCreate(user, chatId, tenant.id);
-    return;
-  }
-
-  const d = profileData(user);
-  if (d.fullName && d.phone && d.brand) {
-    const saved = await persistColleague(user);
-    if (saved.ok) {
-      await startBotCreate(user, chatId, saved.tenant.id);
-      return;
-    }
-  }
-
-  await startProfile(user, chatId);
 }
 
 async function persistColleague(user) {
@@ -380,7 +224,7 @@ ${snapshot}
 
 ${snapshot}`
   );
-  await startBotCreate(user, chatId, saved.tenant.id);
+  await serviceBilling.startInitial(user, chatId, saved.tenant.id);
 }
 
 async function startBotCreate(user, chatId, tenantId) {
@@ -558,32 +402,23 @@ module.exports = async function colleagueHandler(user, chatId, text) {
         chatId,
         `ربات این فروشگاه قبلاً ثبت شده است${
           tenant.bot.username ? `: @${tenant.bot.username}` : ""
-        }.`,
+        }.
+
+برای فاکتور راه‌اندازی یا تمدید اشتراک، در همان ربات فروشگاه بزنید:
+⚙️ مدیریت فروشگاه → 💳 خرید اشتراک`,
         mainMenu(user)
       );
       return true;
     }
-
-    await showServicePicker(user, chatId);
-    return true;
-  }
-
-  if (text === BTN.SVC_CONFIRM && user.orderStep === PICK_STEP) {
-    await confirmServicePicks(user, chatId);
-    return true;
-  }
-
-  if (user.orderStep === PICK_STEP) {
-    if (
-      Object.values(BTN).includes(text) &&
-      text !== BTN.SVC_CONFIRM &&
-      text !== BTN.CREATE_SHOP_BOT
-    ) {
-      return false;
+    if (!tenant) {
+      await startProfile(user, chatId);
+      return true;
     }
-    await showServicePicker(user, chatId);
+    await serviceBilling.startInitial(user, chatId, tenant.id);
     return true;
   }
+
+  if (await serviceBilling.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_QUESTION && PROFILE_STEPS.includes(user.orderStep)) {
     await goProfileBack(user, chatId);
@@ -779,13 +614,13 @@ module.exports.handleServiceCallback = async function handleServiceCallback(
   chatId,
   data
 ) {
-  if (data === "svcok") {
-    await confirmServicePicks(user, chatId);
-    return true;
-  }
-  if (data.startsWith("svct:")) {
-    await toggleServicePick(user, chatId, data.slice(5));
-    return true;
-  }
-  return false;
+  return serviceBilling.handleCallback(user, chatId, data);
+};
+
+module.exports.continueAfterInvoice = async function continueAfterInvoice(
+  user,
+  chatId,
+  tenantId
+) {
+  await startBotCreate(user, chatId, tenantId);
 };

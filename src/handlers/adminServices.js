@@ -62,11 +62,15 @@ function packageSummary(pack) {
     : pack.isActive
       ? "فعال"
       : "غیرفعال";
+  const kindLabel = pack.kind === "PACKAGE" ? "پکیج" : "خدمت";
+  const billingLabel = pack.billing === "MONTHLY" ? "ماهانه" : "یک‌بار";
   const desc = (pack.description || "").trim() || "—";
   return [
     `💼 ${pack.title}`,
     "━━━━━━━━━━━━━━━━━━",
     `💰 قیمت: ${formatPrice(pack.priceToman)}`,
+    `📦 نوع: ${kindLabel}`,
+    `📅 دوره: ${billingLabel}`,
     `📊 وضعیت: ${state}`,
     `📝 ${desc}`,
   ].join("\n");
@@ -223,6 +227,20 @@ async function handleText(user, chatId, text) {
       }
       const updated = await services.updatePackage(pack.id, { isActive: !pack.isActive });
       await showDetail(user, chatId, updated.id);
+      return true;
+    }
+    if (text === BTN.SVC_KIND) {
+      await services.updatePackage(pack.id, {
+        kind: pack.kind === "PACKAGE" ? "SERVICE" : "PACKAGE",
+      });
+      await showDetail(user, chatId, pack.id);
+      return true;
+    }
+    if (text === BTN.SVC_BILLING) {
+      await services.updatePackage(pack.id, {
+        billing: pack.billing === "MONTHLY" ? "ONCE" : "MONTHLY",
+      });
+      await showDetail(user, chatId, pack.id);
       return true;
     }
     if (text === BTN.SVC_ARCHIVE) {

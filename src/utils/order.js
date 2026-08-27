@@ -31,6 +31,11 @@ function generateTenantTrackingCode() {
   return `TS-${dateStamp()}-${rand}`;
 }
 
+function generateServiceInvoiceCode() {
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `SI-${dateStamp()}-${rand}`;
+}
+
 function isMotherTrackingCode(code) {
   return String(code || "").trim().startsWith("PL-");
 }
@@ -43,6 +48,7 @@ module.exports = {
   statusLabel,
   generateTrackingCode,
   generateTenantTrackingCode,
+  generateServiceInvoiceCode,
   isMotherTrackingCode,
   isTenantTrackingCode,
   STATUS_LABELS,
