@@ -250,6 +250,7 @@ async function handleCallbackQuery(cq, user) {
 
   if (
     data.startsWith("sb") ||
+    data.startsWith("siv:") ||
     data === "svcok"
   ) {
     await require("./serviceBilling").handleCallback(user, chatId, data);
@@ -313,6 +314,9 @@ async function handlePhoto(message, user) {
   const photo = message.photo;
   if (!photo?.length) return;
   if (await tenantAdmin.handleAdminPhoto(user, chatId, photo)) return;
+  if (await require("./serviceBilling").handleReceiptPhoto(user, chatId, photo)) {
+    return;
+  }
   if (await tenantOrder.handleReceiptPhoto(user, chatId, photo)) return;
   await reply(
     user,

@@ -673,6 +673,10 @@ async function handleAdminText(user, chatId, text) {
       await showCreditWallet(user, chatId, tenantId);
       return true;
     }
+    if (user.adminStep === "TS:SINV:LIST") {
+      await showAdminHome(user, chatId);
+      return true;
+    }
     if (
       user.adminStep === "TS:MENU" ||
       user.adminStep === "TS:PROFILE" ||

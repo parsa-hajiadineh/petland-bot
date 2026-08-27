@@ -592,6 +592,7 @@ model ServiceInvoice {
 
   periodStart     DateTime?
   periodEnd       DateTime?
+  receiptImage    String?
 
   userId          String
   tenantId        String?

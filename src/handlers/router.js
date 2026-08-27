@@ -316,6 +316,7 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   if (
     data.startsWith("sb") ||
+    data.startsWith("siv:") ||
     data.startsWith("svct:") ||
     data === "svcok"
   ) {
@@ -479,6 +480,10 @@ module.exports.handlePhoto = async function handlePhoto(message, user) {
   if (!photo?.length) return;
 
   if (isAdmin(user) && (await adminHandler.handleAdminPhoto(user, chatId, photo))) {
+    return;
+  }
+
+  if (await require("./serviceBilling").handleReceiptPhoto(user, chatId, photo)) {
     return;
   }
 

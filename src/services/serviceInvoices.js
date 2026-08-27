@@ -45,6 +45,7 @@ async function ensureInner() {
       "periodEnd" TIMESTAMP(3),
       "userId" TEXT NOT NULL,
       "tenantId" TEXT,
+      "receiptImage" TEXT,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "ServiceInvoice_pkey" PRIMARY KEY ("id")
@@ -69,6 +70,10 @@ async function ensureInner() {
       "invoiceId" TEXT NOT NULL,
       CONSTRAINT "ServiceInvoiceItem_pkey" PRIMARY KEY ("id")
     )`
+  );
+  await execSql(
+    "SERVICE INVOICE RECEIPT COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "receiptImage" TEXT`
   );
 }
 
@@ -99,6 +104,7 @@ function mapInvoice(row, items = []) {
     periodEnd: row.periodEnd,
     userId: row.userId,
     tenantId: row.tenantId,
+    receiptImage: row.receiptImage || null,
     createdAt: row.createdAt,
     items,
   };
@@ -179,7 +185,7 @@ async function listPendingInvoices(take = 20) {
   if (hasInvoiceModel()) {
     try {
       return await prisma.serviceInvoice.findMany({
-        where: { status: "WAITING_PAYMENT" },
+        where: { status: "WAITING_APPROVAL" },
         orderBy: { createdAt: "desc" },
         take,
         include: { items: true },
@@ -189,7 +195,7 @@ async function listPendingInvoices(take = 20) {
     }
   }
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT * FROM "ServiceInvoice" WHERE "status" = 'WAITING_PAYMENT' ORDER BY "createdAt" DESC LIMIT $1`,
+    `SELECT * FROM "ServiceInvoice" WHERE "status" = 'WAITING_APPROVAL' ORDER BY "createdAt" DESC LIMIT $1`,
     take
   );
   const invoices = [];
@@ -219,6 +225,29 @@ async function approveInvoice(id) {
   await prisma.$executeRawUnsafe(
     `UPDATE "ServiceInvoice" SET "status" = 'APPROVED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
     id
+  );
+  return getInvoice(id);
+}
+
+async function markWaitingApproval(id, receiptImage) {
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.update({
+        where: { id },
+        data: { status: "WAITING_APPROVAL", receiptImage: receiptImage || null },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE RECEIPT PRISMA SKIP:", err.message);
+    }
+  }
+  await prisma.$executeRawUnsafe(
+    `UPDATE "ServiceInvoice"
+     SET "status" = 'WAITING_APPROVAL', "receiptImage" = $2, "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "id" = $1`,
+    id,
+    receiptImage || null
   );
   return getInvoice(id);
 }
@@ -299,13 +328,46 @@ function buildQuote(packs, invoiceKind) {
   };
 }
 
+function invoiceStatusLabel(status) {
+  if (status === "APPROVED") return "تایید شده";
+  if (status === "WAITING_APPROVAL") return "در انتظار تایید پرداخت";
+  return "در انتظار پرداخت";
+}
+
+function formatFaDotDate(value) {
+  if (!value) return "—";
+  return new Date(value)
+    .toLocaleDateString("fa-IR")
+    .replace(/‏/g, "")
+    .replace(/[\/\-]/g, ".");
+}
+
+function formatPeriodButton(invoice) {
+  return `اشتراک ${formatFaDotDate(invoice.periodStart)} الی ${formatFaDotDate(
+    invoice.periodEnd
+  )}`;
+}
+
 function formatInvoiceText(invoice) {
   const isInitial = invoice.kind === "INITIAL";
   const title = isInitial ? "🧾 فاکتور راه‌اندازی" : "🧾 فاکتور اشتراک ماهانه";
-  const lines = [title, `🔖 ${invoice.trackingCode}`, "━━━━━━━━━━━━━━━━━━", ""];
+  const created = invoice.createdAt
+    ? new Date(invoice.createdAt).toLocaleDateString("fa-IR")
+    : "—";
+  const lines = [
+    title,
+    `🔖 ${invoice.trackingCode}`,
+    `📅 تاریخ ثبت: ${created}`,
+    "━━━━━━━━━━━━━━━━━━",
+    "",
+    "پکیج‌ها و خدمات (قیمت قفل‌شده):",
+    "",
+  ];
   for (const item of invoice.items || []) {
-    lines.push(`${item.title}`);
-    lines.push(`${formatPrice(item.unitPrice)}`);
+    const qty = Number(item.quantity || 1);
+    lines.push(`• ${item.title}`);
+    if (qty > 1) lines.push(`  تعداد: ${qty}`);
+    lines.push(`  ${formatPrice(item.unitPrice)}`);
     lines.push("");
   }
   lines.push("────────────────────────────");
@@ -321,11 +383,13 @@ function formatInvoiceText(invoice) {
     lines.push(`ماهانه: ${formatPrice(invoice.totalAmount)}`);
   }
   if (invoice.periodStart && invoice.periodEnd) {
-    const start = new Date(invoice.periodStart).toLocaleDateString("fa-IR");
-    const end = new Date(invoice.periodEnd).toLocaleDateString("fa-IR");
-    lines.push(`دوره: ${start} تا ${end}`);
+    lines.push(
+      `دوره اشتراک: ${formatFaDotDate(invoice.periodStart)} الی ${formatFaDotDate(
+        invoice.periodEnd
+      )}`
+    );
   }
-  lines.push(`وضعیت: ${invoice.status === "APPROVED" ? "تایید شده" : "در انتظار تایید پرداخت"}`);
+  lines.push(`وضعیت: ${invoiceStatusLabel(invoice.status)}`);
   return lines.join("\n");
 }
 
@@ -485,6 +549,9 @@ module.exports = {
   getInvoice,
   listPendingInvoices,
   approveInvoice,
+  markWaitingApproval,
+  invoiceStatusLabel,
+  formatPeriodButton,
   buildQuote,
   formatInvoiceText,
   formatQuoteText,

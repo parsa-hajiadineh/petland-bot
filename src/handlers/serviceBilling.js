@@ -3,8 +3,9 @@ const { reply, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { getBotContext } = require("../bot/context");
 const { ADMIN_BALE_IDS } = require("../config");
-const { BTN, kb, inlineKb, backMain, mainMenu, tenantAdminMenu } = require("../keyboards/menus");
+const { BTN, kb, inlineKb, backMain, mainMenu, tenantAdminMenu, paymentMenu } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
+const { buildPaymentInfo } = require("../utils/invoice");
 const packages = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
 
@@ -14,6 +15,10 @@ const MOTHER_CART = "SB:I:CART";
 const TENANT_LIST = "TS:SUB:LIST";
 const TENANT_VIEW = "TS:SUB:VIEW";
 const TENANT_CART = "TS:SUB:CART";
+const TENANT_PAY = "TS:SUB:PAY";
+const TENANT_INV_LIST = "TS:SINV:LIST";
+const TENANT_INV_VIEW = "TS:SINV:VIEW";
+const MOTHER_PAY = "SB:I:PAY";
 const REQUIRED_INITIAL = "SETUP_FIRST_MONTH";
 const REQUIRED_RENEWAL = "MONTHLY_SUB";
 
@@ -31,12 +36,27 @@ function proformaMenu() {
   return kb([[{ text: BTN.SVC_ISSUE }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
 }
 
+function tenantPayMenu() {
+  return kb([
+    [{ text: BTN.UPLOAD_RECEIPT }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function invoiceListMenu() {
+  return kb([[{ text: BTN.BACK_PRODUCT_LIST }]]);
+}
+
 function isMotherStep(step) {
   return Boolean(step && String(step).startsWith("SB:I:"));
 }
 
 function isTenantStep(step) {
   return Boolean(step && String(step).startsWith("TS:SUB:"));
+}
+
+function isTenantInvoiceStep(step) {
+  return Boolean(step && String(step).startsWith("TS:SINV:"));
 }
 
 async function shopHasBot(tenantId) {
@@ -180,7 +200,7 @@ async function sendInline(user, chatId, caption, rows) {
   }
 }
 
-async function showCatalog(user, chatId, ctx) {
+async function showCatalog(user, chatId, ctx, prefix = "") {
   if (ctx.source === "mother") await setMotherStep(user, MOTHER_LIST);
   else await setTenantStep(user, TENANT_LIST);
   const list = await visiblePackages(ctx.tenantId);
@@ -188,7 +208,7 @@ async function showCatalog(user, chatId, ctx) {
     await reply(
       user,
       chatId,
-      "سرویس فعالی برای انتخاب نیست.",
+      `${prefix}سرویس فعالی برای انتخاب نیست.`,
       ctx.source === "tenant" ? tenantAdminMenu() : backMain()
     );
     return;
@@ -196,7 +216,7 @@ async function showCatalog(user, chatId, ctx) {
   await reply(
     user,
     chatId,
-    "💳 خرید اشتراک\nروی هر مورد بزنید تا توضیحات را ببینید. بعد از انتخاب‌ها، پیش‌فاکتور را باز کنید.",
+    `${prefix}💳 خرید اشتراک\nروی هر مورد بزنید تا توضیحات را ببینید. بعد از انتخاب‌ها، پیش‌فاکتور را باز کنید.`,
     catalogMenu(ctx.source)
   );
   const rows = list.map((pack) => [
@@ -319,12 +339,10 @@ async function selectCurrent(user, chatId) {
     return true;
   }
   const added = await addPick(user.id, pack.id);
-  await reply(
-    user,
-    chatId,
-    added ? "✅ به پیش‌فاکتور اضافه شد." : "این مورد از قبل در پیش‌فاکتور هست.",
-    detailMenu()
-  );
+  const note = added
+    ? "✅ به پیش‌فاکتور اضافه شد.\n\n"
+    : "این مورد از قبل در پیش‌فاکتور هست.\n\n";
+  await showCatalog(user, chatId, ctx, note);
   return true;
 }
 
@@ -362,33 +380,7 @@ async function issueInvoice(user, chatId) {
       packs: chosen,
     });
     await packages.replacePicks(user.id, []);
-    const waitNote =
-      ctx.source === "mother" && ctx.flow === "INITIAL"
-        ? "\n\nتا تایید پرداخت توسط ادمین پت‌لند امکان ساخت ربات نیست. بعد از تایید، از ربات مادر دکمه «ساخت ربات فروشگاهی» را بزنید."
-        : "\n\nبعد از تایید پرداخت توسط ادمین پت‌لند، وضعیت این فاکتور به‌روز می‌شود.";
-    await prisma.user.update({
-      where: { id: user.id },
-      data:
-        ctx.source === "tenant"
-          ? { adminStep: "TS:MENU" }
-          : { orderStep: null, pendingOrderId: null },
-    });
-    if (ctx.source === "tenant") user.adminStep = "TS:MENU";
-    else {
-      user.orderStep = null;
-      user.pendingOrderId = null;
-    }
-    await reply(
-      user,
-      chatId,
-      `${invoices.formatInvoiceText(invoice)}\n\nقیمت این فاکتور قفل شد و با تغییر پکیج‌ها عوض نمی‌شود.${waitNote}`,
-      ctx.source === "tenant" ? tenantAdminMenu() : mainMenu(user)
-    );
-    await notifyMotherAdmins(
-      `🧾 فاکتور خدمات جدید\n🔖 ${invoice.trackingCode}\n💰 ${formatPrice(
-        invoice.totalAmount
-      )}\n\nاز پنل ادمین → فاکتور خدمات همکاران تایید کنید.`
-    );
+    await startPayment(user, chatId, invoice, ctx.source, tenantId);
   } catch (err) {
     console.error("SERVICE INVOICE ISSUE:", err);
     await reply(user, chatId, "صدور فاکتور ممکن نشد. دوباره تلاش کنید.");
@@ -396,16 +388,144 @@ async function issueInvoice(user, chatId) {
   return true;
 }
 
+function payKeyboard(source) {
+  return source === "tenant" ? tenantPayMenu() : paymentMenu();
+}
+
+async function startPayment(user, chatId, invoice, source, tenantId) {
+  if (source === "tenant") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: TENANT_PAY, pendingOrderId: invoice.id },
+    });
+    user.adminStep = TENANT_PAY;
+    user.pendingOrderId = invoice.id;
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        orderStep: MOTHER_PAY,
+        pendingOrderId: invoice.id,
+        ...(tenantId ? {} : {}),
+      },
+    });
+    user.orderStep = MOTHER_PAY;
+    user.pendingOrderId = invoice.id;
+  }
+  const extra =
+    source === "mother"
+      ? "\n\nتا تایید پرداخت توسط ادمین پت‌لند امکان ساخت ربات نیست."
+      : "";
+  await reply(
+    user,
+    chatId,
+    `${invoices.formatInvoiceText(invoice)}\n\n${buildPaymentInfo()}${extra}`,
+    payKeyboard(source)
+  );
+}
+
+async function handleReceiptPhoto(user, chatId, photo) {
+  const motherPay = user.orderStep === MOTHER_PAY;
+  const tenantPay = user.adminStep === TENANT_PAY;
+  if (!motherPay && !tenantPay) return false;
+  const invoiceId = user.pendingOrderId;
+  if (!invoiceId) return false;
+  const fileId = photo[photo.length - 1]?.file_id || photo[photo.length - 1]?.fileId;
+  if (!fileId) return false;
+  const current = await invoices.getInvoice(invoiceId);
+  if (!current || current.status === "APPROVED") return false;
+  const invoice = await invoices.markWaitingApproval(invoiceId, fileId);
+  if (tenantPay) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "TS:MENU", pendingOrderId: null },
+    });
+    user.adminStep = "TS:MENU";
+    user.pendingOrderId = null;
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, pendingOrderId: null },
+    });
+    user.orderStep = null;
+    user.pendingOrderId = null;
+  }
+  await reply(
+    user,
+    chatId,
+    `✅ رسید دریافت شد.\n\n${invoices.formatInvoiceText(invoice)}\n\nپس از بررسی ادمین، نتیجه اعلام می‌شود.`,
+    tenantPay ? tenantAdminMenu() : mainMenu(user)
+  );
+  await notifyMotherAdmins(
+    `🧾 رسید فاکتور خدمات\n🔖 ${invoice.trackingCode}\n💰 ${formatPrice(
+      invoice.totalAmount
+    )}\n\nاز پنل ادمین → فاکتور خدمات همکاران تایید کنید.`
+  );
+  return true;
+}
+
 async function handleCallback(user, chatId, data) {
   if (data.startsWith("sbv:")) return showDetail(user, chatId, data.slice(4));
   if (data.startsWith("sbx:")) return removeFromProforma(user, chatId, data.slice(4));
+  if (data.startsWith("siv:")) {
+    return showInvoiceDetail(user, chatId, data.slice(4));
+  }
   if (data === "sbinv") return issueInvoice(user, chatId);
   return false;
 }
 
 async function handleText(user, chatId, text) {
+  if (isTenantInvoiceStep(user.adminStep)) {
+    if (text === BTN.UPLOAD_RECEIPT && user.pendingOrderId) {
+      const inv = await invoices.getInvoice(user.pendingOrderId);
+      if (inv && inv.status === "WAITING_PAYMENT") {
+        await startPayment(
+          user,
+          chatId,
+          inv,
+          "tenant",
+          getBotContext().tenantId
+        );
+        return true;
+      }
+    }
+    if (text === BTN.BACK_PRODUCT_LIST) {
+      if (user.adminStep === TENANT_INV_VIEW) {
+        await showInvoiceList(user, chatId, getBotContext().tenantId);
+        return true;
+      }
+      return false;
+    }
+    if (text === BTN.BACK_MAIN) return false;
+    return true;
+  }
+
   const ctx = await currentContext(user);
   if (!ctx) return false;
+  if (ctx.phase === "PAY") {
+    if (text === BTN.UPLOAD_RECEIPT) {
+      await reply(
+        user,
+        chatId,
+        "📸 لطفاً اسکرین‌شات رسید پرداخت را ارسال کنید.",
+        payKeyboard(ctx.source)
+      );
+      return true;
+    }
+    if (text === BTN.BACK_PRODUCT_LIST) return goBack(user, chatId);
+    if (text === BTN.BACK_MAIN) {
+      if (ctx.source === "mother") {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { orderStep: null, pendingOrderId: null },
+        });
+        user.orderStep = null;
+        user.pendingOrderId = null;
+      }
+      return false;
+    }
+    return true;
+  }
   if (text === BTN.SVC_SELECT) return selectCurrent(user, chatId);
   if (text === BTN.SVC_PROFORMA) return showProforma(user, chatId);
   if (text === BTN.SVC_ISSUE) return issueInvoice(user, chatId);
@@ -417,6 +537,27 @@ async function handleText(user, chatId, text) {
 async function goBack(user, chatId) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
+  if (ctx.phase === "PAY") {
+    if (ctx.source === "tenant") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { adminStep: "TS:MENU", pendingOrderId: null },
+      });
+      user.adminStep = "TS:MENU";
+      user.pendingOrderId = null;
+      const tenantAdmin = require("./tenantAdmin");
+      await tenantAdmin.showAdminHome(user, chatId);
+      return true;
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, pendingOrderId: null },
+    });
+    user.orderStep = null;
+    user.pendingOrderId = null;
+    await reply(user, chatId, "از منوی زیر استفاده کنید.", mainMenu(user));
+    return true;
+  }
   if (ctx.phase === "VIEW" || ctx.phase === "CART") {
     await showCatalog(user, chatId, ctx);
     return true;
@@ -430,21 +571,51 @@ async function goBack(user, chatId) {
 }
 
 async function showInvoiceList(user, chatId, tenantId) {
+  await setTenantStep(user, TENANT_INV_LIST);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { pendingOrderId: null },
+  });
+  user.pendingOrderId = null;
   const rows = await invoices.listInvoices(tenantId, 10);
   if (!rows.length) {
     await reply(user, chatId, "هنوز فاکتور خدماتی صادر نشده.", tenantAdminMenu());
     return;
   }
-  const lines = ["🧾 فاکتورهای خدمات", ""];
-  for (const inv of rows) {
-    const label = inv.kind === "INITIAL" ? "راه‌اندازی" : "ماهانه";
-    const status = inv.status === "APPROVED" ? "تایید شده" : "در انتظار تایید";
-    lines.push(
-      `🔖 ${inv.trackingCode} | ${label} | ${formatPrice(inv.totalAmount)} | ${status}`
-    );
+  await reply(
+    user,
+    chatId,
+    "🧾 فاکتورهای خدمات\nروی هر مورد بزنید تا جزئیات را ببینید.\n\nفقط ده فاکتور آخر شما قابل مشاهده می‌باشد.",
+    invoiceListMenu()
+  );
+  const buttons = rows.map((inv) => [
+    {
+      text: invoices.formatPeriodButton(inv).slice(0, 64),
+      callback_data: `siv:${inv.id}`.slice(0, 64),
+    },
+  ]);
+  await sendInline(user, chatId, "فاکتورها:", buttons);
+}
+
+async function showInvoiceDetail(user, chatId, invoiceId) {
+  const invoice = await invoices.getInvoice(invoiceId);
+  if (!invoice) {
+    await reply(user, chatId, "این فاکتور پیدا نشد.", invoiceListMenu());
+    await showInvoiceList(user, chatId, getBotContext().tenantId);
+    return true;
   }
-  lines.push("", "مبالغ فاکتورهای قبلی با تغییر قیمت پکیج عوض نمی‌شوند.");
-  await reply(user, chatId, lines.join("\n"), tenantAdminMenu());
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: TENANT_INV_VIEW, pendingOrderId: invoice.id },
+  });
+  user.adminStep = TENANT_INV_VIEW;
+  user.pendingOrderId = invoice.id;
+  const keyboard =
+    invoice.status === "WAITING_PAYMENT"
+      ? tenantPayMenu()
+      : invoiceListMenu();
+  await reply(user, chatId, invoices.formatInvoiceText(invoice), keyboard);
+  return true;
 }
 
 module.exports = {
@@ -452,8 +623,11 @@ module.exports = {
   startTenantSubscribe,
   handleCallback,
   handleText,
+  handleReceiptPhoto,
   goBack,
   isMotherStep,
   isTenantStep,
+  isTenantInvoiceStep,
   showInvoiceList,
+  showInvoiceDetail,
 };
