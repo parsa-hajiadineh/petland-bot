@@ -11,6 +11,7 @@ const {
   findOwnedTenant,
   persistColleagueShop,
 } = require("../services/shopProvision");
+const invoices = require("../services/serviceInvoices");
 const serviceBilling = require("./serviceBilling");
 
 const PROFILE_STEPS = [
@@ -224,7 +225,57 @@ ${snapshot}
 
 ${snapshot}`
   );
-  await serviceBilling.startInitial(user, chatId, saved.tenant.id);
+  await gateShopBotCreate(user, chatId, saved.tenant);
+}
+
+async function waitSetupApproval(user, chatId, invoice) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: null, pendingOrderId: null },
+  });
+  user.orderStep = null;
+  user.pendingOrderId = null;
+  const code = invoice?.trackingCode ? ` ${invoice.trackingCode}` : "";
+  await reply(
+    user,
+    chatId,
+    `فاکتور راه‌اندازی${code} هنوز توسط ادمین پت‌لند تایید نشده است.
+
+تا تایید پرداخت هزینه راه‌اندازی، امکان ساخت ربات وجود ندارد.
+بعد از تایید، دوباره «ساخت ربات فروشگاهی» را بزنید.`,
+    mainMenu(user)
+  );
+}
+
+async function gateShopBotCreate(user, chatId, tenant) {
+  if (tenant?.bot) {
+    await reply(
+      user,
+      chatId,
+      `ربات این فروشگاه قبلاً ثبت شده است${
+        tenant.bot.username ? `: @${tenant.bot.username}` : ""
+      }.
+
+برای تمدید اشتراک، در همان ربات فروشگاه بزنید:
+⚙️ مدیریت فروشگاه → 💳 خرید اشتراک`,
+      mainMenu(user)
+    );
+    return;
+  }
+  if (!tenant) {
+    await startProfile(user, chatId);
+    return;
+  }
+  const initial = await invoices.getInitialInvoice(tenant.id);
+  if (initial?.status === "APPROVED") {
+    await startBotCreate(user, chatId, tenant.id);
+    return;
+  }
+  if (initial) {
+    await waitSetupApproval(user, chatId, initial);
+    return;
+  }
+  await serviceBilling.startInitial(user, chatId, tenant.id);
 }
 
 async function startBotCreate(user, chatId, tenantId) {
@@ -283,6 +334,23 @@ async function registerBot(user, chatId, rawToken) {
         `ربات این فروشگاه قبلاً ثبت شده است${at}.`,
         mainMenu(user)
       );
+      return;
+    }
+
+    if (result.code === "NEED_SETUP_INVOICE") {
+      const tenant = await findOwnedTenant(user.id);
+      await serviceBilling.startInitial(user, chatId, tenant?.id);
+      return;
+    }
+
+    if (result.code === "NEED_APPROVED_SETUP") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { orderStep: null, pendingOrderId: null },
+      });
+      await waitSetupApproval(user, chatId, {
+        trackingCode: result.trackingCode,
+      });
       return;
     }
 
@@ -394,27 +462,8 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
   if (text === BTN.CREATE_SHOP_BOT) {
     if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
-
     const tenant = await findOwnedTenant(user.id);
-    if (tenant?.bot) {
-      await reply(
-        user,
-        chatId,
-        `ربات این فروشگاه قبلاً ثبت شده است${
-          tenant.bot.username ? `: @${tenant.bot.username}` : ""
-        }.
-
-برای فاکتور راه‌اندازی یا تمدید اشتراک، در همان ربات فروشگاه بزنید:
-⚙️ مدیریت فروشگاه → 💳 خرید اشتراک`,
-        mainMenu(user)
-      );
-      return true;
-    }
-    if (!tenant) {
-      await startProfile(user, chatId);
-      return true;
-    }
-    await serviceBilling.startInitial(user, chatId, tenant.id);
+    await gateShopBotCreate(user, chatId, tenant);
     return true;
   }
 
@@ -620,7 +669,7 @@ module.exports.handleServiceCallback = async function handleServiceCallback(
 module.exports.continueAfterInvoice = async function continueAfterInvoice(
   user,
   chatId,
-  tenantId
+  invoice
 ) {
-  await startBotCreate(user, chatId, tenantId);
+  await waitSetupApproval(user, chatId, invoice);
 };

@@ -1,8 +1,9 @@
 const prisma = require("../database/prisma");
-const { reply } = require("../bot/messenger");
+const { reply, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { getBotContext } = require("../bot/context");
-const { BTN, kb, inlineKb, backMain, tenantAdminMenu } = require("../keyboards/menus");
+const { ADMIN_BALE_IDS } = require("../config");
+const { BTN, kb, inlineKb, backMain, mainMenu, tenantAdminMenu } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const packages = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
@@ -38,9 +39,48 @@ function isTenantStep(step) {
   return Boolean(step && String(step).startsWith("TS:SUB:"));
 }
 
+async function shopHasBot(tenantId) {
+  if (!tenantId) return false;
+  try {
+    if (prisma.bot?.findUnique) {
+      const bot = await prisma.bot.findUnique({ where: { tenantId } });
+      if (bot) return true;
+    }
+  } catch (err) {
+    console.error("SHOP BOT LOOKUP SKIP:", err.message);
+  }
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT "id" FROM "Bot" WHERE "tenantId" = $1 LIMIT 1`,
+      tenantId
+    );
+    return Boolean(rows?.[0]);
+  } catch (err) {
+    console.error("SHOP BOT SQL SKIP:", err.message);
+    return false;
+  }
+}
+
 async function tenantFlowKind(tenantId) {
+  if (await shopHasBot(tenantId)) return "RENEWAL";
   const hasInitial = await invoices.hasInitialInvoice(tenantId);
   return hasInitial ? "RENEWAL" : "INITIAL";
+}
+
+async function visiblePackages(tenantId) {
+  const list = await packages.listActivePackages();
+  if (!(await shopHasBot(tenantId))) return list;
+  return list.filter((pack) => pack.code !== REQUIRED_INITIAL);
+}
+
+async function notifyMotherAdmins(text) {
+  for (const adminId of ADMIN_BALE_IDS || []) {
+    try {
+      await notify(adminId, text);
+    } catch (err) {
+      console.error("SERVICE INVOICE ADMIN NOTIFY:", adminId, err.message);
+    }
+  }
 }
 
 function requiredCode(flow) {
@@ -72,14 +112,13 @@ async function currentContext(user) {
   const tenant = isTenantStep(user.adminStep);
   if (!mother && !tenant) return null;
   const source = mother ? "mother" : "tenant";
-  let flow = "INITIAL";
-  if (source === "tenant") {
-    flow = await tenantFlowKind(getBotContext().tenantId);
-  }
+  const tenantId =
+    source === "tenant" ? getBotContext().tenantId : user.pendingOrderId;
+  const flow = await tenantFlowKind(tenantId);
   const phase = mother
     ? user.orderStep.split(":")[2]
     : user.adminStep.split(":")[2];
-  return { source, flow, phase };
+  return { source, flow, phase, tenantId };
 }
 
 function uniquePacks(list) {
@@ -99,10 +138,10 @@ async function requiredPackage(flow) {
   return all.find((pack) => pack.code === code) || null;
 }
 
-async function selectedPacks(user) {
+async function selectedPacks(user, tenantId) {
   const picks = await packages.listPicks(user.id);
   const ids = [...new Set(picks.map((row) => row.packageId))];
-  const all = await packages.listActivePackages();
+  const all = await visiblePackages(tenantId);
   const byId = new Map(all.map((pack) => [pack.id, pack]));
   return uniquePacks(ids.map((id) => byId.get(id)).filter(Boolean));
 }
@@ -144,7 +183,7 @@ async function sendInline(user, chatId, caption, rows) {
 async function showCatalog(user, chatId, ctx) {
   if (ctx.source === "mother") await setMotherStep(user, MOTHER_LIST);
   else await setTenantStep(user, TENANT_LIST);
-  const list = await packages.listActivePackages();
+  const list = await visiblePackages(ctx.tenantId);
   if (!list.length) {
     await reply(
       user,
@@ -152,10 +191,6 @@ async function showCatalog(user, chatId, ctx) {
       "سرویس فعالی برای انتخاب نیست.",
       ctx.source === "tenant" ? tenantAdminMenu() : backMain()
     );
-    if (ctx.source === "mother") {
-      const colleague = require("./colleague");
-      await colleague.continueAfterInvoice(user, chatId, user.pendingOrderId);
-    }
     return;
   }
   await reply(
@@ -179,6 +214,14 @@ async function showDetail(user, chatId, packId) {
   const pack = await packages.getPackage(packId);
   if (!pack || !pack.isActive || pack.isArchived) {
     await reply(user, chatId, "این مورد الان قابل انتخاب نیست.");
+    return true;
+  }
+  if (pack.code === REQUIRED_INITIAL && (await shopHasBot(ctx.tenantId))) {
+    await reply(
+      user,
+      chatId,
+      "ربات این فروشگاه قبلاً راه‌اندازی شده و پکیج راه‌اندازی قابل انتخاب نیست."
+    );
     return true;
   }
   if (ctx.source === "mother") {
@@ -211,7 +254,7 @@ async function showProforma(user, chatId) {
   const required = await ensureRequired(user, ctx.flow);
   if (ctx.source === "mother") await setMotherStep(user, MOTHER_CART);
   else await setTenantStep(user, TENANT_CART);
-  const chosen = await selectedPacks(user);
+  const chosen = await selectedPacks(user, ctx.tenantId);
   const requiredId = required?.id;
   const quote = invoices.buildQuote(chosen, ctx.flow);
   const lines = ["🧾 پیش فاکتور", "━━━━━━━━━━━━━━━━━━", ""];
@@ -242,7 +285,11 @@ async function startInitial(user, chatId, tenantId) {
   await packages.replacePicks(user.id, []);
   await invoices.ensureServiceInvoices();
   await setMotherStep(user, MOTHER_LIST, tenantId);
-  await showCatalog(user, chatId, { source: "mother", flow: "INITIAL" });
+  await showCatalog(user, chatId, {
+    source: "mother",
+    flow: "INITIAL",
+    tenantId,
+  });
 }
 
 async function startTenantSubscribe(user, chatId, tenantId) {
@@ -250,7 +297,7 @@ async function startTenantSubscribe(user, chatId, tenantId) {
   await invoices.ensureServiceInvoices();
   const flow = await tenantFlowKind(tenantId);
   await setTenantStep(user, TENANT_LIST);
-  await showCatalog(user, chatId, { source: "tenant", flow });
+  await showCatalog(user, chatId, { source: "tenant", flow, tenantId });
 }
 
 async function selectCurrent(user, chatId) {
@@ -260,6 +307,15 @@ async function selectCurrent(user, chatId) {
   const pack = await packages.getPackage(packId);
   if (!pack || !pack.isActive || pack.isArchived) {
     await reply(user, chatId, "این مورد الان قابل انتخاب نیست.", detailMenu());
+    return true;
+  }
+  if (pack.code === REQUIRED_INITIAL && (await shopHasBot(ctx.tenantId))) {
+    await reply(
+      user,
+      chatId,
+      "ربات این فروشگاه قبلاً راه‌اندازی شده و پکیج راه‌اندازی قابل انتخاب نیست.",
+      catalogMenu(ctx.source)
+    );
     return true;
   }
   const added = await addPick(user.id, pack.id);
@@ -294,9 +350,10 @@ async function issueInvoice(user, chatId) {
     return true;
   }
   await ensureRequired(user, ctx.flow);
-  const chosen = await selectedPacks(user);
+  const chosen = await selectedPacks(user, ctx.tenantId);
   const tenantId =
-    ctx.source === "tenant" ? getBotContext().tenantId : user.pendingOrderId;
+    ctx.tenantId ||
+    (ctx.source === "tenant" ? getBotContext().tenantId : user.pendingOrderId);
   try {
     const invoice = await invoices.createInvoice({
       userId: user.id,
@@ -305,22 +362,33 @@ async function issueInvoice(user, chatId) {
       packs: chosen,
     });
     await packages.replacePicks(user.id, []);
+    const waitNote =
+      ctx.source === "mother" && ctx.flow === "INITIAL"
+        ? "\n\nتا تایید پرداخت توسط ادمین پت‌لند امکان ساخت ربات نیست. بعد از تایید، از ربات مادر دکمه «ساخت ربات فروشگاهی» را بزنید."
+        : "\n\nبعد از تایید پرداخت توسط ادمین پت‌لند، وضعیت این فاکتور به‌روز می‌شود.";
+    await prisma.user.update({
+      where: { id: user.id },
+      data:
+        ctx.source === "tenant"
+          ? { adminStep: "TS:MENU" }
+          : { orderStep: null, pendingOrderId: null },
+    });
+    if (ctx.source === "tenant") user.adminStep = "TS:MENU";
+    else {
+      user.orderStep = null;
+      user.pendingOrderId = null;
+    }
     await reply(
       user,
       chatId,
-      `${invoices.formatInvoiceText(invoice)}\n\nقیمت این فاکتور قفل شد و با تغییر پکیج‌ها عوض نمی‌شود.`,
-      ctx.source === "tenant" ? tenantAdminMenu() : backMain()
+      `${invoices.formatInvoiceText(invoice)}\n\nقیمت این فاکتور قفل شد و با تغییر پکیج‌ها عوض نمی‌شود.${waitNote}`,
+      ctx.source === "tenant" ? tenantAdminMenu() : mainMenu(user)
     );
-    if (ctx.source === "mother") {
-      const colleague = require("./colleague");
-      await colleague.continueAfterInvoice(user, chatId, tenantId);
-    } else {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { adminStep: "TS:MENU" },
-      });
-      user.adminStep = "TS:MENU";
-    }
+    await notifyMotherAdmins(
+      `🧾 فاکتور خدمات جدید\n🔖 ${invoice.trackingCode}\n💰 ${formatPrice(
+        invoice.totalAmount
+      )}\n\nاز پنل ادمین → فاکتور خدمات همکاران تایید کنید.`
+    );
   } catch (err) {
     console.error("SERVICE INVOICE ISSUE:", err);
     await reply(user, chatId, "صدور فاکتور ممکن نشد. دوباره تلاش کنید.");
@@ -370,7 +438,10 @@ async function showInvoiceList(user, chatId, tenantId) {
   const lines = ["🧾 فاکتورهای خدمات", ""];
   for (const inv of rows) {
     const label = inv.kind === "INITIAL" ? "راه‌اندازی" : "ماهانه";
-    lines.push(`🔖 ${inv.trackingCode} | ${label} | ${formatPrice(inv.totalAmount)}`);
+    const status = inv.status === "APPROVED" ? "تایید شده" : "در انتظار تایید";
+    lines.push(
+      `🔖 ${inv.trackingCode} | ${label} | ${formatPrice(inv.totalAmount)} | ${status}`
+    );
   }
   lines.push("", "مبالغ فاکتورهای قبلی با تغییر قیمت پکیج عوض نمی‌شوند.");
   await reply(user, chatId, lines.join("\n"), tenantAdminMenu());

@@ -6,6 +6,7 @@ const {
 } = require("../config");
 const bale = require("../bot/bale");
 const { encryptToken, hashToken } = require("../utils/tokenCrypto");
+const invoices = require("./serviceInvoices");
 
 function publicBaseUrl() {
   return (PUBLIC_BASE_URL || "").replace(/\/$/, "");
@@ -703,6 +704,18 @@ async function provisionShop(user, rawToken) {
         code: "ALREADY_HAS_BOT",
         username: tenant.bot.username || null,
         shopName: tenant.name,
+      };
+    }
+
+    const setupInvoice = await invoices.getInitialInvoice(tenant.id);
+    if (!setupInvoice) {
+      return { ok: false, code: "NEED_SETUP_INVOICE" };
+    }
+    if (setupInvoice.status !== "APPROVED") {
+      return {
+        ok: false,
+        code: "NEED_APPROVED_SETUP",
+        trackingCode: setupInvoice.trackingCode,
       };
     }
 

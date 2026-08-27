@@ -3,14 +3,20 @@
 
 ---
 
-## وضعیت همین الان (۱۴۰۵/۰۶/۰۶ — فاکتور خدمات همکار)
+## وضعیت همین الان (۱۴۰۵/۰۶/۰۶ — گیت ساخت ربات)
 
-پکیج‌ها `kind` (PACKAGE/SERVICE) و `billing` (ONCE/MONTHLY) دارند. فاکتور `ServiceInvoice` با snapshot قیمت (کد SI-). تایید ادمین و پرداخت این فاکتورها هنوز نیست.
+ساخت ربات فروشگاهی فقط وقتی قبول می‌شود که:
+1. فروشگاه هنوز ربات نداشته باشد (هر فروشگاه یک ربات)
+2. فاکتور راه‌اندازی (`ServiceInvoice` با `kind=INITIAL`) توسط ادمین ربات مادر `APPROVED` شده باشد
 
-جریان مادر و ربات همکار: خرید اشتراک → لیست اینلاین همه خدمات → جزئیات + انتخاب سرویس → پیش‌فاکتور (سبد، حذف اختیاری) → صدور فاکتور.
-اولین خرید: راه‌اندازی (`SETUP_FIRST_MONTH`) اجباری. خریدهای بعد: اشتراک ماهانه (`MONTHLY_SUB`) اجباری و غیرقابل حذف از پیش‌فاکتور. هر خدمت حداکثر یک‌بار.
+بعد از صدور فاکتور راه‌اندازی، توکن گرفته نمی‌شود. همکار صبر می‌کند تا ادمین از پنل مادر «فاکتور خدمات همکاران» را تایید کند؛ بعد از دکمه «ساخت ربات فروشگاهی» توکن را می‌فرستد.
 
-ربات تست که از قبل ساخته شده: در مادر «ساخت ربات فروشگاهی» همان پیام قبلی را می‌دهد. تست فاکتور از خود ربات فروشگاه: مدیریت فروشگاه → خرید اشتراک. اگر فاکتور INITIAL نداشته باشد همان راه‌اندازی است؛ وگرنه تمدید ماهانه.
+خرید اشتراک در ربات همکار: اگر `Bot` از قبل وجود داشته باشد، پکیج راه‌اندازی (`SETUP_FIRST_MONTH`) در کاتالوگ نیست و جریان `RENEWAL` است (`MONTHLY_SUB` اجباری).
+
+پکیج‌ها `kind` (PACKAGE/SERVICE) و `billing` (ONCE/MONTHLY) دارند. فاکتور `ServiceInvoice` با snapshot قیمت (کد SI-). وضعیت: `WAITING_PAYMENT` تا ادمین مادر تایید کند، بعد `APPROVED`.
+
+جریان خرید اشتراک: لیست اینلاین → جزئیات + انتخاب سرویس → پیش‌فاکتور → صدور فاکتور.
+اولین خرید (قبل از ربات): راه‌اندازی اجباری. بعد از راه‌اندازی ربات: اشتراک ماهانه اجباری. هر خدمت حداکثر یک‌بار.
 
 روی `Order` موقع استارت ALTER نزن. توکن را لاگ نکن.
 
@@ -69,11 +75,11 @@ src/handlers/tenantShop.js   منوی فروشگاه همکار
 src/handlers/tenantOrder.js  سبد/تسویه/رسید/پیگیری مالک
 src/handlers/tenantAdmin.js  پنل مالک
 src/services/shopCart.js     SQL خام
-src/services/shopProvision.js جدول‌های runtime
+src/services/shopProvision.js جدول‌های runtime + گیت فاکتور راه‌اندازی
 src/handlers/products.js     مادر + showTenantProducts
 src/services/servicePackages.js جدول و seed پکیج خدمات
-src/handlers/adminServices.js  ادمین مادر: CRUD پکیج
-src/handlers/colleague.js      انتخاب پکیج/خدمت و فاکتور قبل از ساخت ربات
+src/handlers/adminServices.js  ادمین مادر: CRUD پکیج + تایید فاکتور خدمات
+src/handlers/colleague.js      پروفایل همکار، گیت ساخت ربات
 src/handlers/serviceBilling.js ویزارد پکیج → خدمت → فاکتور
 src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 ```
@@ -83,6 +89,9 @@ src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 محصولات تننت: **همیشه اول دسته‌ها**، بعد اینلاین ۱۰تایی.
 
 قدم‌های تننت: `TSC:` دسته، `TCK:QTY` تعداد، `TCK:NAME`… تسویه، `TCK:RECEIPT` رسید، `TS:` پنل مالک.
+
+گیت ساخت ربات: `colleague.gateShopBotCreate` + `provisionShop` (`NEED_SETUP_INVOICE` / `NEED_APPROVED_SETUP` / `ALREADY_HAS_BOT`).
+تایید فاکتور خدمات: پنل ادمین مادر → «فاکتور خدمات همکاران» (`sinv:`). دکمه تایید سفارش فروشگاهی (`approveOrder`) را برای این فاکتورها صدا نزن.
 
 ---
 
@@ -101,7 +110,7 @@ src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 ---
 
 ## کار بعدی
-1. پرداخت و تایید ادمین برای فاکتور خدمات همکار
+1. آپلود رسید پرداخت برای فاکتور خدمات
 2. ادمین مادر: خاموش/روشن Bot، TenantMessage
 3. TENANT_RESELL
 4. تیکت داخل ربات تننت

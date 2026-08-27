@@ -157,6 +157,7 @@ const BTN = {
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
   ADMIN_SERVICES: "💼 پکیج خدمات",
+  ADMIN_SVC_INVOICES: "🧾 فاکتور خدمات همکاران",
   SVC_NEW: "➕ پکیج جدید",
   SVC_EDIT_TITLE: "✏️ نام",
   SVC_EDIT_PRICE: "💰 قیمت",
@@ -358,6 +359,7 @@ function adminMenu() {
     [{ text: BTN.ADMIN_TICKETS }],
     [{ text: BTN.ADMIN_PRODUCTS }],
     [{ text: BTN.ADMIN_SERVICES }],
+    [{ text: BTN.ADMIN_SVC_INVOICES }],
     [{ text: BTN.ADMIN_WITHDRAWALS }],
     [{ text: BTN.ADMIN_SALES }],
     [{ text: BTN.BACK_MAIN }],
@@ -380,6 +382,13 @@ function adminServiceDetailMenu() {
     [{ text: BTN.SVC_BILLING }],
     [{ text: BTN.SVC_ARCHIVE }],
     [{ text: BTN.SVC_DELETE }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminServiceInvoiceActions() {
+  return kb([
+    [{ text: BTN.APPROVE }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
@@ -478,6 +487,7 @@ module.exports = {
   adminMenu,
   adminServicesMenu,
   adminServiceDetailMenu,
+  adminServiceInvoiceActions,
   adminInvoicesMenu,
   adminBackMenu,
   adminOrderActions,

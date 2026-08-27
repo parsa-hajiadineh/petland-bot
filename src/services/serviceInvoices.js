@@ -118,6 +118,111 @@ function mapItem(row) {
   };
 }
 
+async function hasApprovedInitialInvoice(tenantId) {
+  const invoice = await getInitialInvoice(tenantId);
+  return Boolean(invoice && invoice.status === "APPROVED");
+}
+
+async function getInitialInvoice(tenantId) {
+  if (!tenantId) return null;
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.findFirst({
+        where: { tenantId, kind: "INITIAL" },
+        orderBy: { createdAt: "desc" },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE INITIAL SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoice" WHERE "tenantId" = $1 AND "kind" = 'INITIAL' ORDER BY "createdAt" DESC LIMIT 1`,
+    tenantId
+  );
+  if (!rows?.[0]) return null;
+  const items = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoiceItem" WHERE "invoiceId" = $1`,
+    rows[0].id
+  );
+  return mapInvoice(rows[0], (items || []).map(mapItem));
+}
+
+async function getInvoice(id) {
+  if (!id) return null;
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE GET SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoice" WHERE "id" = $1 LIMIT 1`,
+    id
+  );
+  if (!rows?.[0]) return null;
+  const items = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoiceItem" WHERE "invoiceId" = $1`,
+    id
+  );
+  return mapInvoice(rows[0], (items || []).map(mapItem));
+}
+
+async function listPendingInvoices(take = 20) {
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.findMany({
+        where: { status: "WAITING_PAYMENT" },
+        orderBy: { createdAt: "desc" },
+        take,
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE PENDING SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoice" WHERE "status" = 'WAITING_PAYMENT' ORDER BY "createdAt" DESC LIMIT $1`,
+    take
+  );
+  const invoices = [];
+  for (const row of rows || []) {
+    const items = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "ServiceInvoiceItem" WHERE "invoiceId" = $1`,
+      row.id
+    );
+    invoices.push(mapInvoice(row, (items || []).map(mapItem)));
+  }
+  return invoices;
+}
+
+async function approveInvoice(id) {
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.update({
+        where: { id },
+        data: { status: "APPROVED" },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE APPROVE PRISMA SKIP:", err.message);
+    }
+  }
+  await prisma.$executeRawUnsafe(
+    `UPDATE "ServiceInvoice" SET "status" = 'APPROVED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+    id
+  );
+  return getInvoice(id);
+}
+
 async function hasInitialInvoice(tenantId) {
   if (!tenantId) return false;
   await ensureServiceInvoices();
@@ -220,7 +325,7 @@ function formatInvoiceText(invoice) {
     const end = new Date(invoice.periodEnd).toLocaleDateString("fa-IR");
     lines.push(`دوره: ${start} تا ${end}`);
   }
-  lines.push(`وضعیت: در انتظار پرداخت`);
+  lines.push(`وضعیت: ${invoice.status === "APPROVED" ? "تایید شده" : "در انتظار تایید پرداخت"}`);
   return lines.join("\n");
 }
 
@@ -375,6 +480,11 @@ async function listInvoices(tenantId, take = 10) {
 module.exports = {
   ensureServiceInvoices,
   hasInitialInvoice,
+  hasApprovedInitialInvoice,
+  getInitialInvoice,
+  getInvoice,
+  listPendingInvoices,
+  approveInvoice,
   buildQuote,
   formatInvoiceText,
   formatQuoteText,

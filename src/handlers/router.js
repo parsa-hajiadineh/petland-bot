@@ -328,6 +328,11 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     return;
   }
 
+  if (data.startsWith("sinv:") && isAdmin(user)) {
+    await require("./adminServices").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (data.startsWith("PL-")) {
     const shown = await orderHandler.showOrderByTracking(user, chatId, data);
     if (!shown) {
