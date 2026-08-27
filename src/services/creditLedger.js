@@ -52,15 +52,28 @@ async function ensureInner() {
     "CREDIT WALLET TABLE SKIP:",
     `CREATE TABLE IF NOT EXISTS "CreditWallet" (
       "id" TEXT NOT NULL,
-      "tenantId" TEXT NOT NULL,
+      "tenantId" TEXT,
+      "userId" TEXT,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "CreditWallet_pkey" PRIMARY KEY ("id")
     )`
   );
   await execSql(
+    "CREDIT WALLET TENANT NULL SKIP:",
+    `ALTER TABLE "CreditWallet" ALTER COLUMN "tenantId" DROP NOT NULL`
+  );
+  await execSql(
+    "CREDIT WALLET USER COL SKIP:",
+    `ALTER TABLE "CreditWallet" ADD COLUMN IF NOT EXISTS "userId" TEXT`
+  );
+  await execSql(
     "CREDIT WALLET TENANT INDEX SKIP:",
     `CREATE UNIQUE INDEX IF NOT EXISTS "CreditWallet_tenantId_key" ON "CreditWallet"("tenantId")`
+  );
+  await execSql(
+    "CREDIT WALLET USER INDEX SKIP:",
+    `CREATE UNIQUE INDEX IF NOT EXISTS "CreditWallet_userId_key" ON "CreditWallet"("userId")`
   );
   await execSql(
     "CREDIT TRANSACTION TABLE SKIP:",
@@ -95,7 +108,8 @@ function mapWallet(row) {
   if (!row) return null;
   return {
     id: row.id,
-    tenantId: row.tenantId,
+    tenantId: row.tenantId || null,
+    userId: row.userId || null,
     createdAt: row.createdAt,
   };
 }
@@ -129,45 +143,123 @@ function formatSignedAmount(amount) {
   return `${body} تومان`;
 }
 
-async function getOrCreateWallet(tenantId) {
-  if (!tenantId) return null;
-  await ensureCreditLedger();
+async function findWalletRow({ tenantId, userId }) {
   if (hasWalletModel()) {
     try {
-      const existing = await prisma.creditWallet.findUnique({
-        where: { tenantId },
+      if (tenantId) {
+        const byTenant = await prisma.creditWallet.findUnique({
+          where: { tenantId },
+        });
+        if (byTenant) return mapWallet(byTenant);
+      }
+      if (userId) {
+        const byUser = await prisma.creditWallet.findUnique({
+          where: { userId },
+        });
+        if (byUser) return mapWallet(byUser);
+      }
+    } catch (err) {
+      console.error("CREDIT WALLET FIND PRISMA SKIP:", err.message);
+    }
+  }
+  if (tenantId) {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "CreditWallet" WHERE "tenantId" = $1 LIMIT 1`,
+      tenantId
+    );
+    if (rows?.[0]) return mapWallet(rows[0]);
+  }
+  if (userId) {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "CreditWallet" WHERE "userId" = $1 LIMIT 1`,
+      userId
+    );
+    if (rows?.[0]) return mapWallet(rows[0]);
+  }
+  return null;
+}
+
+async function patchWallet(id, { tenantId, userId }) {
+  if (!id) return;
+  if (hasWalletModel()) {
+    try {
+      await prisma.creditWallet.update({
+        where: { id },
+        data: {
+          ...(tenantId ? { tenantId } : {}),
+          ...(userId ? { userId } : {}),
+        },
       });
-      if (existing) return mapWallet(existing);
+      return;
+    } catch (err) {
+      console.error("CREDIT WALLET PATCH PRISMA SKIP:", err.message);
+    }
+  }
+  if (tenantId) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "CreditWallet" SET "tenantId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
+      tenantId,
+      id
+    );
+  }
+  if (userId) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "CreditWallet" SET "userId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
+      userId,
+      id
+    );
+  }
+}
+
+async function getOrCreateWallet(input) {
+  const tenantId =
+    typeof input === "string" ? input : input?.tenantId || null;
+  const userId = typeof input === "string" ? null : input?.userId || null;
+  if (!tenantId && !userId) return null;
+  await ensureCreditLedger();
+  let wallet = await findWalletRow({ tenantId, userId });
+  if (wallet) {
+    if ((tenantId && !wallet.tenantId) || (userId && !wallet.userId)) {
+      await patchWallet(wallet.id, { tenantId, userId });
+      wallet = {
+        ...wallet,
+        tenantId: tenantId || wallet.tenantId,
+        userId: userId || wallet.userId,
+      };
+    }
+    return wallet;
+  }
+  if (hasWalletModel()) {
+    try {
       const created = await prisma.creditWallet.create({
-        data: { tenantId },
+        data: {
+          ...(tenantId ? { tenantId } : {}),
+          ...(userId ? { userId } : {}),
+        },
       });
       return mapWallet(created);
     } catch (err) {
-      console.error("CREDIT WALLET PRISMA SKIP:", err.message);
+      console.error("CREDIT WALLET CREATE PRISMA SKIP:", err.message);
     }
   }
-  const found = await prisma.$queryRawUnsafe(
-    `SELECT * FROM "CreditWallet" WHERE "tenantId" = $1 LIMIT 1`,
-    tenantId
-  );
-  if (found?.[0]) return mapWallet(found[0]);
   const id = newId();
   try {
     await prisma.$executeRawUnsafe(
-      `INSERT INTO "CreditWallet" ("id","tenantId","createdAt","updatedAt")
-       VALUES ($1,$2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      `INSERT INTO "CreditWallet" ("id","tenantId","userId","createdAt","updatedAt")
+       VALUES ($1,$2,$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
       id,
-      tenantId
+      tenantId,
+      userId
     );
-    return mapWallet({ id, tenantId, createdAt: new Date() });
+    return mapWallet({ id, tenantId, userId, createdAt: new Date() });
   } catch (err) {
     console.error("CREDIT WALLET INSERT SKIP:", err.message);
   }
-  const again = await prisma.$queryRawUnsafe(
-    `SELECT * FROM "CreditWallet" WHERE "tenantId" = $1 LIMIT 1`,
-    tenantId
-  );
-  return mapWallet(again?.[0]);
+  return findWalletRow({ tenantId, userId });
+}
+
+async function linkUserWalletToTenant(userId, tenantId) {
+  return getOrCreateWallet({ userId, tenantId });
 }
 
 async function getBalance(walletId) {
@@ -218,6 +310,7 @@ async function listTransactions(walletId, take = 20) {
 
 async function appendTransaction({
   tenantId,
+  userId,
   amount,
   type,
   title,
@@ -231,7 +324,7 @@ async function appendTransaction({
   if (!Number.isFinite(n) || n === 0) {
     throw new Error("CREDIT_AMOUNT_INVALID");
   }
-  const wallet = await getOrCreateWallet(tenantId);
+  const wallet = await getOrCreateWallet({ tenantId, userId });
   if (!wallet) throw new Error("CREDIT_WALLET_MISSING");
   const row = {
     id: newId(),
@@ -292,18 +385,74 @@ async function appendTransaction({
   return mapTransaction(row);
 }
 
-function formatLedgerText(balance, entries) {
-  const lines = [
+function parseMetadata(raw) {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    return {};
+  }
+}
+
+async function listByReference(walletId, referenceType, referenceId) {
+  if (!walletId || !referenceId) return [];
+  if (hasTransactionModel()) {
+    try {
+      const rows = await prisma.creditTransaction.findMany({
+        where: { walletId, referenceType, referenceId },
+      });
+      return rows.map(mapTransaction);
+    } catch (err) {
+      console.error("CREDIT TX REF PRISMA SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "CreditTransaction"
+     WHERE "walletId" = $1 AND "referenceType" = $2 AND "referenceId" = $3`,
+    walletId,
+    referenceType,
+    referenceId
+  );
+  return (rows || []).map(mapTransaction);
+}
+
+async function usedGoldenBase(walletId, excludeOrderId) {
+  const rows = await listTransactions(walletId, 500);
+  let used = 0;
+  for (const row of rows) {
+    if (row.type !== CREDIT_TYPE.GOLDEN_REWARD) continue;
+    const meta = parseMetadata(row.metadata);
+    if (
+      excludeOrderId &&
+      (row.referenceId === excludeOrderId || meta.orderId === excludeOrderId)
+    ) {
+      continue;
+    }
+    const base = Number(meta.goldenBase);
+    if (Number.isFinite(base) && base > 0) {
+      used += base;
+      continue;
+    }
+    used += Math.floor(Number(row.amount || 0) / 5);
+  }
+  return used;
+}
+
+function formatWalletHome(balance) {
+  return [
     "📒 کیف پول اعتباری",
     "━━━━━━━━━━━━━━━━━━",
     `موجودی: ${formatPrice(balance)}`,
     "",
     "اعتبار این کیف پول فقط برای استفاده از خدمات مجاز پلتفرم قابل استفاده میباشد.",
-    "",
-    "دفتر تراکنش‌ها",
-  ];
+  ].join("\n");
+}
+
+function formatLedgerList(entries) {
+  const lines = ["📋 دفتر تراکنش‌ها", "━━━━━━━━━━━━━━━━━━"];
   if (!entries.length) {
-    lines.push("هنوز تراکنشی ثبت نشده است.");
+    lines.push("", "هنوز تراکنشی ثبت نشده است.");
     return lines.join("\n");
   }
   for (const entry of entries) {
@@ -318,25 +467,36 @@ function formatLedgerText(balance, entries) {
   return lines.join("\n");
 }
 
-async function getWalletView(tenantId, take = 20) {
-  const wallet = await getOrCreateWallet(tenantId);
+function formatLedgerText(balance, entries) {
+  return `${formatWalletHome(balance)}\n\n${formatLedgerList(entries)}`;
+}
+
+async function loadWalletState(input, take = 20) {
+  const wallet = await getOrCreateWallet(input);
   if (!wallet) {
-    return {
-      wallet: null,
-      balance: 0,
-      entries: [],
-      text: formatLedgerText(0, []),
-    };
+    return { wallet: null, balance: 0, entries: [] };
   }
   const [balance, entries] = await Promise.all([
     getBalance(wallet.id),
     listTransactions(wallet.id, take),
   ]);
+  return { wallet, balance, entries };
+}
+
+async function getWalletHome(input) {
+  const state = await loadWalletState(input, 1);
   return {
-    wallet,
-    balance,
-    entries,
-    text: formatLedgerText(balance, entries),
+    ...state,
+    text: formatWalletHome(state.balance),
+  };
+}
+
+async function getWalletView(input, take = 20) {
+  const tenantId = typeof input === "string" ? input : input;
+  const state = await loadWalletState(tenantId, take);
+  return {
+    ...state,
+    text: formatLedgerList(state.entries),
   };
 }
 
@@ -345,10 +505,17 @@ module.exports = {
   CREDIT_TYPE_TITLE,
   ensureCreditLedger,
   getOrCreateWallet,
+  linkUserWalletToTenant,
   getBalance,
   listTransactions,
+  listByReference,
+  usedGoldenBase,
+  parseMetadata,
   appendTransaction,
+  getWalletHome,
   getWalletView,
   formatSignedAmount,
   formatLedgerText,
+  formatWalletHome,
+  formatLedgerList,
 };

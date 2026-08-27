@@ -8,6 +8,7 @@ const {
   kb,
   inlineKb,
   tenantAdminMenu,
+  shopCreditMenu,
   tenantProfileMenu,
   tenantBankMenu,
   tenantProductsMenu,
@@ -235,7 +236,10 @@ async function showCreditWallet(user, chatId, tenantId) {
   await setStep(user, "TS:CREDIT");
   let view;
   try {
-    view = await creditLedger.getWalletView(tenantId);
+    view = await creditLedger.getWalletHome({
+      tenantId,
+      userId: user.id,
+    });
   } catch (err) {
     console.error("CREDIT WALLET VIEW:", err);
     await reply(
@@ -246,12 +250,29 @@ async function showCreditWallet(user, chatId, tenantId) {
     );
     return;
   }
-  await reply(
-    user,
-    chatId,
-    view.text,
-    kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
-  );
+  await reply(user, chatId, view.text, shopCreditMenu());
+}
+
+async function showCreditLedger(user, chatId, tenantId) {
+  const creditLedger = require("../services/creditLedger");
+  await setStep(user, "TS:CREDIT_LEDGER");
+  let view;
+  try {
+    view = await creditLedger.getWalletView({
+      tenantId,
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error("CREDIT LEDGER VIEW:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن دفتر تراکنش‌ها ممکن نشد.",
+      shopCreditMenu()
+    );
+    return;
+  }
+  await reply(user, chatId, view.text, shopCreditMenu());
 }
 
 async function showProfile(user, chatId, tenantId) {
@@ -609,6 +630,10 @@ async function handleAdminText(user, chatId, text) {
     await showCreditWallet(user, chatId, tenantId);
     return true;
   }
+  if (text === BTN.SHOP_CREDIT_LEDGER) {
+    await showCreditLedger(user, chatId, tenantId);
+    return true;
+  }
 
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
     if (String(user.adminStep).startsWith("TS:SUB:")) {
@@ -642,6 +667,10 @@ async function handleAdminText(user, chatId, text) {
       } else {
         await tenantOrder.showShopOrders(user, chatId);
       }
+      return true;
+    }
+    if (user.adminStep === "TS:CREDIT_LEDGER") {
+      await showCreditWallet(user, chatId, tenantId);
       return true;
     }
     if (

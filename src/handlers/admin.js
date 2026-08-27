@@ -801,6 +801,12 @@ async function approveOrder(user, chatId) {
 
   await notifyOrderStatus(order, "✅ فاکتور تایید شد. در حال آماده‌سازی.");
 
+  await require("../services/goldenCampaign")
+    .grantPurchaseCredit(order, user.id)
+    .catch((err) => {
+      console.error("GOLDEN CREDIT APPROVE SKIP:", err.message);
+    });
+
   try {
     const pdfPath = await generateInvoicePdf(order, order.items);
     await bale.sendDocument(

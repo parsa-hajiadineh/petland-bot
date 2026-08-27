@@ -495,6 +495,14 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     });
     if (user.role !== "ADMIN") user.role = "COLLEAGUE";
 
+    if (user.role === "COLLEAGUE") {
+      await require("../services/goldenCampaign")
+        .startGoldenPeriod(user.id)
+        .catch((err) => {
+          console.error("GOLDEN PERIOD START SKIP:", err.message);
+        });
+    }
+
     await reply(
       user,
       chatId,

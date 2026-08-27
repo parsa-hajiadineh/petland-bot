@@ -639,6 +639,11 @@ async function persistColleagueShop(user, profile) {
   if (!tenant) return { ok: false };
 
   await linkTenantOwner(tenant, user, profile);
+  await require("./creditLedger")
+    .linkUserWalletToTenant(user.id, tenant.id)
+    .catch((err) => {
+      console.error("CREDIT WALLET LINK SKIP:", err.message);
+    });
   return { ok: true, tenant: await attachTenantExtras(tenant) };
 }
 

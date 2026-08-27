@@ -382,6 +382,12 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
     select: ORDER_WITH_ITEMS_SELECT,
   });
 
+  await require("../services/goldenCampaign")
+    .recordReceiptUpload(order.id)
+    .catch((err) => {
+      console.error("ORDER RECEIPT TIME SKIP:", err.message);
+    });
+
   await prisma.user.update({
     where: { id: user.id },
     data: { orderStep: null, pendingOrderId: null },

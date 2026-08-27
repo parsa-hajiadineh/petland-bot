@@ -174,6 +174,7 @@ const BTN = {
   SHOP_SUBSCRIBE: "💳 خرید اشتراک",
   SHOP_SERVICE_INVOICES: "🧾 فاکتور خدمات",
   SHOP_CREDIT_WALLET: "📒 کیف پول اعتباری",
+  SHOP_CREDIT_LEDGER: "📋 دفتر تراکنش‌ها",
   SHOP_ADMIN: "⚙️ مدیریت فروشگاه",
   SHOP_PROFILE: "🏪 مشخصات فروشگاه",
   SHOP_LOGO: "🖼 لوگو",
@@ -250,13 +251,17 @@ function tenantAdminMenu() {
   return kb([
     [{ text: BTN.SHOP_PROFILE }, { text: BTN.SHOP_LOGO }],
     [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_HELP }],
-    [{ text: BTN.SHOP_BANK }],
+    [{ text: BTN.SHOP_BANK }, { text: BTN.SHOP_ORDERS }],
     [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
-    [{ text: BTN.SHOP_ORDERS }],
-    [{ text: BTN.SHOP_SUBSCRIBE }],
-    [{ text: BTN.SHOP_SERVICE_INVOICES }],
-    [{ text: BTN.SHOP_CREDIT_WALLET }],
-    [{ text: BTN.BACK_MAIN }],
+    [{ text: BTN.SHOP_SUBSCRIBE }, { text: BTN.SHOP_SERVICE_INVOICES }],
+    [{ text: BTN.SHOP_CREDIT_WALLET }, { text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function shopCreditMenu() {
+  return kb([
+    [{ text: BTN.SHOP_CREDIT_LEDGER }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -473,6 +478,7 @@ module.exports = {
   mainMenu,
   tenantMainMenu,
   tenantAdminMenu,
+  shopCreditMenu,
   shopOrdersMenu,
   tenantProfileMenu,
   tenantBankMenu,

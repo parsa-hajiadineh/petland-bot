@@ -627,8 +627,9 @@ model ServiceInvoiceItem {
 
 model CreditWallet {
   id        String   @id @default(cuid())
-  tenantId  String   @unique
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId  String?  @unique
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
+  userId    String?  @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -654,4 +655,20 @@ model CreditTransaction {
 
   @@index([walletId, createdAt])
   @@index([referenceType, referenceId])
+}
+
+model ColleagueGoldenPeriod {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  startedAt   DateTime
+  endsAt      DateTime
+  limitToman  Int      @default(10000000)
+  multiplier  Int      @default(5)
+  createdAt   DateTime @default(now())
+}
+
+model OrderReceipt {
+  id         String   @id @default(cuid())
+  orderId    String   @unique
+  uploadedAt DateTime
 }
