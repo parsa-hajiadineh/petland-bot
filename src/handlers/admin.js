@@ -17,6 +17,7 @@ const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
 const { statusLabel } = require("../utils/order");
 const { notifyOrderStatus } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
+const adminServices = require("./adminServices");
 
 // ─── Sales Stats Helpers ─────────────────────────────────────────────────────
 
@@ -310,6 +311,20 @@ async function goAdminBack(user, chatId) {
     return true;
   }
 
+  if (
+    step === "ADMIN_PRODUCTS" ||
+    step === "ADMIN_SALES" ||
+    step === "ADMIN_WITHDRAWALS" ||
+    step === "ADMIN_TICKETS" ||
+    step === "ADMIN_INVOICES" ||
+    step === "SVC:LIST"
+  ) {
+    await module.exports.showAdminPanel(user, chatId);
+    return true;
+  }
+
+  if (await adminServices.goBack(user, chatId)) return true;
+
   await prisma.user.update({
     where: { id: user.id },
     data: { adminStep: null, pendingOrderId: null },
@@ -423,6 +438,8 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     await showInvoicesMenu(user, chatId);
     return true;
   }
+
+  if (await adminServices.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);

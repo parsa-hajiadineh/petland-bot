@@ -156,6 +156,15 @@ const BTN = {
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
+  ADMIN_SERVICES: "💼 پکیج خدمات",
+  SVC_NEW: "➕ پکیج جدید",
+  SVC_EDIT_TITLE: "✏️ نام",
+  SVC_EDIT_PRICE: "💰 قیمت",
+  SVC_EDIT_DESC: "📝 توضیحات",
+  SVC_TOGGLE: "🔁 فعال / غیرفعال",
+  SVC_ARCHIVE: "🗄 آرشیو / خروج از آرشیو",
+  SVC_DELETE: "🗑 حذف پکیج",
+  SVC_CONFIRM: "✅ تأیید انتخاب",
   SHOP_ADMIN: "⚙️ مدیریت فروشگاه",
   SHOP_PROFILE: "🏪 مشخصات فروشگاه",
   SHOP_LOGO: "🖼 لوگو",
@@ -339,9 +348,28 @@ function adminMenu() {
     [{ text: BTN.ADMIN_INVOICES }],
     [{ text: BTN.ADMIN_TICKETS }],
     [{ text: BTN.ADMIN_PRODUCTS }],
+    [{ text: BTN.ADMIN_SERVICES }],
     [{ text: BTN.ADMIN_WITHDRAWALS }],
     [{ text: BTN.ADMIN_SALES }],
     [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function adminServicesMenu() {
+  return kb([
+    [{ text: BTN.SVC_NEW }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminServiceDetailMenu() {
+  return kb([
+    [{ text: BTN.SVC_EDIT_TITLE }, { text: BTN.SVC_EDIT_PRICE }],
+    [{ text: BTN.SVC_EDIT_DESC }],
+    [{ text: BTN.SVC_TOGGLE }],
+    [{ text: BTN.SVC_ARCHIVE }],
+    [{ text: BTN.SVC_DELETE }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -437,6 +465,8 @@ module.exports = {
   paymentMenu,
   walletMenu,
   adminMenu,
+  adminServicesMenu,
+  adminServiceDetailMenu,
   adminInvoicesMenu,
   adminBackMenu,
   adminOrderActions,

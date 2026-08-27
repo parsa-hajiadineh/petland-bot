@@ -314,6 +314,16 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   user = await reloadUser(user.id);
 
+  if (data.startsWith("svct:") || data === "svcok") {
+    await colleagueHandler.handleServiceCallback(user, chatId, data);
+    return;
+  }
+
+  if (data.startsWith("asvc:") && isAdmin(user)) {
+    await require("./adminServices").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (data.startsWith("PL-")) {
     const shown = await orderHandler.showOrderByTracking(user, chatId, data);
     if (!shown) {

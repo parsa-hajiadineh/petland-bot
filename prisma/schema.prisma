@@ -544,3 +544,34 @@ model TenantMessage {
 
   @@index([tenantId])
 }
+
+model ServicePackage {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  title       String
+  description String?
+  priceToman  Int
+  isActive    Boolean  @default(true)
+  isArchived  Boolean  @default(false)
+  sortOrder   Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  picks       ServicePick[]
+
+  @@index([isActive, isArchived, sortOrder])
+}
+
+model ServicePick {
+  id        String   @id @default(cuid())
+
+  userId    String
+  packageId String
+  package   ServicePackage @relation(fields: [packageId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, packageId])
+  @@index([userId])
+}
