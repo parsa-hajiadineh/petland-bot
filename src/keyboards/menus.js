@@ -167,6 +167,8 @@ const BTN = {
   SHOP_ADD_CATEGORY: "➕ دسته جدید",
   SHOP_ADD_PRODUCT: "➕ کالای جدید",
   SHOP_ORDERS: "🧾 سفارش‌های فروشگاه",
+  SHOP_ORDERS_OPEN: "📬 سفارشات باز",
+  SHOP_ORDERS_CLOSED: "📭 سفارشات بسته",
   APPROVE: "✅ تایید فاکتور",
   REJECT: "❌ رد فاکتور",
   PACK: "📦 بسته‌بندی شد",
@@ -234,6 +236,14 @@ function tenantAdminMenu() {
     [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
     [{ text: BTN.SHOP_ORDERS }],
     [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function shopOrdersMenu() {
+  return kb([
+    [{ text: BTN.SHOP_ORDERS_OPEN }],
+    [{ text: BTN.SHOP_ORDERS_CLOSED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -413,6 +423,7 @@ module.exports = {
   mainMenu,
   tenantMainMenu,
   tenantAdminMenu,
+  shopOrdersMenu,
   tenantProfileMenu,
   tenantBankMenu,
   tenantProductsMenu,

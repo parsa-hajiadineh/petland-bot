@@ -570,12 +570,33 @@ async function handleAdminText(user, chatId, text) {
   }
 
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
+    if (user.adminStep === "TS:ORDERS") {
+      await showAdminHome(user, chatId);
+      return true;
+    }
     if (
-      user.adminStep === "TS:ORDERS" ||
-      user.adminStep === "TS:O_REJECT" ||
-      user.adminStep === "TS:O_SHIP"
+      user.adminStep === "TS:ORDERS_OPEN" ||
+      user.adminStep === "TS:ORDERS_CLOSED"
     ) {
-      await require("./tenantOrder").showShopOrders(user, chatId);
+      const tenantOrder = require("./tenantOrder");
+      if (user.pendingOrderId) {
+        await tenantOrder.showShopOrderList(
+          user,
+          chatId,
+          user.adminStep === "TS:ORDERS_CLOSED" ? "closed" : "open"
+        );
+      } else {
+        await tenantOrder.showShopOrders(user, chatId);
+      }
+      return true;
+    }
+    if (user.adminStep === "TS:O_REJECT" || user.adminStep === "TS:O_SHIP") {
+      const tenantOrder = require("./tenantOrder");
+      if (user.pendingOrderId) {
+        await tenantOrder.showShopOrderDetail(user, chatId, user.pendingOrderId);
+      } else {
+        await tenantOrder.showShopOrders(user, chatId);
+      }
       return true;
     }
     if (

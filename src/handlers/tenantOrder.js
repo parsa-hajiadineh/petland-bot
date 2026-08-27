@@ -15,6 +15,7 @@ const {
   confirmAddressMenu,
   tenantMainMenu,
   tenantAdminMenu,
+  shopOrdersMenu,
   adminOrderActions,
   adminApprovedActions,
 } = require("../keyboards/menus");
@@ -812,12 +813,20 @@ async function loadShopOrder(orderId, tenantId) {
   }
 }
 
+const CLOSED_SHOP_STATUSES = ["REJECTED", "SHIPPED"];
+const OPEN_LIST_STEP = "TS:ORDERS_OPEN";
+const CLOSED_LIST_STEP = "TS:ORDERS_CLOSED";
+
 function ownerActions(order) {
   if (order.status === "WAITING_APPROVAL") return adminOrderActions();
   if (order.status === "APPROVED" || order.status === "PACKAGING") {
     return adminApprovedActions();
   }
   return kb([[{ text: BTN.SHOP_ORDERS }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
+}
+
+function isClosedShopOrder(order) {
+  return CLOSED_SHOP_STATUSES.includes(order.status);
 }
 
 module.exports.showShopOrders = async function showShopOrders(user, chatId) {
@@ -827,11 +836,37 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
   });
   user.adminStep = "TS:ORDERS";
   user.pendingOrderId = null;
+  await reply(
+    user,
+    chatId,
+    "🧾 سفارش‌های فروشگاه\n\nسفارشات باز یا بسته را انتخاب کنید.",
+    shopOrdersMenu()
+  );
+};
+
+module.exports.showShopOrderList = async function showShopOrderList(
+  user,
+  chatId,
+  kind
+) {
+  const closed = kind === "closed";
+  const adminStep = closed ? CLOSED_LIST_STEP : OPEN_LIST_STEP;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep, pendingOrderId: null },
+  });
+  user.adminStep = adminStep;
+  user.pendingOrderId = null;
+
+  const statusFilter = closed
+    ? { status: { in: CLOSED_SHOP_STATUSES } }
+    : { status: { notIn: CLOSED_SHOP_STATUSES } };
+  const title = closed ? "📭 سفارشات بسته" : "📬 سفارشات باز";
 
   let orders = [];
   try {
     orders = await findTsOrders(
-      {},
+      statusFilter,
       {
         id: true,
         trackingCode: true,
@@ -841,14 +876,24 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
       },
       20
     );
+    orders = orders.filter((order) =>
+      closed ? isClosedShopOrder(order) : !isClosedShopOrder(order)
+    );
   } catch (err) {
     console.error("SHOP ORDERS LIST:", err);
-    await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد.", tenantAdminMenu());
+    await reply(user, chatId, "خواندن سفارش‌ها ممکن نشد.", shopOrdersMenu());
     return;
   }
 
   if (!orders.length) {
-    await reply(user, chatId, "🧾 هنوز سفارشی برای این فروشگاه ثبت نشده.", tenantAdminMenu());
+    await reply(
+      user,
+      chatId,
+      closed
+        ? "📭 سفارش رد شده یا ارسال‌شده‌ای نیست."
+        : "📬 سفارش بازی برای این فروشگاه نیست.",
+      shopOrdersMenu()
+    );
     return;
   }
 
@@ -861,8 +906,8 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
   await reply(
     user,
     chatId,
-    "🧾 سفارش‌های فروشگاه\nروی هر مورد برای جزئیات و تایید کلیک کنید.",
-    tenantAdminMenu()
+    `${title}\nروی هر مورد برای جزئیات و تایید کلیک کنید.`,
+    shopOrdersMenu()
   );
   const result = await bale.sendKeyboard(chatId, "سفارش‌ها:", inlineKb(rows));
   const msgId = result?.result?.message_id;
@@ -885,11 +930,13 @@ module.exports.showShopOrderDetail = async function showShopOrderDetail(
     await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", tenantAdminMenu());
     return;
   }
+  const listStep =
+    user.adminStep === CLOSED_LIST_STEP ? CLOSED_LIST_STEP : OPEN_LIST_STEP;
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: "TS:ORDERS", pendingOrderId: order.id },
+    data: { adminStep: listStep, pendingOrderId: order.id },
   });
-  user.adminStep = "TS:ORDERS";
+  user.adminStep = listStep;
   user.pendingOrderId = order.id;
 
   const { shop } = await paymentBank(ctx.tenantId);
@@ -909,8 +956,17 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
     await module.exports.showShopOrders(user, chatId);
     return true;
   }
+  if (text === BTN.SHOP_ORDERS_OPEN) {
+    await module.exports.showShopOrderList(user, chatId, "open");
+    return true;
+  }
+  if (text === BTN.SHOP_ORDERS_CLOSED) {
+    await module.exports.showShopOrderList(user, chatId, "closed");
+    return true;
+  }
 
   if (user.adminStep === "TS:O_REJECT" && user.pendingOrderId) {
+    if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
     try {
       const order = await prisma.order.update({
         where: { id: user.pendingOrderId },
@@ -918,20 +974,17 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
         select: ORDER_WITH_ITEMS_SELECT,
       });
       await notifyCustomer(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { adminStep: "TS:ORDERS", pendingOrderId: null },
-      });
-      await reply(user, chatId, "فاکتور رد شد.", tenantAdminMenu());
-      await module.exports.showShopOrders(user, chatId);
+      await reply(user, chatId, "فاکتور رد شد.", shopOrdersMenu());
+      await module.exports.showShopOrderList(user, chatId, "closed");
     } catch (err) {
       console.error("SHOP REJECT:", err);
-      await reply(user, chatId, "رد فاکتور ممکن نشد.", tenantAdminMenu());
+      await reply(user, chatId, "رد فاکتور ممکن نشد.", shopOrdersMenu());
     }
     return true;
   }
 
   if (user.adminStep === "TS:O_SHIP" && user.pendingOrderId) {
+    if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
     try {
       const order = await prisma.order.update({
         where: { id: user.pendingOrderId },
@@ -939,20 +992,21 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
         select: ORDER_WITH_ITEMS_SELECT,
       });
       await notifyCustomer(order, `🚚 سفارش ارسال شد.\n${text}`);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { adminStep: "TS:ORDERS", pendingOrderId: null },
-      });
-      await reply(user, chatId, "✅ ارسال ثبت شد.", tenantAdminMenu());
-      await module.exports.showShopOrders(user, chatId);
+      await reply(user, chatId, "✅ ارسال ثبت شد.", shopOrdersMenu());
+      await module.exports.showShopOrderList(user, chatId, "closed");
     } catch (err) {
       console.error("SHOP SHIP:", err);
-      await reply(user, chatId, "ثبت ارسال ممکن نشد.", tenantAdminMenu());
+      await reply(user, chatId, "ثبت ارسال ممکن نشد.", shopOrdersMenu());
     }
     return true;
   }
 
-  if (!user.pendingOrderId || user.adminStep !== "TS:ORDERS") return false;
+  if (
+    !user.pendingOrderId ||
+    (user.adminStep !== OPEN_LIST_STEP && user.adminStep !== CLOSED_LIST_STEP)
+  ) {
+    return false;
+  }
 
   if (text === BTN.APPROVE) {
     try {
