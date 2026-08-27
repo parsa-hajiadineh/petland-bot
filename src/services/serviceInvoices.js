@@ -164,16 +164,22 @@ async function lastPeriodEnd(tenantId) {
 }
 
 function buildQuote(packs, invoiceKind) {
-  const items = (packs || []).map((pack) => ({
-    packageId: pack.id,
-    code: pack.code,
-    title: snapshotTitle(pack, invoiceKind),
-    description: pack.description || null,
-    unitPrice: Number(pack.priceToman),
-    kind: pack.kind,
-    billing: pack.billing,
-    quantity: 1,
-  }));
+  const seen = new Set();
+  const items = [];
+  for (const pack of packs || []) {
+    if (!pack?.id || seen.has(pack.id)) continue;
+    seen.add(pack.id);
+    items.push({
+      packageId: pack.id,
+      code: pack.code,
+      title: snapshotTitle(pack, invoiceKind),
+      description: pack.description || null,
+      unitPrice: Number(pack.priceToman),
+      kind: pack.kind,
+      billing: pack.billing,
+      quantity: 1,
+    });
+  }
   const onceAmount = items
     .filter((item) => item.billing === "ONCE")
     .reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);

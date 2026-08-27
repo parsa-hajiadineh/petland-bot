@@ -165,6 +165,8 @@ const BTN = {
   SVC_ARCHIVE: "🗄 آرشیو / خروج از آرشیو",
   SVC_DELETE: "🗑 حذف پکیج",
   SVC_CONFIRM: "✅ تأیید انتخاب",
+  SVC_SELECT: "☑️ انتخاب سرویس",
+  SVC_PROFORMA: "🧾 پیش فاکتور",
   SVC_ISSUE: "🧾 صدور فاکتور",
   SVC_KIND: "📦 نوع پکیج / خدمت",
   SVC_BILLING: "📅 یک‌بار / ماهانه",

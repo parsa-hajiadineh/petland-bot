@@ -7,23 +7,27 @@ const { formatPrice } = require("../utils/price");
 const packages = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
 
-const MOTHER_PKG = "SB:I:PKG";
-const MOTHER_SVC = "SB:I:SVC";
-const MOTHER_INV = "SB:I:INV";
-const TENANT_PKG = "TS:SUB:PKG";
-const TENANT_SVC = "TS:SUB:SVC";
-const TENANT_INV = "TS:SUB:INV";
+const MOTHER_LIST = "SB:I:LIST";
+const MOTHER_VIEW = "SB:I:VIEW";
+const MOTHER_CART = "SB:I:CART";
+const TENANT_LIST = "TS:SUB:LIST";
+const TENANT_VIEW = "TS:SUB:VIEW";
+const TENANT_CART = "TS:SUB:CART";
+const REQUIRED_INITIAL = "SETUP_FIRST_MONTH";
+const REQUIRED_RENEWAL = "MONTHLY_SUB";
 
-function wizardMenu() {
-  return kb([[{ text: BTN.SVC_CONFIRM }], [{ text: BTN.BACK_PRODUCT_LIST }], [{ text: BTN.BACK_MAIN }]]);
+function catalogMenu(source) {
+  const rows = [[{ text: BTN.SVC_PROFORMA }], [{ text: BTN.BACK_PRODUCT_LIST }]];
+  if (source === "mother") rows.push([{ text: BTN.BACK_MAIN }]);
+  return kb(rows);
 }
 
-function invoiceMenu() {
-  return kb([
-    [{ text: BTN.SVC_ISSUE }],
-    [{ text: BTN.BACK_PRODUCT_LIST }],
-    [{ text: BTN.BACK_MAIN }],
-  ]);
+function detailMenu() {
+  return kb([[{ text: BTN.SVC_SELECT }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
+}
+
+function proformaMenu() {
+  return kb([[{ text: BTN.SVC_ISSUE }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
 }
 
 function isMotherStep(step) {
@@ -37,6 +41,10 @@ function isTenantStep(step) {
 async function tenantFlowKind(tenantId) {
   const hasInitial = await invoices.hasInitialInvoice(tenantId);
   return hasInitial ? "RENEWAL" : "INITIAL";
+}
+
+function requiredCode(flow) {
+  return flow === "RENEWAL" ? REQUIRED_RENEWAL : REQUIRED_INITIAL;
 }
 
 async function setMotherStep(user, step, tenantId) {
@@ -59,100 +67,71 @@ async function setTenantStep(user, step) {
   user.adminStep = step;
 }
 
-function packageFilter(flow, phase) {
-  if (phase === "PKG") {
-    return {
-      kind: "PACKAGE",
-      billing: flow === "RENEWAL" ? "MONTHLY" : "ONCE",
-    };
+async function currentContext(user) {
+  const mother = isMotherStep(user.orderStep);
+  const tenant = isTenantStep(user.adminStep);
+  if (!mother && !tenant) return null;
+  const source = mother ? "mother" : "tenant";
+  let flow = "INITIAL";
+  if (source === "tenant") {
+    flow = await tenantFlowKind(getBotContext().tenantId);
   }
-  if (flow === "RENEWAL") return { kind: "SERVICE", billing: "MONTHLY" };
-  return { kind: "SERVICE" };
+  const phase = mother
+    ? user.orderStep.split(":")[2]
+    : user.adminStep.split(":")[2];
+  return { source, flow, phase };
 }
 
-async function selectedFor(user, filter) {
+function uniquePacks(list) {
+  const seen = new Set();
+  const out = [];
+  for (const pack of list || []) {
+    if (!pack?.id || seen.has(pack.id)) continue;
+    seen.add(pack.id);
+    out.push(pack);
+  }
+  return out;
+}
+
+async function requiredPackage(flow) {
+  const code = requiredCode(flow);
+  const all = await packages.listActivePackages();
+  return all.find((pack) => pack.code === code) || null;
+}
+
+async function selectedPacks(user) {
   const picks = await packages.listPicks(user.id);
-  const ids = new Set(picks.map((row) => row.packageId));
-  const list = await packages.listActivePackages(filter);
-  return list.filter((pack) => ids.has(pack.id));
+  const ids = [...new Set(picks.map((row) => row.packageId))];
+  const all = await packages.listActivePackages();
+  const byId = new Map(all.map((pack) => [pack.id, pack]));
+  return uniquePacks(ids.map((id) => byId.get(id)).filter(Boolean));
 }
 
-async function allSelected(user, flow) {
-  const pkg = await selectedFor(user, packageFilter(flow, "PKG"));
-  const svc = await selectedFor(user, packageFilter(flow, "SVC"));
-  return [...pkg, ...svc];
+async function addPick(userId, packageId) {
+  const picks = await packages.listPicks(userId);
+  const ids = [...new Set(picks.map((row) => row.packageId))];
+  if (ids.includes(packageId)) return false;
+  await packages.replacePicks(userId, [...ids, packageId]);
+  return true;
 }
 
-async function showPicker(user, chatId, { source, flow, phase }) {
-  const filter = packageFilter(flow, phase);
-  const list = await packages.listActivePackages(filter);
-  const picks = await packages.listPicks(user.id);
-  const selected = new Set(picks.map((row) => row.packageId));
-  const chosen = list.filter((pack) => selected.has(pack.id));
-  const isPkg = phase === "PKG";
-  const title = isPkg
-    ? flow === "RENEWAL"
-      ? "📦 پکیج اشتراک ماه بعد"
-      : "📦 انتخاب پکیج راه‌اندازی"
-    : flow === "RENEWAL"
-      ? "🛠 خدمات ماه بعد"
-      : "🛠 خدمات تکمیلی";
-  const hint = isPkg
-    ? "حداقل یک پکیج را انتخاب کنید."
-    : "خدمات اختیاری‌اند؛ هر مورد را که می‌خواهید بزنید.";
-
-  if (!list.length && isPkg) {
-    await reply(
-      user,
-      chatId,
-      "پکیج فعالی برای این مرحله نیست.",
-      source === "tenant" ? tenantAdminMenu() : backMain()
-    );
-    if (source === "mother") {
-      const colleague = require("./colleague");
-      await colleague.continueAfterInvoice(user, chatId, user.pendingOrderId);
-    }
-    return;
-  }
-
-  if (!list.length && !isPkg) {
-    await showPreview(user, chatId, { source, flow });
-    return;
-  }
-
-  const lines = [title, hint, ""];
-  for (const pack of list) {
-    const mark = selected.has(pack.id) ? "✅" : "▫️";
-    lines.push(`${mark} ${pack.title}`);
-    lines.push(`   ${formatPrice(pack.priceToman)}`);
-    if (pack.description) lines.push(`   ${pack.description}`);
-    lines.push("");
-  }
-  if (chosen.length) {
-    const sum = chosen.reduce((n, pack) => n + pack.priceToman, 0);
-    lines.push(`جمع این مرحله: ${formatPrice(sum)}`);
-  }
-
-  const prefix = isPkg ? "sbp:" : "sbs:";
-  const rows = list.map((pack) => [
-    {
-      text: `${selected.has(pack.id) ? "✅" : "➕"} ${pack.title}`,
-      callback_data: `${prefix}${pack.id}`.slice(0, 64),
-    },
-  ]);
-  rows.push([{ text: BTN.SVC_CONFIRM, callback_data: "sbok" }]);
-
-  await reply(
-    user,
-    chatId,
-    lines.join("\n"),
-    source === "tenant" ? wizardMenu() : backMain()
+async function removePick(userId, packageId) {
+  const picks = await packages.listPicks(userId);
+  const ids = [...new Set(picks.map((row) => row.packageId))].filter(
+    (id) => id !== packageId
   );
-  const result = await bale.sendKeyboard(
-    chatId,
-    "روی مورد بزنید تا انتخاب شود:",
-    inlineKb(rows)
-  );
+  await packages.replacePicks(userId, ids);
+}
+
+async function ensureRequired(user, flow) {
+  const required = await requiredPackage(flow);
+  if (!required) return null;
+  await addPick(user.id, required.id);
+  return required;
+}
+
+async function sendInline(user, chatId, caption, rows) {
+  const result = await bale.sendKeyboard(chatId, caption, inlineKb(rows));
   const msgId = result?.result?.message_id;
   if (msgId) {
     await prisma.user.update({
@@ -162,106 +141,160 @@ async function showPicker(user, chatId, { source, flow, phase }) {
   }
 }
 
-async function showPreview(user, chatId, { source, flow }) {
-  const chosen = await allSelected(user, flow);
-  const pkg = await selectedFor(user, packageFilter(flow, "PKG"));
-  if (!pkg.length) {
-    await reply(user, chatId, "حداقل یک پکیج انتخاب کنید.", wizardMenu());
-    await showPicker(user, chatId, { source, flow, phase: "PKG" });
+async function showCatalog(user, chatId, ctx) {
+  if (ctx.source === "mother") await setMotherStep(user, MOTHER_LIST);
+  else await setTenantStep(user, TENANT_LIST);
+  const list = await packages.listActivePackages();
+  if (!list.length) {
+    await reply(
+      user,
+      chatId,
+      "سرویس فعالی برای انتخاب نیست.",
+      ctx.source === "tenant" ? tenantAdminMenu() : backMain()
+    );
+    if (ctx.source === "mother") {
+      const colleague = require("./colleague");
+      await colleague.continueAfterInvoice(user, chatId, user.pendingOrderId);
+    }
     return;
   }
-  if (source === "mother") await setMotherStep(user, MOTHER_INV);
-  else await setTenantStep(user, TENANT_INV);
-  const quote = invoices.buildQuote(chosen, flow);
-  const text = `${invoices.formatQuoteText(quote, flow)}\n\nاگر مورد تأیید است صدور فاکتور را بزنید.`;
-  await reply(user, chatId, text, invoiceMenu());
+  await reply(
+    user,
+    chatId,
+    "💳 خرید اشتراک\nروی هر مورد بزنید تا توضیحات را ببینید. بعد از انتخاب‌ها، پیش‌فاکتور را باز کنید.",
+    catalogMenu(ctx.source)
+  );
+  const rows = list.map((pack) => [
+    {
+      text: `${pack.title} | ${formatPrice(pack.priceToman)}`,
+      callback_data: `sbv:${pack.id}`.slice(0, 64),
+    },
+  ]);
+  await sendInline(user, chatId, "خدمات:", rows);
+}
+
+async function showDetail(user, chatId, packId) {
+  const ctx = await currentContext(user);
+  if (!ctx) return false;
+  const pack = await packages.getPackage(packId);
+  if (!pack || !pack.isActive || pack.isArchived) {
+    await reply(user, chatId, "این مورد الان قابل انتخاب نیست.");
+    return true;
+  }
+  if (ctx.source === "mother") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: MOTHER_VIEW, lastProductCode: pack.id },
+    });
+    user.orderStep = MOTHER_VIEW;
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: TENANT_VIEW, lastProductCode: pack.id },
+    });
+    user.adminStep = TENANT_VIEW;
+  }
+  user.lastProductCode = pack.id;
+  const desc = (pack.description || "").trim() || "توضیحی ثبت نشده است.";
+  await reply(
+    user,
+    chatId,
+    `💼 ${pack.title}\n\n💰 ${formatPrice(pack.priceToman)}\n\n${desc}`,
+    detailMenu()
+  );
+  return true;
+}
+
+async function showProforma(user, chatId) {
+  const ctx = await currentContext(user);
+  if (!ctx) return false;
+  const required = await ensureRequired(user, ctx.flow);
+  if (ctx.source === "mother") await setMotherStep(user, MOTHER_CART);
+  else await setTenantStep(user, TENANT_CART);
+  const chosen = await selectedPacks(user);
+  const requiredId = required?.id;
+  const quote = invoices.buildQuote(chosen, ctx.flow);
+  const lines = ["🧾 پیش فاکتور", "━━━━━━━━━━━━━━━━━━", ""];
+  for (const pack of chosen) {
+    const tag = pack.id === requiredId ? " (اجباری)" : "";
+    lines.push(`• ${pack.title}${tag}`);
+    lines.push(`  ${formatPrice(pack.priceToman)}`);
+  }
+  lines.push("", `جمع: ${formatPrice(quote.totalAmount)}`);
+  const removable = chosen.filter((pack) => pack.id !== requiredId);
+  if (removable.length) {
+    lines.push("", "برای حذف یک مورد اختیاری روی آن بزنید.");
+  }
+  await reply(user, chatId, lines.join("\n"), proformaMenu());
+  if (removable.length) {
+    const rows = removable.map((pack) => [
+      {
+        text: `🗑 ${pack.title}`,
+        callback_data: `sbx:${pack.id}`.slice(0, 64),
+      },
+    ]);
+    await sendInline(user, chatId, "حذف از پیش‌فاکتور:", rows);
+  }
+  return true;
 }
 
 async function startInitial(user, chatId, tenantId) {
   await packages.replacePicks(user.id, []);
   await invoices.ensureServiceInvoices();
-  await setMotherStep(user, MOTHER_PKG, tenantId);
-  await showPicker(user, chatId, {
-    source: "mother",
-    flow: "INITIAL",
-    phase: "PKG",
-  });
+  await setMotherStep(user, MOTHER_LIST, tenantId);
+  await showCatalog(user, chatId, { source: "mother", flow: "INITIAL" });
 }
 
 async function startTenantSubscribe(user, chatId, tenantId) {
   await packages.replacePicks(user.id, []);
   await invoices.ensureServiceInvoices();
   const flow = await tenantFlowKind(tenantId);
-  await setTenantStep(user, TENANT_PKG);
-  await showPicker(user, chatId, { source: "tenant", flow, phase: "PKG" });
+  await setTenantStep(user, TENANT_LIST);
+  await showCatalog(user, chatId, { source: "tenant", flow });
 }
 
-async function currentContext(user) {
-  const mother = isMotherStep(user.orderStep);
-  const tenant = isTenantStep(user.adminStep);
-  if (!mother && !tenant) return null;
-  const source = mother ? "mother" : "tenant";
-  let flow = "INITIAL";
-  if (source === "tenant") {
-    const tenantId = getBotContext().tenantId;
-    flow = await tenantFlowKind(tenantId);
-  }
-  const phase = mother
-    ? user.orderStep.split(":")[2]
-    : user.adminStep.split(":")[2];
-  return { source, flow, phase };
-}
-
-async function toggle(user, chatId, packageId, expectedKind) {
+async function selectCurrent(user, chatId) {
   const ctx = await currentContext(user);
-  if (!ctx) return false;
-  const pack = await packages.getPackage(packageId);
+  if (!ctx || ctx.phase !== "VIEW") return false;
+  const packId = user.lastProductCode;
+  const pack = await packages.getPackage(packId);
   if (!pack || !pack.isActive || pack.isArchived) {
-    await reply(user, chatId, "این مورد الان قابل انتخاب نیست.");
+    await reply(user, chatId, "این مورد الان قابل انتخاب نیست.", detailMenu());
     return true;
   }
-  if (pack.kind !== expectedKind) return true;
-  const picks = await packages.listPicks(user.id);
-  const ids = picks.map((row) => row.packageId);
-  const next = ids.includes(packageId)
-    ? ids.filter((id) => id !== packageId)
-    : [...ids, packageId];
-  await packages.replacePicks(user.id, next);
-  await showPicker(user, chatId, ctx);
+  const added = await addPick(user.id, pack.id);
+  await reply(
+    user,
+    chatId,
+    added ? "✅ به پیش‌فاکتور اضافه شد." : "این مورد از قبل در پیش‌فاکتور هست.",
+    detailMenu()
+  );
   return true;
 }
 
-async function confirmPhase(user, chatId) {
+async function removeFromProforma(user, chatId, packageId) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
-  if (ctx.phase === "PKG") {
-    const pkg = await selectedFor(user, packageFilter(ctx.flow, "PKG"));
-    if (!pkg.length) {
-      await reply(user, chatId, "حداقل یک پکیج را انتخاب کنید.");
-      await showPicker(user, chatId, ctx);
-      return true;
-    }
-    if (ctx.source === "mother") await setMotherStep(user, MOTHER_SVC);
-    else await setTenantStep(user, TENANT_SVC);
-    await showPicker(user, chatId, { ...ctx, phase: "SVC" });
+  const required = await requiredPackage(ctx.flow);
+  if (required && required.id === packageId) {
+    await reply(user, chatId, "این مورد اجباری است و از پیش‌فاکتور حذف نمی‌شود.");
+    await showProforma(user, chatId);
     return true;
   }
-  if (ctx.phase === "SVC" || ctx.phase === "INV") {
-    await showPreview(user, chatId, ctx);
-    return true;
-  }
+  await removePick(user.id, packageId);
+  await showProforma(user, chatId);
   return true;
 }
 
 async function issueInvoice(user, chatId) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
-  const chosen = await allSelected(user, ctx.flow);
-  const pkg = await selectedFor(user, packageFilter(ctx.flow, "PKG"));
-  if (!pkg.length) {
-    await reply(user, chatId, "حداقل یک پکیج انتخاب کنید.");
+  if (ctx.phase !== "CART") {
+    await showProforma(user, chatId);
     return true;
   }
+  await ensureRequired(user, ctx.flow);
+  const chosen = await selectedPacks(user);
   const tenantId =
     ctx.source === "tenant" ? getBotContext().tenantId : user.pendingOrderId;
   try {
@@ -296,17 +329,17 @@ async function issueInvoice(user, chatId) {
 }
 
 async function handleCallback(user, chatId, data) {
-  if (data === "sbok") return confirmPhase(user, chatId);
+  if (data.startsWith("sbv:")) return showDetail(user, chatId, data.slice(4));
+  if (data.startsWith("sbx:")) return removeFromProforma(user, chatId, data.slice(4));
   if (data === "sbinv") return issueInvoice(user, chatId);
-  if (data.startsWith("sbp:")) return toggle(user, chatId, data.slice(4), "PACKAGE");
-  if (data.startsWith("sbs:")) return toggle(user, chatId, data.slice(4), "SERVICE");
   return false;
 }
 
 async function handleText(user, chatId, text) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
-  if (text === BTN.SVC_CONFIRM) return confirmPhase(user, chatId);
+  if (text === BTN.SVC_SELECT) return selectCurrent(user, chatId);
+  if (text === BTN.SVC_PROFORMA) return showProforma(user, chatId);
   if (text === BTN.SVC_ISSUE) return issueInvoice(user, chatId);
   if (text === BTN.BACK_PRODUCT_LIST) return goBack(user, chatId);
   if (text === BTN.BACK_MAIN) return false;
@@ -316,16 +349,8 @@ async function handleText(user, chatId, text) {
 async function goBack(user, chatId) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
-  if (ctx.phase === "INV") {
-    if (ctx.source === "mother") await setMotherStep(user, MOTHER_SVC);
-    else await setTenantStep(user, TENANT_SVC);
-    await showPicker(user, chatId, { ...ctx, phase: "SVC" });
-    return true;
-  }
-  if (ctx.phase === "SVC") {
-    if (ctx.source === "mother") await setMotherStep(user, MOTHER_PKG);
-    else await setTenantStep(user, TENANT_PKG);
-    await showPicker(user, chatId, { ...ctx, phase: "PKG" });
+  if (ctx.phase === "VIEW" || ctx.phase === "CART") {
+    await showCatalog(user, chatId, ctx);
     return true;
   }
   if (ctx.source === "tenant") {
