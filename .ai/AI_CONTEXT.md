@@ -3,7 +3,13 @@
 
 ---
 
-## وضعیت همین الان (۱۴۰۵/۰۶/۰۶ — گیت ساخت ربات)
+## وضعیت همین الان (۱۴۰۵/۰۶/۰۶ — کیف پول اعتباری)
+
+کیف پول اعتباری همکار در پنل ادمین فروشگاه: «📒 کیف پول اعتباری». موجودی فیلد جدا نیست؛ از جمع `CreditTransaction` به‌دست می‌آید.
+
+قوانین (نمایش و قرارداد): اعتبار قابل برداشت نیست، برای خرید کالا نیست، فقط برای خدمات مجاز پلتفرم است. این کیف پول با `Wallet` بازاریابی مادر قاطی نشود.
+
+واریز و خرج هنوز وصل نیست. نوشتن دفتر فقط از `appendTransaction` (با عنوان فارسی snapshot، نوع، ارجاع، `createdByUserId`). ردیف دفتر به‌روز یا حذف نمی‌شود.
 
 ساخت ربات فروشگاهی فقط وقتی قبول می‌شود که:
 1. فروشگاه هنوز ربات نداشته باشد (هر فروشگاه یک ربات)
@@ -14,9 +20,6 @@
 خرید اشتراک در ربات همکار: اگر `Bot` از قبل وجود داشته باشد، پکیج راه‌اندازی (`SETUP_FIRST_MONTH`) در کاتالوگ نیست و جریان `RENEWAL` است (`MONTHLY_SUB` اجباری).
 
 پکیج‌ها `kind` (PACKAGE/SERVICE) و `billing` (ONCE/MONTHLY) دارند. فاکتور `ServiceInvoice` با snapshot قیمت (کد SI-). وضعیت: `WAITING_PAYMENT` تا ادمین مادر تایید کند، بعد `APPROVED`.
-
-جریان خرید اشتراک: لیست اینلاین → جزئیات + انتخاب سرویس → پیش‌فاکتور → صدور فاکتور.
-اولین خرید (قبل از ربات): راه‌اندازی اجباری. بعد از راه‌اندازی ربات: اشتراک ماهانه اجباری. هر خدمت حداکثر یک‌بار.
 
 روی `Order` موقع استارت ALTER نزن. توکن را لاگ نکن.
 
@@ -53,6 +56,8 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 
 سفارش تننت: `TS-` + `Order.tenantId`. مادر فقط `PL-`.
 
+کیف پول اعتباری تننت: `CreditWallet` (یک فروشگاه = یک کیف) + دفتر `CreditTransaction`. موجودی = SUM مبلغ‌های دفتر. `Wallet` مادر = پورسانت بازاریابی و قابل برداشت است؛ جدا بماند.
+
 ---
 
 ## Engine
@@ -73,9 +78,10 @@ src/bot/engine.js            poll + processUpdate(update, ctx)
 src/handlers/router.js       مادر vs تننت
 src/handlers/tenantShop.js   منوی فروشگاه همکار
 src/handlers/tenantOrder.js  سبد/تسویه/رسید/پیگیری مالک
-src/handlers/tenantAdmin.js  پنل مالک
+src/handlers/tenantAdmin.js  پنل مالک + کیف پول اعتباری
 src/services/shopCart.js     SQL خام
 src/services/shopProvision.js جدول‌های runtime + گیت فاکتور راه‌اندازی
+src/services/creditLedger.js دفتر اعتبار همکار (بدون فیلد موجودی)
 src/handlers/products.js     مادر + showTenantProducts
 src/services/servicePackages.js جدول و seed پکیج خدمات
 src/handlers/adminServices.js  ادمین مادر: CRUD پکیج + تایید فاکتور خدمات
@@ -88,10 +94,13 @@ src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 سفارش‌های فروشگاه: اول «سفارشات باز» / «سفارشات بسته». باز = همه جز `REJECTED` و `SHIPPED`. بسته = همان دو وضعیت. لیست اینلاین مثل قبل.
 محصولات تننت: **همیشه اول دسته‌ها**، بعد اینلاین ۱۰تایی.
 
-قدم‌های تننت: `TSC:` دسته، `TCK:QTY` تعداد، `TCK:NAME`… تسویه، `TCK:RECEIPT` رسید، `TS:` پنل مالک.
+قدم‌های تننت: `TSC:` دسته، `TCK:QTY` تعداد، `TCK:NAME`… تسویه، `TCK:RECEIPT` رسید، `TS:` پنل مالک، `TS:CREDIT` کیف اعتبار.
 
 گیت ساخت ربات: `colleague.gateShopBotCreate` + `provisionShop` (`NEED_SETUP_INVOICE` / `NEED_APPROVED_SETUP` / `ALREADY_HAS_BOT`).
 تایید فاکتور خدمات: پنل ادمین مادر → «فاکتور خدمات همکاران» (`sinv:`). دکمه تایید سفارش فروشگاهی (`approveOrder`) را برای این فاکتورها صدا نزن.
+
+انواع دفتر اعتبار (عنوان فارسی روی هر ردیف قفل می‌شود):
+`GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `SERVICE_PAYMENT` پرداخت فاکتور خدمات، `REFUND` بازگشت اعتبار.
 
 ---
 
@@ -106,13 +115,15 @@ src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 7. اسکیما additive. ShopCart را به Prisma برنگردان مگر db:push در دسترس باشد.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان نه.
 9. سفارش تننت `TS-`؛ مادر `PL-`.
+10. موجودی اعتبار را در فیلد جدا ذخیره نکن؛ از Ledger جمع بزن. ردیف دفتر را UPDATE/DELETE نکن.
 
 ---
 
 ## کار بعدی
-1. آپلود رسید پرداخت برای فاکتور خدمات
-2. ادمین مادر: خاموش/روشن Bot، TenantMessage
-3. TENANT_RESELL
-4. تیکت داخل ربات تننت
+1. واریز و خرج کیف پول اعتباری (پاداش / پرداخت فاکتور خدمات)
+2. آپلود رسید پرداخت برای فاکتور خدمات
+3. ادمین مادر: خاموش/روشن Bot، TenantMessage
+4. TENANT_RESELL
+5. تیکت داخل ربات تننت
 
 `.ai/CURRENT_STATUS.md` و `ROADMAP.md` مال v22 تکی‌اند و قدیمی‌اند.

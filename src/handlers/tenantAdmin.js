@@ -230,6 +230,30 @@ async function showAdminHome(user, chatId) {
   );
 }
 
+async function showCreditWallet(user, chatId, tenantId) {
+  const creditLedger = require("../services/creditLedger");
+  await setStep(user, "TS:CREDIT");
+  let view;
+  try {
+    view = await creditLedger.getWalletView(tenantId);
+  } catch (err) {
+    console.error("CREDIT WALLET VIEW:", err);
+    await reply(
+      user,
+      chatId,
+      "خواندن کیف پول اعتباری ممکن نشد.",
+      tenantAdminMenu()
+    );
+    return;
+  }
+  await reply(
+    user,
+    chatId,
+    view.text,
+    kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+  );
+}
+
 async function showProfile(user, chatId, tenantId) {
   const shop = await loadShopView(tenantId);
   await setStep(user, "TS:PROFILE");
@@ -581,6 +605,10 @@ async function handleAdminText(user, chatId, text) {
     await require("./serviceBilling").showInvoiceList(user, chatId, tenantId);
     return true;
   }
+  if (text === BTN.SHOP_CREDIT_WALLET) {
+    await showCreditWallet(user, chatId, tenantId);
+    return true;
+  }
 
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
     if (String(user.adminStep).startsWith("TS:SUB:")) {
@@ -624,7 +652,8 @@ async function handleAdminText(user, chatId, text) {
       user.adminStep === "TS:PRODUCTS" ||
       user.adminStep === "TS:WELCOME" ||
       user.adminStep === "TS:HELP" ||
-      user.adminStep === "TS:LOGO"
+      user.adminStep === "TS:LOGO" ||
+      user.adminStep === "TS:CREDIT"
     ) {
       await showAdminHome(user, chatId);
       return true;

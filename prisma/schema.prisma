@@ -378,6 +378,7 @@ model Tenant {
   subscriptions   TenantSubscription[]
   messages        TenantMessage[]
   serviceInvoices ServiceInvoice[]
+  creditWallet    CreditWallet?
 
   @@index([status])
   @@index([type])
@@ -622,4 +623,35 @@ model ServiceInvoiceItem {
   invoice     ServiceInvoice @relation(fields: [invoiceId], references: [id])
 
   @@index([invoiceId])
+}
+
+model CreditWallet {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries   CreditTransaction[]
+}
+
+model CreditTransaction {
+  id              String   @id @default(cuid())
+  amount          Int
+  type            String
+  title           String
+  note            String?
+  referenceType   String?
+  referenceId     String?
+  createdByUserId String?
+  metadata        String?
+
+  createdAt       DateTime @default(now())
+
+  walletId        String
+  wallet          CreditWallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@index([referenceType, referenceId])
 }

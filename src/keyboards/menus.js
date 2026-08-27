@@ -173,6 +173,7 @@ const BTN = {
   SVC_BILLING: "📅 یک‌بار / ماهانه",
   SHOP_SUBSCRIBE: "💳 خرید اشتراک",
   SHOP_SERVICE_INVOICES: "🧾 فاکتور خدمات",
+  SHOP_CREDIT_WALLET: "📒 کیف پول اعتباری",
   SHOP_ADMIN: "⚙️ مدیریت فروشگاه",
   SHOP_PROFILE: "🏪 مشخصات فروشگاه",
   SHOP_LOGO: "🖼 لوگو",
@@ -254,6 +255,7 @@ function tenantAdminMenu() {
     [{ text: BTN.SHOP_ORDERS }],
     [{ text: BTN.SHOP_SUBSCRIBE }],
     [{ text: BTN.SHOP_SERVICE_INVOICES }],
+    [{ text: BTN.SHOP_CREDIT_WALLET }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }

@@ -34,6 +34,7 @@ app.listen(PORT, async () => {
   try {
     await ensureServicePackages();
     await ensureServiceInvoices();
+    await require("./services/creditLedger").ensureCreditLedger();
   } catch (err) {
     console.error("SERVICE PACKAGES SKIP:", err.message);
   }
