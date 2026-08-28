@@ -18,6 +18,7 @@ const { statusLabel } = require("../utils/order");
 const { notifyOrderStatus } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
+const adminCreditSettings = require("./adminCreditSettings");
 
 // ─── Sales Stats Helpers ─────────────────────────────────────────────────────
 
@@ -317,13 +318,15 @@ async function goAdminBack(user, chatId) {
     step === "ADMIN_WITHDRAWALS" ||
     step === "ADMIN_TICKETS" ||
     step === "ADMIN_INVOICES" ||
-    step === "SVC:LIST"
+    step === "SVC:LIST" ||
+    step === "CRSET:LIST"
   ) {
     await module.exports.showAdminPanel(user, chatId);
     return true;
   }
 
   if (await adminServices.goBack(user, chatId)) return true;
+  if (await adminCreditSettings.goBack(user, chatId)) return true;
 
   await prisma.user.update({
     where: { id: user.id },
@@ -440,6 +443,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (await adminServices.handleText(user, chatId, text)) return true;
+  if (await adminCreditSettings.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);

@@ -156,8 +156,13 @@ const BTN = {
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
-  ADMIN_SERVICES: "💼 پکیج خدمات",
+  ADMIN_SERVICES: "🛠 تغییر پکیج های خدماتی",
   ADMIN_SVC_INVOICES: "🧾 فاکتور خدمات همکاران",
+  ADMIN_CREDIT_SETTINGS: "⚙️ تنظیمات ساخت اعتبار",
+  CREDIT_SET_HOURS: "⏱ زمان گلدن تایم",
+  CREDIT_SET_LIMIT: "💰 سقف اعتبار ویژه",
+  CREDIT_SET_GOLDEN_PCT: "⭐ درصد اعتبار ویژه",
+  CREDIT_SET_STANDARD_PCT: "📈 درصد اعتبار عادی",
   SVC_NEW: "➕ پکیج جدید",
   SVC_EDIT_TITLE: "✏️ نام",
   SVC_EDIT_PRICE: "💰 قیمت",
@@ -362,13 +367,10 @@ function walletMenu() {
 
 function adminMenu() {
   return kb([
-    [{ text: BTN.ADMIN_INVOICES }],
-    [{ text: BTN.ADMIN_TICKETS }],
-    [{ text: BTN.ADMIN_PRODUCTS }],
-    [{ text: BTN.ADMIN_SERVICES }],
-    [{ text: BTN.ADMIN_SVC_INVOICES }],
-    [{ text: BTN.ADMIN_WITHDRAWALS }],
-    [{ text: BTN.ADMIN_SALES }],
+    [{ text: BTN.ADMIN_INVOICES }, { text: BTN.ADMIN_TICKETS }],
+    [{ text: BTN.ADMIN_PRODUCTS }, { text: BTN.ADMIN_SERVICES }],
+    [{ text: BTN.ADMIN_SVC_INVOICES }, { text: BTN.ADMIN_WITHDRAWALS }],
+    [{ text: BTN.ADMIN_SALES }, { text: BTN.ADMIN_CREDIT_SETTINGS }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }
@@ -402,10 +404,16 @@ function adminServiceInvoiceActions() {
 
 function adminInvoicesMenu() {
   return kb([
-    [{ text: BTN.ADMIN_PENDING }],
-    [{ text: BTN.ADMIN_APPROVED }],
-    [{ text: BTN.ADMIN_REJECTED }],
-    [{ text: BTN.ADMIN_SHIPPED }],
+    [{ text: BTN.ADMIN_PENDING }, { text: BTN.ADMIN_APPROVED }],
+    [{ text: BTN.ADMIN_REJECTED }, { text: BTN.ADMIN_SHIPPED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminCreditSettingsMenu() {
+  return kb([
+    [{ text: BTN.CREDIT_SET_HOURS }, { text: BTN.CREDIT_SET_LIMIT }],
+    [{ text: BTN.CREDIT_SET_GOLDEN_PCT }, { text: BTN.CREDIT_SET_STANDARD_PCT }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
@@ -497,6 +505,7 @@ module.exports = {
   adminServiceDetailMenu,
   adminServiceInvoiceActions,
   adminInvoicesMenu,
+  adminCreditSettingsMenu,
   adminBackMenu,
   adminOrderActions,
   adminApprovedActions,

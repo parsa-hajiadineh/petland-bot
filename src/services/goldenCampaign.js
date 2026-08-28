@@ -4,10 +4,13 @@ const { formatPrice } = require("../utils/price");
 const creditLedger = require("./creditLedger");
 const { findOwnedTenant } = require("./shopProvision");
 
-const GOLDEN_LIMIT = 10_000_000;
-const GOLDEN_MULTIPLIER = 5;
-const GOLDEN_HOURS = 48;
-const STANDARD_RATE = 10;
+const DEFAULTS = {
+  goldenHours: 48,
+  goldenLimitToman: 10_000_000,
+  goldenPercent: 500,
+  standardPercent: 10,
+};
+const SETTINGS_ID = "default";
 const REF_ORDER = "Order";
 
 function newId() {
@@ -66,6 +69,22 @@ async function ensureInner() {
     "ORDER RECEIPT ORDER INDEX SKIP:",
     `CREATE UNIQUE INDEX IF NOT EXISTS "OrderReceipt_orderId_key" ON "OrderReceipt"("orderId")`
   );
+  await execSql(
+    "CREDIT SETTINGS TABLE SKIP:",
+    `CREATE TABLE IF NOT EXISTS "CreditCampaignSettings" (
+      "id" TEXT NOT NULL,
+      "goldenHours" INTEGER NOT NULL DEFAULT 48,
+      "goldenLimitToman" INTEGER NOT NULL DEFAULT 10000000,
+      "goldenPercent" INTEGER NOT NULL DEFAULT 500,
+      "standardPercent" INTEGER NOT NULL DEFAULT 10,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CreditCampaignSettings_pkey" PRIMARY KEY ("id")
+    )`
+  );
+  await execSql(
+    "GOLDEN PERIOD PERCENT COL SKIP:",
+    `ALTER TABLE "ColleagueGoldenPeriod" ADD COLUMN IF NOT EXISTS "goldenPercent" INTEGER`
+  );
 }
 
 function mapPeriod(row) {
@@ -75,9 +94,94 @@ function mapPeriod(row) {
     userId: row.userId,
     startedAt: new Date(row.startedAt),
     endsAt: new Date(row.endsAt),
-    limitToman: Number(row.limitToman || GOLDEN_LIMIT),
-    multiplier: Number(row.multiplier || GOLDEN_MULTIPLIER),
+    limitToman: Number(row.limitToman || DEFAULTS.goldenLimitToman),
+    multiplier: Number(row.multiplier || 5),
+    goldenPercent: Number(
+      row.goldenPercent || (Number(row.multiplier || 5) * 100)
+    ),
   };
+}
+
+function mapSettings(row) {
+  return {
+    goldenHours: Number(row?.goldenHours || DEFAULTS.goldenHours),
+    goldenLimitToman: Number(row?.goldenLimitToman || DEFAULTS.goldenLimitToman),
+    goldenPercent: Number(row?.goldenPercent || DEFAULTS.goldenPercent),
+    standardPercent: Number(row?.standardPercent || DEFAULTS.standardPercent),
+  };
+}
+
+async function getSettings() {
+  await ensureGoldenCampaign();
+  if (prisma.creditCampaignSettings?.findUnique) {
+    try {
+      const row = await prisma.creditCampaignSettings.findUnique({
+        where: { id: SETTINGS_ID },
+      });
+      if (row) return mapSettings(row);
+    } catch (err) {
+      console.error("CREDIT SETTINGS GET PRISMA SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "CreditCampaignSettings" WHERE "id" = $1 LIMIT 1`,
+    SETTINGS_ID
+  );
+  if (rows?.[0]) return mapSettings(rows[0]);
+  try {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "CreditCampaignSettings"
+        ("id","goldenHours","goldenLimitToman","goldenPercent","standardPercent","updatedAt")
+       VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)`,
+      SETTINGS_ID,
+      DEFAULTS.goldenHours,
+      DEFAULTS.goldenLimitToman,
+      DEFAULTS.goldenPercent,
+      DEFAULTS.standardPercent
+    );
+  } catch (err) {
+    console.error("CREDIT SETTINGS SEED SKIP:", err.message);
+  }
+  return { ...DEFAULTS };
+}
+
+async function updateSettings(patch) {
+  const current = await getSettings();
+  const next = {
+    goldenHours: Number(patch.goldenHours ?? current.goldenHours),
+    goldenLimitToman: Number(patch.goldenLimitToman ?? current.goldenLimitToman),
+    goldenPercent: Number(patch.goldenPercent ?? current.goldenPercent),
+    standardPercent: Number(patch.standardPercent ?? current.standardPercent),
+  };
+  if (prisma.creditCampaignSettings?.upsert) {
+    try {
+      await prisma.creditCampaignSettings.upsert({
+        where: { id: SETTINGS_ID },
+        create: { id: SETTINGS_ID, ...next },
+        update: next,
+      });
+      return next;
+    } catch (err) {
+      console.error("CREDIT SETTINGS UPSERT PRISMA SKIP:", err.message);
+    }
+  }
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "CreditCampaignSettings"
+      ("id","goldenHours","goldenLimitToman","goldenPercent","standardPercent","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
+     ON CONFLICT ("id") DO UPDATE SET
+      "goldenHours" = EXCLUDED."goldenHours",
+      "goldenLimitToman" = EXCLUDED."goldenLimitToman",
+      "goldenPercent" = EXCLUDED."goldenPercent",
+      "standardPercent" = EXCLUDED."standardPercent",
+      "updatedAt" = CURRENT_TIMESTAMP`,
+    SETTINGS_ID,
+    next.goldenHours,
+    next.goldenLimitToman,
+    next.goldenPercent,
+    next.standardPercent
+  );
+  return next;
 }
 
 async function getGoldenPeriod(userId) {
@@ -104,8 +208,12 @@ async function startGoldenPeriod(userId) {
   if (!userId) return null;
   const existing = await getGoldenPeriod(userId);
   if (existing) return existing;
+  const settings = await getSettings();
   const startedAt = new Date();
-  const endsAt = new Date(startedAt.getTime() + GOLDEN_HOURS * 60 * 60 * 1000);
+  const endsAt = new Date(
+    startedAt.getTime() + settings.goldenHours * 60 * 60 * 1000
+  );
+  const multiplier = Math.max(1, Math.round(settings.goldenPercent / 100));
   if (prisma.colleagueGoldenPeriod?.create) {
     try {
       return mapPeriod(
@@ -114,8 +222,9 @@ async function startGoldenPeriod(userId) {
             userId,
             startedAt,
             endsAt,
-            limitToman: GOLDEN_LIMIT,
-            multiplier: GOLDEN_MULTIPLIER,
+            limitToman: settings.goldenLimitToman,
+            multiplier,
+            goldenPercent: settings.goldenPercent,
           },
         })
       );
@@ -126,14 +235,15 @@ async function startGoldenPeriod(userId) {
   try {
     await prisma.$executeRawUnsafe(
       `INSERT INTO "ColleagueGoldenPeriod"
-        ("id","userId","startedAt","endsAt","limitToman","multiplier","createdAt")
-       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)`,
+        ("id","userId","startedAt","endsAt","limitToman","multiplier","goldenPercent","createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)`,
       newId(),
       userId,
       startedAt,
       endsAt,
-      GOLDEN_LIMIT,
-      GOLDEN_MULTIPLIER
+      settings.goldenLimitToman,
+      multiplier,
+      settings.goldenPercent
     );
   } catch (err) {
     console.error("GOLDEN PERIOD INSERT SKIP:", err.message);
@@ -265,28 +375,36 @@ async function grantPurchaseCredit(order, actorUserId) {
 
     const created = [];
     if (goldenBase > 0 && !hasGolden) {
-      const amount = goldenBase * period.multiplier;
-      created.push(
-        await creditLedger.appendTransaction({
-          userId: order.userId,
-          tenantId: tenant?.id || null,
-          amount,
-          type: creditLedger.CREDIT_TYPE.GOLDEN_REWARD,
-          title: creditLedger.CREDIT_TYPE_TITLE.GOLDEN_REWARD,
-          referenceType: REF_ORDER,
-          referenceId: order.id,
-          createdByUserId: actorUserId || null,
-          metadata: {
-            orderId: order.id,
-            trackingCode: order.trackingCode,
-            goldenBase,
-            multiplier: period.multiplier,
-          },
-        })
+      const amount = Math.floor(
+        (goldenBase * Number(period.goldenPercent || 500)) / 100
       );
+      if (amount > 0) {
+        created.push(
+          await creditLedger.appendTransaction({
+            userId: order.userId,
+            tenantId: tenant?.id || null,
+            amount,
+            type: creditLedger.CREDIT_TYPE.GOLDEN_REWARD,
+            title: creditLedger.CREDIT_TYPE_TITLE.GOLDEN_REWARD,
+            referenceType: REF_ORDER,
+            referenceId: order.id,
+            createdByUserId: actorUserId || null,
+            metadata: {
+              orderId: order.id,
+              trackingCode: order.trackingCode,
+              goldenBase,
+              goldenPercent: period.goldenPercent,
+              multiplier: period.multiplier,
+            },
+          })
+        );
+      }
     }
     if (standardBase > 0 && !hasStandard) {
-      const amount = Math.floor((standardBase * STANDARD_RATE) / 100);
+      const settings = await getSettings();
+      const amount = Math.floor(
+        (standardBase * Number(settings.standardPercent || 10)) / 100
+      );
       if (amount > 0) {
         created.push(
           await creditLedger.appendTransaction({
@@ -302,7 +420,7 @@ async function grantPurchaseCredit(order, actorUserId) {
               orderId: order.id,
               trackingCode: order.trackingCode,
               standardBase,
-              ratePercent: STANDARD_RATE,
+              ratePercent: settings.standardPercent,
             },
           })
         );
@@ -334,11 +452,10 @@ async function grantPurchaseCredit(order, actorUserId) {
 }
 
 module.exports = {
-  GOLDEN_LIMIT,
-  GOLDEN_MULTIPLIER,
-  GOLDEN_HOURS,
-  STANDARD_RATE,
+  DEFAULTS,
   ensureGoldenCampaign,
+  getSettings,
+  updateSettings,
   startGoldenPeriod,
   getGoldenPeriod,
   recordReceiptUpload,

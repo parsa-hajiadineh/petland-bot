@@ -665,7 +665,17 @@ model ColleagueGoldenPeriod {
   endsAt      DateTime
   limitToman  Int      @default(10000000)
   multiplier  Int      @default(5)
+  goldenPercent Int?
   createdAt   DateTime @default(now())
+}
+
+model CreditCampaignSettings {
+  id                 String   @id
+  goldenHours        Int      @default(48)
+  goldenLimitToman   Int      @default(10000000)
+  goldenPercent      Int      @default(500)
+  standardPercent    Int      @default(10)
+  updatedAt          DateTime @updatedAt
 }
 
 model OrderReceipt {

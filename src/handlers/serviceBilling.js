@@ -285,9 +285,10 @@ async function showProforma(user, chatId) {
   }
   lines.push("", `جمع: ${formatPrice(quote.totalAmount)}`);
   const removable = chosen.filter((pack) => pack.id !== requiredId);
-  if (removable.length) {
-    lines.push("", "برای حذف یک مورد اختیاری روی آن بزنید.");
-  }
+  lines.push(
+    "",
+    "برای حذف سرویس مد نظر روی نام آن بزنید و یا در صورت تایید پیش فاکتور دکمه «صدور فاکتور» را فشار دهید"
+  );
   await reply(user, chatId, lines.join("\n"), proformaMenu());
   if (removable.length) {
     const rows = removable.map((pack) => [
