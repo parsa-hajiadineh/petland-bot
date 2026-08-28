@@ -2,24 +2,49 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
+const MOTHER_DISPLAY_NAME = "پائورا";
+const MOTHER_DESCRIPTION = "ربات مادر";
+const MOTHER_LEGACY_NAME = "پت لند";
+
 let motherTenantId = null;
 
 function getMotherTenantId() {
   return motherTenantId;
 }
 
+async function findMotherTenant() {
+  const byDesc = await prisma.tenant.findFirst({
+    where: { description: MOTHER_DESCRIPTION },
+    orderBy: { createdAt: "asc" },
+  });
+  if (byDesc) return byDesc;
+  return prisma.tenant.findFirst({
+    where: { name: MOTHER_LEGACY_NAME },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 async function ensureMotherCatalog() {
   try {
-    let tenant = await prisma.tenant.findFirst({
-      where: { name: "پت لند" },
-    });
+    let tenant = await findMotherTenant();
     if (!tenant) {
       tenant = await prisma.tenant.create({
         data: {
-          name: "پت لند",
+          name: MOTHER_DISPLAY_NAME,
           type: "OTHER",
           status: "ACTIVE",
-          description: "ربات مادر",
+          description: MOTHER_DESCRIPTION,
+        },
+      });
+    } else if (
+      tenant.name !== MOTHER_DISPLAY_NAME ||
+      tenant.description !== MOTHER_DESCRIPTION
+    ) {
+      tenant = await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          name: MOTHER_DISPLAY_NAME,
+          description: MOTHER_DESCRIPTION,
         },
       });
     }
@@ -29,9 +54,9 @@ async function ensureMotherCatalog() {
       where: { tenantId: tenant.id },
       create: {
         tenantId: tenant.id,
-        shopName: "پت لند",
+        shopName: MOTHER_DISPLAY_NAME,
       },
-      update: {},
+      update: { shopName: MOTHER_DISPLAY_NAME },
     });
 
     const result = await prisma.product.updateMany({

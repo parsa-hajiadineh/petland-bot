@@ -1,4 +1,4 @@
-const { DEFAULT_PROFIT_PERCENT, WHOLESALE_MIN_ORDER } = require("../config");
+const { DEFAULT_PROFIT_PERCENT } = require("../config");
 
 function calcRetailPrice(product) {
   const profit = Math.floor(
@@ -28,9 +28,8 @@ function isWholesaleUser(user) {
   return false;
 }
 
-function getMinOrderAmount(user) {
-  if (user.role === "ADMIN") return 0;
-  return isWholesaleUser(user) ? WHOLESALE_MIN_ORDER : 0;
+function getMinOrderAmount() {
+  return 0;
 }
 
 module.exports = {

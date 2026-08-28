@@ -46,7 +46,7 @@ Payment Engine فاکتور خدمات: پیش‌فاکتور پیش‌فرض ت
       ┌───────┼───────┐
       ▼       ▼       ▼
    Mother   Bot A   Bot B
-  (پت‌لند)  (کلینیک) (پت‌شاپ)
+  (پائورا)  (کلینیک) (پت‌شاپ)
 ```
 
 ---
@@ -77,6 +77,8 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 ## Engine
 
 - `index.js`: اول `ensureMotherCatalog()` (تا `getMotherTenantId()` خالی نباشد)، بعد `engine.start()` (poll)، سپس ensure پکیج/فاکتور خدمات/دفتر اعتبار/کمپین طلایی
+- tenant مادر با `description=ربات مادر` پیدا می‌شود (نه فقط نام نمایشی). همان ردیف درجا به نام «پائورا» rename می‌شود؛ tenant جدید ساخته نمی‌شود. پیشوند سفارش `PL-` عوض نمی‌شود.
+- حداقل سفارش همکار صفر است؛ `getMinOrderAmount` همیشه 0 برمی‌گردد.
 - تننت‌ها poll هستند؛ قبل از poll `deleteWebhook` با توکن همان ربات
 - `getUpdates(offset, ctx.token)` — توکن را صریح بده
 - بعد از `getOrCreateUser` دوباره `runWithContext(ctx)` وگرنه پاسخ تست با توکن مادر می‌رود
@@ -186,7 +188,7 @@ Motivation Engine: نوتیف همکار از قوانین زنده است (`src
 ## قوانین چت بعد
 
 1. مادر (سبد، تسویه، ادمین، عمده) را نشکن.
-2. تننت درخت پت‌لند / همکار / ادمین مادر را نبیند. بین فروشگاه‌ها داده نشت نکند.
+2. تننت درخت پائورا / همکار / ادمین مادر را نبیند. بین فروشگاه‌ها داده نشت نکند.
 3. اول `module.exports = function` بعد export کمکی در products.js.
 4. روی شل زنده لیارا `prisma generate` نزن.
 5. کاتالوگ مادر با `motherCatalogWhere`. select صریح. کوئری تننت همیشه `tenantId` دارد.
