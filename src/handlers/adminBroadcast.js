@@ -264,17 +264,43 @@ async function askMessage(user, chatId, state) {
 async function showShops(user, chatId, offset = 0) {
   const skip = Math.max(0, Number(offset) || 0);
   await setStep(user, STEP_SHOP, { audience: "shop" });
-  const rows = await prisma.tenant.findMany({
-    orderBy: { createdAt: "desc" },
-    skip,
-    take: PAGE + 1,
-    include: {
-      ownerUser: { select: { fullName: true, baleId: true } },
-      settings: { select: { shopName: true } },
-    },
-  });
+  let rows = [];
+  try {
+    rows = await prisma.tenant.findMany({
+      where: {
+        ownerUserId: { not: null },
+        bot: { isNot: null },
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: PAGE + 1,
+      include: {
+        ownerUser: { select: { fullName: true, baleId: true } },
+        settings: { select: { shopName: true } },
+        bot: { select: { username: true, status: true } },
+      },
+    });
+  } catch (err) {
+    console.error("BC SHOP LIST:", err.message);
+    const all = await prisma.tenant.findMany({
+      where: { ownerUserId: { not: null } },
+      orderBy: { createdAt: "desc" },
+      include: {
+        ownerUser: { select: { fullName: true, baleId: true } },
+        settings: { select: { shopName: true } },
+        bot: { select: { username: true, status: true } },
+      },
+    }).catch(() => []);
+    const withBot = (all || []).filter((t) => t.bot);
+    rows = withBot.slice(skip, skip + PAGE + 1);
+  }
   if (!rows.length) {
-    await reply(user, chatId, "فروشگاهی ثبت نشده است.", broadcastMenu());
+    await reply(
+      user,
+      chatId,
+      skip ? "ربات دیگری در لیست نیست." : "ربات فروشگاهی ثبت نشده است.",
+      skip ? adminBackMenu() : broadcastMenu()
+    );
     return;
   }
   const hasMore = rows.length > PAGE;
@@ -282,20 +308,30 @@ async function showShops(user, chatId, offset = 0) {
   const buttons = page.map((t) => {
     const name = t.settings?.shopName || t.name || "فروشگاه";
     const owner = t.ownerUser?.fullName || t.ownerName || t.ownerUser?.baleId || "";
+    const bot = t.bot?.username ? `@${t.bot.username}` : "";
     return [
       {
-        text: `${name}${owner ? ` | ${owner}` : ""}`.slice(0, 64),
+        text: `${name}${owner ? ` | ${owner}` : ""}${bot ? ` | ${bot}` : ""}`.slice(0, 64),
         callback_data: `bcsh:${t.id}`.slice(0, 64),
       },
     ];
   });
   if (hasMore) {
     buttons.push([
-      { text: "ده مورد قبلی", callback_data: `bcm:${skip + PAGE}` },
+      {
+        text: "۱۰ ربات بعدی",
+        callback_data: `bcm:${skip + PAGE}`,
+      },
     ]);
   }
-  await reply(user, chatId, "همکار / فروشگاه را انتخاب کنید:", adminBackMenu());
-  await bale.sendKeyboard(chatId, "روی فروشگاه بزنید:", inlineKb(buttons));
+  const pageNo = Math.floor(skip / PAGE) + 1;
+  await reply(
+    user,
+    chatId,
+    `همکار / ربات را انتخاب کنید (صفحه ${pageNo.toLocaleString("fa-IR")}):`,
+    adminBackMenu()
+  );
+  await bale.sendKeyboard(chatId, "روی ربات بزنید:", inlineKb(buttons));
 }
 
 async function showPickResults(user, chatId, query, offset = 0) {

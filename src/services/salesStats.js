@@ -56,6 +56,42 @@ function num(value) {
   return Number(value || 0);
 }
 
+async function countMotherCustomers() {
+  try {
+    return await prisma.user.count({
+      where: {
+        role: "CUSTOMER",
+        OR: [
+          { cart: { isNot: null } },
+          { orders: { some: { trackingCode: { startsWith: "PL-" } } } },
+          { tickets: { some: {} } },
+        ],
+      },
+    });
+  } catch (err) {
+    console.error("SALES STATS MOTHER USERS SKIP:", err.message);
+    try {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT COUNT(*)::int AS n
+         FROM "User" u
+         WHERE u.role = 'CUSTOMER'
+           AND (
+             EXISTS (SELECT 1 FROM "Cart" c WHERE c."userId" = u.id)
+             OR EXISTS (
+               SELECT 1 FROM "Order" o
+               WHERE o."userId" = u.id AND o."trackingCode" LIKE 'PL-%'
+             )
+             OR EXISTS (SELECT 1 FROM "Ticket" t WHERE t."userId" = u.id)
+           )`
+      );
+      return num(rows?.[0]?.n);
+    } catch (err2) {
+      console.error("SALES STATS MOTHER USERS SQL SKIP:", err2.message);
+      return 0;
+    }
+  }
+}
+
 async function sumServiceSplit(start, end) {
   try {
     const rows = await prisma.$queryRawUnsafe(
@@ -133,7 +169,8 @@ async function calcMonthStats(yearMonth) {
   const service = await sumServiceSplit(start, end);
 
   const [
-    usersNow,
+    usersMotherNow,
+    usersAllNow,
     colleaguesNow,
     botsNow,
     botsActive,
@@ -141,6 +178,7 @@ async function calcMonthStats(yearMonth) {
     colleaguesMonth,
     botsMonth,
   ] = await Promise.all([
+    countMotherCustomers(),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: "COLLEAGUE" } }),
     prisma.bot.count().catch(() => 0),
@@ -169,7 +207,8 @@ async function calcMonthStats(yearMonth) {
     serviceCash: service.serviceCash,
     serviceCredit: service.serviceCredit,
     serviceCount: service.serviceCount,
-    usersNow,
+    usersMotherNow,
+    usersAllNow,
     colleaguesNow,
     botsNow,
     botsActive,
@@ -201,9 +240,10 @@ function formatMonthReport(yearMonth, stats, isCurrent) {
     `   تعداد فاکتور تاییدشده: ${Number(stats.serviceCount).toLocaleString("fa-IR")}`,
     "━━━━━━━━━━━━━━━━━━",
     "وضعیت فعلی پلتفرم",
-    `۱. تعداد کل یوزرها: ${Number(stats.usersNow).toLocaleString("fa-IR")}`,
-    `۲. تعداد کل همکاران: ${Number(stats.colleaguesNow).toLocaleString("fa-IR")}`,
-    `۳. تعداد کل ربات‌ها: ${Number(stats.botsNow).toLocaleString("fa-IR")}`,
+    `۱. تعداد کل یوزرهای ربات مادر: ${Number(stats.usersMotherNow).toLocaleString("fa-IR")}`,
+    `۲. تعداد کل یوزرهای مجموعه: ${Number(stats.usersAllNow).toLocaleString("fa-IR")}`,
+    `۳. تعداد کل همکاران: ${Number(stats.colleaguesNow).toLocaleString("fa-IR")}`,
+    `۴. تعداد کل ربات‌ها: ${Number(stats.botsNow).toLocaleString("fa-IR")}`,
     `   ربات فعال: ${Number(stats.botsActive).toLocaleString("fa-IR")}`,
     "━━━━━━━━━━━━━━━━━━",
     "ثبت‌نام همین ماه",
