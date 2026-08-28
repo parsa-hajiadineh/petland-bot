@@ -56,6 +56,13 @@ function tenantPayMenu() {
   ]);
 }
 
+function tenantCompletePayMenu() {
+  return kb([
+    [{ text: BTN.COMPLETE_PAYMENT }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
 function invoiceListMenu() {
   return kb([[{ text: BTN.BACK_PRODUCT_LIST }]]);
 }
@@ -325,11 +332,12 @@ async function showDetail(user, chatId, packId) {
   return true;
 }
 
-async function showProforma(user, chatId, usingCredit = false) {
+async function showProforma(user, chatId, usingCredit) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
   const required = await ensureRequired(user, ctx.flow);
-  const wantCredit = usingCredit || isUsingCredit(ctx);
+  const wantCredit =
+    usingCredit === undefined ? isUsingCredit(ctx) : Boolean(usingCredit);
   await setCartStep(user, ctx, wantCredit);
   const chosen = await selectedPacks(user, ctx.tenantId);
   const requiredId = required?.id;
@@ -666,7 +674,10 @@ async function handleCallback(user, chatId, data) {
 
 async function handleText(user, chatId, text) {
   if (isTenantInvoiceStep(user.adminStep)) {
-    if (text === BTN.UPLOAD_RECEIPT && user.pendingOrderId) {
+    if (
+      (text === BTN.COMPLETE_PAYMENT || text === BTN.UPLOAD_RECEIPT) &&
+      user.pendingOrderId
+    ) {
       const inv = await invoices.getInvoice(user.pendingOrderId);
       if (inv && inv.status === "WAITING_PAYMENT") {
         await startPayment(
@@ -806,7 +817,7 @@ async function showInvoiceDetail(user, chatId, invoiceId) {
   user.pendingOrderId = invoice.id;
   const keyboard =
     invoice.status === "WAITING_PAYMENT"
-      ? tenantPayMenu()
+      ? tenantCompletePayMenu()
       : invoiceListMenu();
   await reply(user, chatId, invoices.formatInvoiceText(invoice), keyboard);
   return true;

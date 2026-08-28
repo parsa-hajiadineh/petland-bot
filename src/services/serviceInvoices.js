@@ -76,6 +76,10 @@ async function ensureInner() {
     `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "receiptImage" TEXT`
   );
   await execSql(
+    "SERVICE INVOICE REJECT REASON COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "rejectReason" TEXT`
+  );
+  await execSql(
     "SERVICE INVOICE CREDIT COL SKIP:",
     `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "creditAmount" INTEGER NOT NULL DEFAULT 0`
   );
@@ -139,6 +143,7 @@ function mapInvoice(row, items = []) {
     userId: row.userId,
     tenantId: row.tenantId,
     receiptImage: row.receiptImage || null,
+    rejectReason: row.rejectReason || null,
     createdAt: row.createdAt,
     items,
   };
@@ -277,18 +282,19 @@ async function settleCredit(invoice, action) {
   }
 }
 
-async function rejectInvoice(id) {
+async function rejectInvoice(id, reason) {
   await ensureServiceInvoices();
   const current = await getInvoice(id);
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return null;
   }
+  const rejectReason = String(reason || "").trim() || null;
   let invoice = null;
   if (hasInvoiceModel()) {
     try {
       invoice = await prisma.serviceInvoice.update({
         where: { id },
-        data: { status: "REJECTED" },
+        data: { status: "REJECTED", rejectReason },
         include: { items: true },
       });
     } catch (err) {
@@ -297,8 +303,11 @@ async function rejectInvoice(id) {
   }
   if (!invoice) {
     await prisma.$executeRawUnsafe(
-      `UPDATE "ServiceInvoice" SET "status" = 'REJECTED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
-      id
+      `UPDATE "ServiceInvoice"
+       SET "status" = 'REJECTED', "rejectReason" = $2, "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "id" = $1`,
+      id,
+      rejectReason
     );
   }
   invoice = await getInvoice(id);
@@ -578,6 +587,9 @@ function formatInvoiceText(invoice) {
     lines.push(`قابل پرداخت نقدی: ${formatPrice(cashAmount)}`);
   }
   lines.push(`وضعیت: ${invoiceStatusLabel(invoice.status)}`);
+  if (invoice.status === "REJECTED" && invoice.rejectReason) {
+    lines.push(`علت رد: ${invoice.rejectReason}`);
+  }
   return lines.join("\n");
 }
 

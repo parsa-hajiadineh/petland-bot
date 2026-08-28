@@ -593,6 +593,7 @@ model ServiceInvoice {
   periodStart     DateTime?
   periodEnd       DateTime?
   receiptImage    String?
+  rejectReason    String?
 
   creditAmount    Int      @default(0)
   cashAmount      Int      @default(0)

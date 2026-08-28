@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { reply, notifyShop } = require("../bot/messenger");
+const { reply, notifyShop, sendReceiptPhoto } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const {
   BTN,
@@ -233,6 +233,18 @@ async function showInvoiceDetail(user, chatId, invoiceId) {
   const shop = await shopLabel(invoice.tenantId);
   const extra = [`🏪 فروشگاه: ${shop}`, ""];
   const text = `${extra.join("\n")}${invoices.formatInvoiceText(invoice)}`;
+  if (invoice.receiptImage) {
+    try {
+      await sendReceiptPhoto(
+        chatId,
+        invoice.receiptImage,
+        invoice.tenantId,
+        "📸 رسید پرداخت"
+      );
+    } catch (err) {
+      console.error("SERVICE INVOICE RECEIPT PHOTO SKIP:", err.message);
+    }
+  }
   if (invoice.status === "APPROVED") {
     await reply(user, chatId, `${text}\n\nاین فاکتور قبلاً تایید شده.`, adminBackMenu());
     return;
@@ -244,8 +256,18 @@ async function showInvoiceDetail(user, chatId, invoiceId) {
   await reply(user, chatId, text, adminServiceInvoiceActions());
 }
 
-async function rejectServiceInvoice(user, chatId) {
-  const invoice = await invoices.rejectInvoice(user.pendingOrderId);
+async function askRejectReason(user, chatId) {
+  await setStep(user, "SINV:REJECT", { pendingOrderId: user.pendingOrderId });
+  await reply(user, chatId, "دلیل رد فاکتور خدمات را بنویسید:", adminBackMenu());
+}
+
+async function rejectServiceInvoice(user, chatId, reason) {
+  const note = String(reason || "").trim();
+  if (!note) {
+    await reply(user, chatId, "دلیل رد را بنویسید.", adminBackMenu());
+    return;
+  }
+  const invoice = await invoices.rejectInvoice(user.pendingOrderId, note);
   if (!invoice) {
     await reply(user, chatId, "رد فاکتور ممکن نشد.", adminBackMenu());
     return;
@@ -258,7 +280,7 @@ async function rejectServiceInvoice(user, chatId) {
     if (owner?.baleId) {
       await notifyShop(
         owner.baleId,
-        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`,
+        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nعلت رد: ${note}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`,
         invoice.tenantId
       );
     }
@@ -316,6 +338,10 @@ async function goBack(user, chatId) {
       await showPendingInvoices(user, chatId);
       return true;
     }
+    if (step === "SINV:REJECT" && user.pendingOrderId) {
+      await showInvoiceDetail(user, chatId, user.pendingOrderId);
+      return true;
+    }
     return false;
   }
   if (!isServiceAdminStep(step)) return false;
@@ -363,7 +389,16 @@ async function handleText(user, chatId, text) {
     user.adminStep === "SINV:VIEW" &&
     user.pendingOrderId
   ) {
-    await rejectServiceInvoice(user, chatId);
+    await askRejectReason(user, chatId);
+    return true;
+  }
+  if (
+    user.adminStep === "SINV:REJECT" &&
+    user.pendingOrderId &&
+    text !== BTN.BACK_PRODUCT_LIST &&
+    text !== BTN.BACK_MAIN
+  ) {
+    await rejectServiceInvoice(user, chatId, text);
     return true;
   }
   if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;

@@ -19,6 +19,7 @@ const NAV_BUTTONS = new Set([
   BTN.CHECKOUT,
   BTN.CLEAR_CART,
   BTN.UPLOAD_RECEIPT,
+  BTN.COMPLETE_PAYMENT,
   BTN.BACK_PRODUCTS,
   BTN.BACK_MAIN,
 ]);
@@ -170,7 +171,7 @@ async function handleMessageInner(message, user) {
     return;
   }
 
-  if (text === BTN.UPLOAD_RECEIPT) {
+  if (text === BTN.COMPLETE_PAYMENT || text === BTN.UPLOAD_RECEIPT) {
     const billing = require("./serviceBilling");
     if (
       billing.isTenantInvoiceStep(user.adminStep) ||
@@ -178,7 +179,9 @@ async function handleMessageInner(message, user) {
     ) {
       if (await billing.handleText(user, chatId, text)) return;
     }
-    await tenantOrder.promptReceipt(user, chatId);
+    if (text === BTN.UPLOAD_RECEIPT) {
+      await tenantOrder.promptReceipt(user, chatId);
+    }
     return;
   }
 

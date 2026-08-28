@@ -141,6 +141,7 @@ const BTN = {
   SKIP: "⏭ رد کردن",
   RETAIL_MODE: "👤 بازگشت به خرید عادی",
   UPLOAD_RECEIPT: "📸 ارسال رسید پرداخت",
+  COMPLETE_PAYMENT: "💳 تکمیل پرداخت",
   NEW_TICKET: "➕ تیکت جدید",
   MY_TICKETS: "📋 تیکت‌های من",
   CLOSE_TICKET: "🔒 بستن تیکت",

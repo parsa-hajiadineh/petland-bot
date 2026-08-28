@@ -80,7 +80,7 @@ async function sendKeyboard(chatId, text, keyboard) {
   return result;
 }
 
-async function sendPhoto(chatId, photo, caption, keyboard) {
+async function sendPhoto(chatId, photo, caption, keyboard, token) {
   const body = {
     chat_id: chatId,
     photo,
@@ -91,7 +91,7 @@ async function sendPhoto(chatId, photo, caption, keyboard) {
     body.reply_markup = keyboard;
   }
 
-  return apiCall("sendPhoto", body);
+  return apiCall("sendPhoto", body, token);
 }
 
 async function deleteMessage(chatId, messageId) {
@@ -127,8 +127,27 @@ async function sendDocument(chatId, document, caption) {
   }
 }
 
-async function getFile(fileId) {
-  return apiCall("getFile", { file_id: fileId });
+async function getFile(fileId, token) {
+  return apiCall("getFile", { file_id: fileId }, token);
+}
+
+async function sendPhotoUpload(chatId, buffer, caption, token, filename = "receipt.jpg") {
+  const FormData = require("form-data");
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("photo", buffer, { filename });
+  if (caption) form.append("caption", caption);
+  const response = await fetch(`${botApiUrl(token)}/sendPhoto`, {
+    method: "POST",
+    body: form,
+    headers: form.getHeaders(),
+  });
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, description: text };
+  }
 }
 
 async function answerCallbackQuery(callbackQueryId, text = "") {
@@ -163,6 +182,7 @@ module.exports = {
   sendKeyboard,
   deleteMessage,
   sendPhoto,
+  sendPhotoUpload,
   sendDocument,
   getFile,
   answerCallbackQuery,

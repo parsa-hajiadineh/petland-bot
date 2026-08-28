@@ -2,6 +2,7 @@ const prisma = require("../database/prisma");
 const bale = require("../bot/bale");
 const { BOT_TOKEN } = require("../config");
 const { decryptToken } = require("../utils/tokenCrypto");
+const fetch = require("node-fetch");
 
 async function clearLastMessage(user, chatId) {
   if (!user?.lastMessageId) return;
@@ -102,11 +103,33 @@ async function notifyShop(chatId, text, tenantId) {
   return notifyMother(chatId, text);
 }
 
+async function sendReceiptPhoto(chatId, fileId, tenantId, caption) {
+  if (!chatId || !fileId) return { ok: false };
+  let result = await bale.sendPhoto(chatId, fileId, caption || "📸 رسید پرداخت");
+  if (result?.ok) return result;
+  const shopToken = await getShopBotToken(tenantId);
+  if (!shopToken) return result;
+  try {
+    const info = await bale.getFile(fileId, shopToken);
+    const filePath = info?.result?.file_path;
+    if (!filePath) return result;
+    const fileUrl = `https://tapi.bale.ai/file/bot${shopToken}/${filePath}`;
+    const response = await fetch(fileUrl);
+    const buffer = await response.buffer();
+    if (!buffer?.length) return result;
+    return bale.sendPhotoUpload(chatId, buffer, caption || "📸 رسید پرداخت");
+  } catch (err) {
+    console.error("RECEIPT PHOTO COPY SKIP:", err.message);
+    return result;
+  }
+}
+
 module.exports = {
   reply,
   replyPhoto,
   notify,
   notifyMother,
   notifyShop,
+  sendReceiptPhoto,
   clearLastMessage,
 };
