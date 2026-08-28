@@ -452,7 +452,8 @@ async function startPayment(user, chatId, invoice, source, tenantId) {
 
 async function handleReceiptPhoto(user, chatId, photo) {
   const motherPay = user.orderStep === MOTHER_PAY;
-  const tenantPay = user.adminStep === TENANT_PAY;
+  const tenantPay =
+    user.adminStep === TENANT_PAY || user.adminStep === TENANT_INV_VIEW;
   if (!motherPay && !tenantPay) return false;
   const invoiceId = user.pendingOrderId;
   if (!invoiceId) return false;

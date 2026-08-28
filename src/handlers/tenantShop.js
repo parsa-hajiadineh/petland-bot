@@ -171,6 +171,13 @@ async function handleMessageInner(message, user) {
   }
 
   if (text === BTN.UPLOAD_RECEIPT) {
+    const billing = require("./serviceBilling");
+    if (
+      billing.isTenantInvoiceStep(user.adminStep) ||
+      billing.isTenantStep(user.adminStep)
+    ) {
+      if (await billing.handleText(user, chatId, text)) return;
+    }
     await tenantOrder.promptReceipt(user, chatId);
     return;
   }

@@ -617,6 +617,13 @@ module.exports.startNewAddress = async function startNewAddress(user, chatId) {
 
 module.exports.promptReceipt = async function promptReceipt(user, chatId) {
   let pendingId = user.pendingOrderId;
+  if (pendingId) {
+    const existing = await findTsOrder(
+      { id: pendingId, userId: user.id },
+      { id: true }
+    );
+    if (!existing) pendingId = null;
+  }
   if (!pendingId) {
     const pending = await findTsOrder(
       { userId: user.id, status: "WAITING_PAYMENT" },
