@@ -94,11 +94,19 @@ async function calcMonthStats(yearMonth) {
       totalAmount: true,
       isWholesale: true,
       user: { select: { referrerId: true } },
+      items: {
+        select: {
+          quantity: true,
+          unitPrice: true,
+          product: { select: { costPrice: true } },
+        },
+      },
     },
   });
 
   let retailVolume = 0;
   let retailCount = 0;
+  let retailProfit = 0;
   let colleagueVolume = 0;
   let colleagueCount = 0;
   let commission = 0;
@@ -111,6 +119,11 @@ async function calcMonthStats(yearMonth) {
     } else {
       retailVolume += amount;
       retailCount += 1;
+      for (const item of order.items || []) {
+        retailProfit +=
+          (num(item.unitPrice) - num(item.product?.costPrice)) *
+          num(item.quantity);
+      }
       if (order.user?.referrerId) {
         commission += Math.floor(amount * 0.05);
       }
@@ -148,8 +161,9 @@ async function calcMonthStats(yearMonth) {
   return {
     retailVolume,
     retailCount,
+    retailProfit,
     commission,
-    retailGross: retailVolume - commission,
+    retailGross: retailProfit - commission,
     colleagueVolume,
     colleagueCount,
     serviceCash: service.serviceCash,
@@ -174,9 +188,10 @@ function formatMonthReport(yearMonth, stats, isCurrent) {
     "بخش یوزر (ربات مادر)",
     `۱. حجم فروش خرد: ${formatPrice(stats.retailVolume)}`,
     `   تعداد سفارش: ${Number(stats.retailCount).toLocaleString("fa-IR")}`,
+    `   سود فروش خرد: ${formatPrice(stats.retailProfit)}`,
     `۲. کمیسیون بازاریابان: ${formatPrice(stats.commission)}`,
     `۳. سود ناخالص یوزر: ${formatPrice(stats.retailGross)}`,
-    "   (حجم فروش خرد − کمیسیون)",
+    "   (سود فروش خرد − کمیسیون)",
     "━━━━━━━━━━━━━━━━━━",
     "بخش همکار",
     `۱. حجم فروش به همکار: ${formatPrice(stats.colleagueVolume)}`,

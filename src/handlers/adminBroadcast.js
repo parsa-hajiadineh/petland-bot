@@ -348,30 +348,133 @@ async function previewConfirm(user, chatId, message) {
   await reply(
     user,
     chatId,
-    `✉️ پیش‌نمایش\nمخاطب: ${AUDIENCE_FA[state.audience] || ""}\nگیرنده: ${targets.length.toLocaleString("fa-IR")} نفر\n━━━━━━━━━━━━━━━━━━\n${preview}${message.length > 400 ? "…" : ""}\n━━━━━━━━━━━━━━━━━━\nارسال را تایید کنید.`,
+    `✉️ پیش‌نمایش\nمخاطب: ${AUDIENCE_FA[state.audience] || ""}\nگیرنده: ${targets.length.toLocaleString("fa-IR")} نفر\nزمان تقریبی ارسال: ${formatDuration(estimateSendMs(targets.length))}\n━━━━━━━━━━━━━━━━━━\n${preview}${message.length > 400 ? "…" : ""}\n━━━━━━━━━━━━━━━━━━\nارسال را تایید کنید.`,
     confirmMenu()
   );
 }
 
+const SEND_GAP_MS = 1200;
+const BURST_EVERY = 20;
+const BURST_PAUSE_MS = 8000;
+
+let bulkJob = null;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimited(result) {
+  const code = Number(result?.error_code || result?.errorCode || 0);
+  const desc = String(result?.description || result?.error || "").toLowerCase();
+  return (
+    code === 429 ||
+    desc.includes("too many") ||
+    desc.includes("retry after") ||
+    desc.includes("flood")
+  );
+}
+
+function retryAfterMs(result) {
+  const sec = Number(result?.parameters?.retry_after || result?.retry_after || 0);
+  if (sec > 0) return Math.min((sec + 1) * 1000, 120000);
+  return 20000;
+}
+
+function estimateSendMs(count) {
+  const n = Math.max(0, Number(count) || 0);
+  return n * SEND_GAP_MS + Math.floor(n / BURST_EVERY) * BURST_PAUSE_MS;
+}
+
+function formatDuration(ms) {
+  const sec = Math.max(1, Math.ceil(ms / 1000));
+  if (sec < 90) return `حدود ${sec.toLocaleString("fa-IR")} ثانیه`;
+  const min = Math.ceil(sec / 60);
+  return `حدود ${min.toLocaleString("fa-IR")} دقیقه`;
+}
+
+async function deliverOnce(target, text) {
+  try {
+    return await deliver(target, text);
+  } catch (err) {
+    return { ok: false, description: err.message };
+  }
+}
+
 async function runSend(adminBaleId, state) {
+  if (bulkJob?.running) {
+    await notify(
+      adminBaleId,
+      "یک ارسال انبوه هنوز در صف است. بعد از اتمام دوباره تلاش کنید."
+    );
+    return;
+  }
+
   const targets = await resolveTargets(state);
   const text = String(state.msg || "").trim();
+  bulkJob = { running: true, total: targets.length, sent: 0, failed: 0 };
+
   let sent = 0;
   let failed = 0;
-  for (const target of targets) {
-    try {
-      const result = await deliver(target, text);
-      if (result?.ok) sent += 1;
+  let lastProgress = 0;
+
+  const sendOne = async (target) => {
+    let result = await deliverOnce(target, text);
+    if (isRateLimited(result)) {
+      await sleep(retryAfterMs(result));
+      result = await deliverOnce(target, text);
+    }
+    if (result?.ok) sent += 1;
+    else if (isRateLimited(result)) {
+      await sleep(retryAfterMs(result));
+      const retry = await deliverOnce(target, text);
+      if (retry?.ok) sent += 1;
       else failed += 1;
-    } catch {
+    } else {
       failed += 1;
     }
-    await new Promise((resolve) => setTimeout(resolve, 80));
-  }
-  await notify(
-    adminBaleId,
-    `✅ ارسال پیام تمام شد.\nموفق: ${sent.toLocaleString("fa-IR")}\nناموفق: ${failed.toLocaleString("fa-IR")}`
-  );
+  };
+
+  const tick = async (index) => {
+    if (!bulkJob?.running) return;
+    if (index >= targets.length) {
+      bulkJob.running = false;
+      await notify(
+        adminBaleId,
+        `✅ ارسال پیام تمام شد.\nموفق: ${sent.toLocaleString("fa-IR")}\nناموفق: ${failed.toLocaleString("fa-IR")}`
+      );
+      return;
+    }
+
+    await sendOne(targets[index]);
+    bulkJob.sent = sent;
+    bulkJob.failed = failed;
+
+    if (index + 1 - lastProgress >= 50) {
+      lastProgress = index + 1;
+      notify(
+        adminBaleId,
+        `⏳ ارسال انبوه: ${Number(index + 1).toLocaleString("fa-IR")} از ${targets.length.toLocaleString("fa-IR")}`
+      ).catch(() => {});
+    }
+
+    let delay = SEND_GAP_MS;
+    if ((index + 1) % BURST_EVERY === 0) delay += BURST_PAUSE_MS;
+    setTimeout(() => {
+      tick(index + 1).catch((err) => {
+        console.error("BROADCAST TICK:", err);
+        bulkJob.running = false;
+        notify(adminBaleId, "ارسال پیام با خطا متوقف شد.").catch(() => {});
+      });
+    }, delay);
+  };
+
+  setTimeout(() => {
+    tick(0).catch((err) => {
+      console.error("BROADCAST SEND:", err);
+      bulkJob.running = false;
+      notify(adminBaleId, "ارسال پیام با خطا متوقف شد.").catch(() => {});
+    });
+  }, 400);
 }
 
 async function goBack(user, chatId) {
@@ -518,6 +621,15 @@ async function handleText(user, chatId, text) {
       await reply(user, chatId, "گیرنده‌ای پیدا نشد.", broadcastMenu());
       return true;
     }
+    if (bulkJob?.running) {
+      await reply(
+        user,
+        chatId,
+        "یک ارسال انبوه هنوز در صف است. بعد از اتمام دوباره تلاش کنید.",
+        adminTicketsMenu()
+      );
+      return true;
+    }
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: "ADMIN_TICKETS" },
@@ -527,15 +639,15 @@ async function handleText(user, chatId, text) {
     await reply(
       user,
       chatId,
-      `ارسال برای ${targets.length.toLocaleString("fa-IR")} نفر شروع شد.\nنتیجه بعد از اتمام برایتان می‌آید.`,
+      `ارسال برای ${targets.length.toLocaleString("fa-IR")} نفر در صف پس‌زمینه قرار گرفت.\nفاصله ارسال رعایت می‌شود تا به سقف بله نخورد.\nزمان تقریبی: ${formatDuration(estimateSendMs(targets.length))}\nنتیجه بعد از اتمام برایتان می‌آید.`,
       adminTicketsMenu()
     );
-    setImmediate(() => {
+    setTimeout(() => {
       runSend(user.baleId, state).catch((err) => {
         console.error("BROADCAST SEND:", err);
         notify(user.baleId, "ارسال پیام با خطا متوقف شد.").catch(() => {});
       });
-    });
+    }, 0);
     return true;
   }
 
