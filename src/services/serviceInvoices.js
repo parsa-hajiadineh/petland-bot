@@ -75,6 +75,25 @@ async function ensureInner() {
     "SERVICE INVOICE RECEIPT COL SKIP:",
     `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "receiptImage" TEXT`
   );
+  await execSql(
+    "SERVICE INVOICE CREDIT COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "creditAmount" INTEGER NOT NULL DEFAULT 0`
+  );
+  await execSql(
+    "SERVICE INVOICE CASH COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "cashAmount" INTEGER NOT NULL DEFAULT 0`
+  );
+  await execSql(
+    "SERVICE INVOICE PAY METHOD COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT NOT NULL DEFAULT 'CASH'`
+  );
+  await execSql(
+    "SERVICE INVOICE CASH BACKFILL SKIP:",
+    `UPDATE "ServiceInvoice"
+     SET "cashAmount" = "totalAmount"
+     WHERE COALESCE("creditAmount", 0) = 0
+       AND COALESCE("cashAmount", 0) = 0`
+  );
 }
 
 function addOneMonth(date) {
@@ -90,8 +109,20 @@ function snapshotTitle(pack, invoiceKind) {
   return pack.title;
 }
 
+function resolveCashAmount(row) {
+  const total = Number(row.totalAmount || 0);
+  const credit = Number(row.creditAmount || 0);
+  const method = row.paymentMethod || (credit ? "MIXED" : "CASH");
+  if (method === "CREDIT") return 0;
+  if (row.cashAmount != null && Number(row.cashAmount) > 0) {
+    return Number(row.cashAmount);
+  }
+  return Math.max(0, total - credit);
+}
+
 function mapInvoice(row, items = []) {
   if (!row) return null;
+  const creditAmount = Number(row.creditAmount || 0);
   return {
     id: row.id,
     trackingCode: row.trackingCode,
@@ -100,6 +131,9 @@ function mapInvoice(row, items = []) {
     onceAmount: Number(row.onceAmount || 0),
     monthlyAmount: Number(row.monthlyAmount || 0),
     totalAmount: Number(row.totalAmount || 0),
+    creditAmount,
+    cashAmount: resolveCashAmount(row),
+    paymentMethod: row.paymentMethod || (creditAmount ? "MIXED" : "CASH"),
     periodStart: row.periodStart,
     periodEnd: row.periodEnd,
     userId: row.userId,
@@ -227,15 +261,32 @@ async function listPendingInvoices(take = 20) {
   return invoices;
 }
 
+async function settleCredit(invoice, action) {
+  if (!invoice?.id || !Number(invoice.creditAmount || 0)) return;
+  try {
+    const creditLedger = require("./creditLedger");
+    const payload = {
+      userId: invoice.userId,
+      tenantId: invoice.tenantId,
+      invoiceId: invoice.id,
+    };
+    if (action === "consume") await creditLedger.consumeReserve(payload);
+    else await creditLedger.refundReserve(payload);
+  } catch (err) {
+    console.error("SERVICE INVOICE CREDIT SETTLE SKIP:", err.message);
+  }
+}
+
 async function rejectInvoice(id) {
   await ensureServiceInvoices();
   const current = await getInvoice(id);
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return null;
   }
+  let invoice = null;
   if (hasInvoiceModel()) {
     try {
-      return await prisma.serviceInvoice.update({
+      invoice = await prisma.serviceInvoice.update({
         where: { id },
         data: { status: "REJECTED" },
         include: { items: true },
@@ -244,11 +295,15 @@ async function rejectInvoice(id) {
       console.error("SERVICE INVOICE REJECT PRISMA SKIP:", err.message);
     }
   }
-  await prisma.$executeRawUnsafe(
-    `UPDATE "ServiceInvoice" SET "status" = 'REJECTED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
-    id
-  );
-  return getInvoice(id);
+  if (!invoice) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ServiceInvoice" SET "status" = 'REJECTED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      id
+    );
+  }
+  invoice = await getInvoice(id);
+  await settleCredit(invoice, "refund");
+  return invoice;
 }
 
 async function approveInvoice(id) {
@@ -257,9 +312,10 @@ async function approveInvoice(id) {
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return null;
   }
+  let invoice = null;
   if (hasInvoiceModel()) {
     try {
-      return await prisma.serviceInvoice.update({
+      invoice = await prisma.serviceInvoice.update({
         where: { id },
         data: { status: "APPROVED" },
         include: { items: true },
@@ -268,11 +324,15 @@ async function approveInvoice(id) {
       console.error("SERVICE INVOICE APPROVE PRISMA SKIP:", err.message);
     }
   }
-  await prisma.$executeRawUnsafe(
-    `UPDATE "ServiceInvoice" SET "status" = 'APPROVED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
-    id
-  );
-  return getInvoice(id);
+  if (!invoice) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ServiceInvoice" SET "status" = 'APPROVED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      id
+    );
+  }
+  invoice = await getInvoice(id);
+  await settleCredit(invoice, "consume");
+  return invoice;
 }
 
 async function markWaitingApproval(id, receiptImage) {
@@ -396,6 +456,23 @@ async function resolveInvoicePeriod(tenantId, invoiceKind) {
   return { periodStart, periodEnd: addOneMonth(periodStart) };
 }
 
+function splitPayment(totalAmount, availableCredit, useCredit) {
+  const total = Math.max(0, Math.trunc(Number(totalAmount) || 0));
+  const available = Math.max(0, Math.trunc(Number(availableCredit) || 0));
+  const creditAmount = useCredit ? Math.min(total, available) : 0;
+  const cashAmount = Math.max(0, total - creditAmount);
+  let paymentMethod = "CASH";
+  if (creditAmount > 0 && cashAmount > 0) paymentMethod = "MIXED";
+  else if (creditAmount > 0) paymentMethod = "CREDIT";
+  return { totalAmount: total, creditAmount, cashAmount, paymentMethod };
+}
+
+function paymentMethodLabel(method) {
+  if (method === "CREDIT") return "تماماً اعتباری";
+  if (method === "MIXED") return "ترکیبی";
+  return "تماماً نقدی";
+}
+
 function buildQuote(packs, invoiceKind) {
   const seen = new Set();
   const items = [];
@@ -489,6 +566,17 @@ function formatInvoiceText(invoice) {
       )}`
     );
   }
+  const creditAmount = Number(invoice.creditAmount || 0);
+  const cashAmount = Number(
+    invoice.cashAmount != null ? invoice.cashAmount : invoice.totalAmount || 0
+  );
+  if (creditAmount > 0 || invoice.paymentMethod) {
+    lines.push(`روش پرداخت: ${paymentMethodLabel(invoice.paymentMethod)}`);
+    if (creditAmount > 0) {
+      lines.push(`پرداخت اعتباری: ${formatPrice(creditAmount)}`);
+    }
+    lines.push(`قابل پرداخت نقدی: ${formatPrice(cashAmount)}`);
+  }
   lines.push(`وضعیت: ${invoiceStatusLabel(invoice.status)}`);
   return lines.join("\n");
 }
@@ -503,7 +591,24 @@ function formatQuoteText(quote, invoiceKind) {
   return formatInvoiceText(draft).replace("🔖 پیش‌نمایش", "پیش‌نمایش — هنوز صادر نشده");
 }
 
-async function createInvoice({ userId, tenantId, kind, packs }) {
+async function patchPaymentSplit(id, creditAmount, cashAmount, paymentMethod) {
+  if (!id) return;
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ServiceInvoice"
+       SET "creditAmount" = $2, "cashAmount" = $3, "paymentMethod" = $4, "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "id" = $1`,
+      id,
+      creditAmount,
+      cashAmount,
+      paymentMethod
+    );
+  } catch (err) {
+    console.error("SERVICE INVOICE PAY SPLIT SKIP:", err.message);
+  }
+}
+
+async function createInvoice({ userId, tenantId, kind, packs, creditAmount = 0 }) {
   await ensureServiceInvoices();
   const invoiceKind = kind === "RENEWAL" ? "RENEWAL" : "INITIAL";
   const quote = buildQuote(packs, invoiceKind);
@@ -520,13 +625,17 @@ async function createInvoice({ userId, tenantId, kind, packs }) {
     tenantId,
     invoiceKind
   );
+  const split = splitPayment(quote.totalAmount, creditAmount, true);
+  const payCredit = split.creditAmount;
+  const payCash = split.cashAmount;
+  const paymentMethod = split.paymentMethod;
 
   for (let i = 0; i < 4; i++) {
     const trackingCode = generateServiceInvoiceCode();
     const id = newId();
     if (hasInvoiceModel()) {
       try {
-        return await prisma.serviceInvoice.create({
+        const created = await prisma.serviceInvoice.create({
           data: {
             trackingCode,
             kind: invoiceKind,
@@ -553,6 +662,11 @@ async function createInvoice({ userId, tenantId, kind, packs }) {
           },
           include: { items: true },
         });
+        await patchPaymentSplit(created.id, payCredit, payCash, paymentMethod);
+        return mapInvoice(
+          { ...created, creditAmount: payCredit, cashAmount: payCash, paymentMethod },
+          created.items
+        );
       } catch (err) {
         console.error("SERVICE INVOICE CREATE PRISMA SKIP:", err.message);
       }
@@ -560,14 +674,17 @@ async function createInvoice({ userId, tenantId, kind, packs }) {
     try {
       await prisma.$executeRawUnsafe(
         `INSERT INTO "ServiceInvoice"
-          ("id","trackingCode","kind","status","onceAmount","monthlyAmount","totalAmount","periodStart","periodEnd","userId","tenantId","createdAt","updatedAt")
-         VALUES ($1,$2,$3,'WAITING_PAYMENT',$4,$5,$6,$7,$8,$9,$10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+          ("id","trackingCode","kind","status","onceAmount","monthlyAmount","totalAmount","creditAmount","cashAmount","paymentMethod","periodStart","periodEnd","userId","tenantId","createdAt","updatedAt")
+         VALUES ($1,$2,$3,'WAITING_PAYMENT',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
         id,
         trackingCode,
         invoiceKind,
         quote.onceAmount,
         quote.monthlyAmount,
         quote.totalAmount,
+        payCredit,
+        payCash,
+        paymentMethod,
         periodStart,
         periodEnd,
         userId,
@@ -599,6 +716,9 @@ async function createInvoice({ userId, tenantId, kind, packs }) {
           onceAmount: quote.onceAmount,
           monthlyAmount: quote.monthlyAmount,
           totalAmount: quote.totalAmount,
+          creditAmount: payCredit,
+          cashAmount: payCash,
+          paymentMethod,
           periodStart,
           periodEnd,
           userId,
@@ -663,4 +783,6 @@ module.exports = {
   formatQuoteText,
   createInvoice,
   listInvoices,
+  splitPayment,
+  paymentMethodLabel,
 };

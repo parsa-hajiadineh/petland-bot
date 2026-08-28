@@ -8,13 +8,16 @@ const { formatPrice } = require("../utils/price");
 const { buildPaymentInfo } = require("../utils/invoice");
 const packages = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
+const creditLedger = require("../services/creditLedger");
 
 const MOTHER_LIST = "SB:I:LIST";
 const MOTHER_VIEW = "SB:I:VIEW";
 const MOTHER_CART = "SB:I:CART";
+const MOTHER_CART_CREDIT = "SB:I:CCR";
 const TENANT_LIST = "TS:SUB:LIST";
 const TENANT_VIEW = "TS:SUB:VIEW";
 const TENANT_CART = "TS:SUB:CART";
+const TENANT_CART_CREDIT = "TS:SUB:CCR";
 const TENANT_PAY = "TS:SUB:PAY";
 const TENANT_INV_LIST = "TS:SINV:LIST";
 const TENANT_INV_VIEW = "TS:SINV:VIEW";
@@ -32,8 +35,18 @@ function detailMenu() {
   return kb([[{ text: BTN.SVC_SELECT }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
 }
 
-function proformaMenu() {
-  return kb([[{ text: BTN.SVC_ISSUE }], [{ text: BTN.BACK_PRODUCT_LIST }]]);
+function proformaMenu(usingCredit, canUseCredit) {
+  const rows = [
+    [{ text: usingCredit ? BTN.SVC_CONFIRM_PROFORMA : BTN.SVC_ISSUE }],
+  ];
+  if (!usingCredit && canUseCredit) {
+    rows.push([{ text: BTN.SVC_USE_CREDIT }]);
+  }
+  if (usingCredit) {
+    rows.push([{ text: BTN.SVC_PAY_CASH }]);
+  }
+  rows.push([{ text: BTN.BACK_PRODUCT_LIST }]);
+  return kb(rows);
 }
 
 function tenantPayMenu() {
@@ -153,6 +166,36 @@ async function currentContext(user) {
     ? user.orderStep.split(":")[2]
     : user.adminStep.split(":")[2];
   return { source, flow, phase, tenantId };
+}
+
+function isCartPhase(phase) {
+  return phase === "CART" || phase === "CCR";
+}
+
+function isUsingCredit(ctx) {
+  return ctx?.phase === "CCR";
+}
+
+async function setCartStep(user, ctx, usingCredit) {
+  if (ctx.source === "mother") {
+    await setMotherStep(user, usingCredit ? MOTHER_CART_CREDIT : MOTHER_CART);
+  } else {
+    await setTenantStep(user, usingCredit ? TENANT_CART_CREDIT : TENANT_CART);
+  }
+}
+
+async function loadAvailableCredit(user, tenantId) {
+  try {
+    const wallet = await creditLedger.getOrCreateWallet({
+      tenantId,
+      userId: user.id,
+    });
+    if (!wallet) return 0;
+    return await creditLedger.getBalance(wallet.id);
+  } catch (err) {
+    console.error("SERVICE CREDIT BALANCE SKIP:", err.message);
+    return 0;
+  }
 }
 
 function uniquePacks(list) {
@@ -282,28 +325,53 @@ async function showDetail(user, chatId, packId) {
   return true;
 }
 
-async function showProforma(user, chatId) {
+async function showProforma(user, chatId, usingCredit = false) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
   const required = await ensureRequired(user, ctx.flow);
-  if (ctx.source === "mother") await setMotherStep(user, MOTHER_CART);
-  else await setTenantStep(user, TENANT_CART);
+  const wantCredit = usingCredit || isUsingCredit(ctx);
+  await setCartStep(user, ctx, wantCredit);
   const chosen = await selectedPacks(user, ctx.tenantId);
   const requiredId = required?.id;
   const quote = invoices.buildQuote(chosen, ctx.flow);
+  const available = await loadAvailableCredit(user, ctx.tenantId);
+  const split = invoices.splitPayment(quote.totalAmount, available, wantCredit);
+  const canUseCredit = available > 0 && quote.totalAmount > 0;
   const lines = ["🧾 پیش فاکتور", "━━━━━━━━━━━━━━━━━━", ""];
   for (const pack of chosen) {
     const tag = pack.id === requiredId ? " (اجباری)" : "";
     lines.push(`• ${pack.title}${tag}`);
     lines.push(`  ${formatPrice(pack.priceToman)}`);
   }
-  lines.push("", `جمع: ${formatPrice(quote.totalAmount)}`);
+  lines.push("", `جمع فاکتور: ${formatPrice(quote.totalAmount)}`);
+  lines.push(`روش پرداخت: ${invoices.paymentMethodLabel(split.paymentMethod)}`);
+  if (wantCredit) {
+    lines.push(`موجودی اعتبار: ${formatPrice(available)}`);
+    lines.push(`پرداخت اعتباری: ${formatPrice(split.creditAmount)}`);
+  }
+  lines.push(`قابل پرداخت نقدی: ${formatPrice(split.cashAmount)}`);
   const removable = chosen.filter((pack) => pack.id !== requiredId);
-  lines.push(
-    "",
-    "برای حذف سرویس مد نظر روی نام آن بزنید و یا در صورت تایید پیش فاکتور دکمه «صدور فاکتور» را فشار دهید"
+  if (wantCredit) {
+    lines.push(
+      "",
+      "در صورت تایید، اعتبار تا سقف فاکتور رزرو می‌شود و بعد از تایید ادمین قطعی می‌گردد."
+    );
+    if (split.cashAmount > 0) {
+      lines.push("باقی‌مانده را کارت‌به‌کارت واریز کنید و رسید بفرستید.");
+    }
+    lines.push("برای تایید دکمه «تایید پیش فاکتور» را بزنید.");
+  } else {
+    lines.push(
+      "",
+      "برای حذف سرویس مد نظر روی نام آن بزنید و یا در صورت تایید پیش فاکتور دکمه «صدور فاکتور» را فشار دهید"
+    );
+  }
+  await reply(
+    user,
+    chatId,
+    lines.join("\n"),
+    proformaMenu(wantCredit && split.creditAmount > 0, canUseCredit)
   );
-  await reply(user, chatId, lines.join("\n"), proformaMenu());
   if (removable.length) {
     const rows = removable.map((pack) => [
       {
@@ -377,10 +445,23 @@ async function removeFromProforma(user, chatId, packageId) {
   return true;
 }
 
+async function applyProformaCredit(user, chatId) {
+  const ctx = await currentContext(user);
+  if (!ctx) return false;
+  const available = await loadAvailableCredit(user, ctx.tenantId);
+  if (available <= 0) {
+    await reply(user, chatId, "موجودی اعتبار کیف پول صفر است.");
+    await showProforma(user, chatId, false);
+    return true;
+  }
+  await showProforma(user, chatId, true);
+  return true;
+}
+
 async function issueInvoice(user, chatId) {
   const ctx = await currentContext(user);
   if (!ctx) return false;
-  if (ctx.phase !== "CART") {
+  if (!isCartPhase(ctx.phase)) {
     await showProforma(user, chatId);
     return true;
   }
@@ -389,15 +470,40 @@ async function issueInvoice(user, chatId) {
   const tenantId =
     ctx.tenantId ||
     (ctx.source === "tenant" ? getBotContext().tenantId : user.pendingOrderId);
+  const wantCredit = isUsingCredit(ctx);
+  const available = wantCredit
+    ? await loadAvailableCredit(user, tenantId)
+    : 0;
+  const quote = invoices.buildQuote(chosen, ctx.flow);
+  const split = invoices.splitPayment(quote.totalAmount, available, wantCredit);
   try {
     const invoice = await invoices.createInvoice({
       userId: user.id,
       tenantId,
       kind: ctx.flow,
       packs: chosen,
+      creditAmount: split.creditAmount,
     });
+    if (split.creditAmount > 0) {
+      try {
+        await creditLedger.reserveForInvoice({
+          userId: user.id,
+          tenantId,
+          invoiceId: invoice.id,
+          amount: split.creditAmount,
+          createdByUserId: user.id,
+        });
+      } catch (reserveErr) {
+        await invoices.rejectInvoice(invoice.id).catch(() => {});
+        throw reserveErr;
+      }
+    }
     await packages.replacePicks(user.id, []);
-    await startPayment(user, chatId, invoice, ctx.source, tenantId);
+    if (split.cashAmount > 0) {
+      await startPayment(user, chatId, invoice, ctx.source, tenantId);
+    } else {
+      await submitZeroCashInvoice(user, chatId, invoice, ctx.source);
+    }
   } catch (err) {
     if (err.message === "OPEN_INVOICE") {
       await reply(
@@ -408,6 +514,15 @@ async function issueInvoice(user, chatId) {
       );
       return true;
     }
+    if (err.message === "CREDIT_INSUFFICIENT") {
+      await reply(
+        user,
+        chatId,
+        "موجودی اعتبار برای این پیش‌فاکتور کافی نیست. پیش‌فاکتور نقدی را ببینید."
+      );
+      await showProforma(user, chatId, false);
+      return true;
+    }
     console.error("SERVICE INVOICE ISSUE:", err);
     await reply(user, chatId, "صدور فاکتور ممکن نشد. دوباره تلاش کنید.");
   }
@@ -416,6 +531,41 @@ async function issueInvoice(user, chatId) {
 
 function payKeyboard(source) {
   return source === "tenant" ? tenantPayMenu() : paymentMenu();
+}
+
+async function submitZeroCashInvoice(user, chatId, invoice, source) {
+  await invoices.markWaitingApproval(invoice.id, null);
+  const shown = (await invoices.getInvoice(invoice.id)) || invoice;
+  if (source === "tenant") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "TS:MENU", pendingOrderId: null },
+    });
+    user.adminStep = "TS:MENU";
+    user.pendingOrderId = null;
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, pendingOrderId: null },
+    });
+    user.orderStep = null;
+    user.pendingOrderId = null;
+  }
+  await reply(
+    user,
+    chatId,
+    `✅ پیش‌فاکتور تایید شد.\n\n${invoices.formatInvoiceText(
+      shown
+    )}\n\nرقم نقدی صفر است. فاکتور برای بررسی ادمین ارسال شد.`,
+    source === "tenant" ? tenantAdminMenu() : mainMenu(user)
+  );
+  await notifyMotherAdmins(
+    `🧾 فاکتور خدمات اعتباری\n🔖 ${invoice.trackingCode}\n💰 جمع: ${formatPrice(
+      invoice.totalAmount
+    )}\n💳 اعتبار رزرو: ${formatPrice(
+      invoice.creditAmount || 0
+    )}\n💵 نقدی: ${formatPrice(0)}\n\nاز پنل ادمین → فاکتور خدمات همکاران بررسی کنید.`
+  );
 }
 
 async function startPayment(user, chatId, invoice, source, tenantId) {
@@ -438,14 +588,21 @@ async function startPayment(user, chatId, invoice, source, tenantId) {
     user.orderStep = MOTHER_PAY;
     user.pendingOrderId = invoice.id;
   }
+  const cashDue = Number(
+    invoice.cashAmount != null ? invoice.cashAmount : invoice.totalAmount || 0
+  );
   const extra =
     source === "mother"
       ? "\n\nتا تایید پرداخت توسط ادمین پت‌لند امکان ساخت ربات نیست."
       : "";
+  const cashLine =
+    cashDue !== Number(invoice.totalAmount || 0)
+      ? `\n\nمبلغ کارت‌به‌کارت: ${formatPrice(cashDue)}`
+      : "";
   await reply(
     user,
     chatId,
-    `${invoices.formatInvoiceText(invoice)}\n\n${buildPaymentInfo()}${extra}`,
+    `${invoices.formatInvoiceText(invoice)}${cashLine}\n\n${buildPaymentInfo()}${extra}\n\n📸 لطفاً اسکرین‌شات رسید پرداخت را ارسال کنید.`,
     payKeyboard(source)
   );
 }
@@ -486,8 +643,12 @@ async function handleReceiptPhoto(user, chatId, photo) {
     tenantPay ? tenantAdminMenu() : mainMenu(user)
   );
   await notifyMotherAdmins(
-    `🧾 رسید فاکتور خدمات\n🔖 ${invoice.trackingCode}\n💰 ${formatPrice(
+    `🧾 رسید فاکتور خدمات\n🔖 ${invoice.trackingCode}\n💰 جمع: ${formatPrice(
       invoice.totalAmount
+    )}\n💵 نقدی: ${formatPrice(
+      invoice.cashAmount != null ? invoice.cashAmount : invoice.totalAmount
+    )}\n💳 اعتبار: ${formatPrice(
+      invoice.creditAmount || 0
     )}\n\nاز پنل ادمین → فاکتور خدمات همکاران تایید کنید.`
   );
   return true;
@@ -556,8 +717,12 @@ async function handleText(user, chatId, text) {
     return true;
   }
   if (text === BTN.SVC_SELECT) return selectCurrent(user, chatId);
-  if (text === BTN.SVC_PROFORMA) return showProforma(user, chatId);
-  if (text === BTN.SVC_ISSUE) return issueInvoice(user, chatId);
+  if (text === BTN.SVC_PROFORMA) return showProforma(user, chatId, false);
+  if (text === BTN.SVC_USE_CREDIT) return applyProformaCredit(user, chatId);
+  if (text === BTN.SVC_PAY_CASH) return showProforma(user, chatId, false);
+  if (text === BTN.SVC_ISSUE || text === BTN.SVC_CONFIRM_PROFORMA) {
+    return issueInvoice(user, chatId);
+  }
   if (text === BTN.BACK_PRODUCT_LIST) return goBack(user, chatId);
   if (text === BTN.BACK_MAIN) return false;
   return true;
@@ -587,7 +752,7 @@ async function goBack(user, chatId) {
     await reply(user, chatId, "از منوی زیر استفاده کنید.", mainMenu(user));
     return true;
   }
-  if (ctx.phase === "VIEW" || ctx.phase === "CART") {
+  if (ctx.phase === "VIEW" || isCartPhase(ctx.phase)) {
     await showCatalog(user, chatId, ctx);
     return true;
   }

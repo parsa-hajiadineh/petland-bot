@@ -594,6 +594,10 @@ model ServiceInvoice {
   periodEnd       DateTime?
   receiptImage    String?
 
+  creditAmount    Int      @default(0)
+  cashAmount      Int      @default(0)
+  paymentMethod   String   @default("CASH")
+
   userId          String
   tenantId        String?
   tenant          Tenant?  @relation(fields: [tenantId], references: [id])

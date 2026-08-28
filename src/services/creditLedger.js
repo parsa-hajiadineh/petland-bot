@@ -5,6 +5,8 @@ const CREDIT_TYPE = {
   GOLDEN_REWARD: "GOLDEN_REWARD",
   PURCHASE_REWARD: "PURCHASE_REWARD",
   SERVICE_PAYMENT: "SERVICE_PAYMENT",
+  CREDIT_RESERVE: "CREDIT_RESERVE",
+  CREDIT_RELEASE: "CREDIT_RELEASE",
   REFUND: "REFUND",
 };
 
@@ -12,6 +14,8 @@ const CREDIT_TYPE_TITLE = {
   GOLDEN_REWARD: "پاداش دوره طلایی",
   PURCHASE_REWARD: "پاداش خرید استاندارد",
   SERVICE_PAYMENT: "پرداخت فاکتور خدمات",
+  CREDIT_RESERVE: "رزرو اعتبار فاکتور خدمات",
+  CREDIT_RELEASE: "آزادسازی رزرو اعتبار",
   REFUND: "بازگشت اعتبار",
 };
 
@@ -417,6 +421,109 @@ async function listByReference(walletId, referenceType, referenceId) {
   return (rows || []).map(mapTransaction);
 }
 
+const REF_INVOICE = "ServiceInvoice";
+
+function reserveState(rows) {
+  let reserved = 0;
+  let refunded = 0;
+  let consumed = 0;
+  for (const row of rows || []) {
+    const n = Math.abs(Number(row.amount || 0));
+    if (row.type === CREDIT_TYPE.CREDIT_RESERVE) reserved += n;
+    if (row.type === CREDIT_TYPE.REFUND) refunded += n;
+    if (row.type === CREDIT_TYPE.SERVICE_PAYMENT) consumed += n;
+  }
+  return {
+    reserved,
+    refunded,
+    consumed,
+    open: Math.max(0, reserved - refunded - consumed),
+  };
+}
+
+async function getReserveState(walletId, invoiceId) {
+  const rows = await listByReference(walletId, REF_INVOICE, invoiceId);
+  return reserveState(rows);
+}
+
+async function reserveForInvoice({
+  userId,
+  tenantId,
+  invoiceId,
+  amount,
+  createdByUserId,
+}) {
+  const n = Math.max(0, Math.trunc(Number(amount) || 0));
+  if (!invoiceId || !n) return null;
+  const wallet = await getOrCreateWallet({ tenantId, userId });
+  if (!wallet) throw new Error("CREDIT_WALLET_MISSING");
+  const state = await getReserveState(wallet.id, invoiceId);
+  if (state.open > 0) return { wallet, amount: state.open, already: true };
+  const available = await getBalance(wallet.id);
+  if (available < n) throw new Error("CREDIT_INSUFFICIENT");
+  const row = await appendTransaction({
+    tenantId,
+    userId,
+    amount: -n,
+    type: CREDIT_TYPE.CREDIT_RESERVE,
+    title: CREDIT_TYPE_TITLE.CREDIT_RESERVE,
+    referenceType: REF_INVOICE,
+    referenceId: invoiceId,
+    createdByUserId: createdByUserId || null,
+    metadata: { invoiceId, phase: "reserved" },
+  });
+  return { wallet, amount: n, row };
+}
+
+async function consumeReserve({ userId, tenantId, invoiceId, createdByUserId }) {
+  const wallet = await getOrCreateWallet({ tenantId, userId });
+  if (!wallet || !invoiceId) return null;
+  const state = await getReserveState(wallet.id, invoiceId);
+  if (state.open <= 0) return null;
+  const release = await appendTransaction({
+    tenantId,
+    userId,
+    amount: state.open,
+    type: CREDIT_TYPE.CREDIT_RELEASE,
+    title: CREDIT_TYPE_TITLE.CREDIT_RELEASE,
+    referenceType: REF_INVOICE,
+    referenceId: invoiceId,
+    createdByUserId: createdByUserId || null,
+    metadata: { invoiceId, phase: "released" },
+  });
+  const payment = await appendTransaction({
+    tenantId,
+    userId,
+    amount: -state.open,
+    type: CREDIT_TYPE.SERVICE_PAYMENT,
+    title: CREDIT_TYPE_TITLE.SERVICE_PAYMENT,
+    referenceType: REF_INVOICE,
+    referenceId: invoiceId,
+    createdByUserId: createdByUserId || null,
+    metadata: { invoiceId, phase: "consumed" },
+  });
+  return { release, payment, amount: state.open };
+}
+
+async function refundReserve({ userId, tenantId, invoiceId, createdByUserId, note }) {
+  const wallet = await getOrCreateWallet({ tenantId, userId });
+  if (!wallet || !invoiceId) return null;
+  const state = await getReserveState(wallet.id, invoiceId);
+  if (state.open <= 0) return null;
+  return appendTransaction({
+    tenantId,
+    userId,
+    amount: state.open,
+    type: CREDIT_TYPE.REFUND,
+    title: CREDIT_TYPE_TITLE.REFUND,
+    note: note || null,
+    referenceType: REF_INVOICE,
+    referenceId: invoiceId,
+    createdByUserId: createdByUserId || null,
+    metadata: { invoiceId, phase: "refunded" },
+  });
+}
+
 async function usedGoldenBase(walletId, excludeOrderId) {
   const rows = await listTransactions(walletId, 500);
   let used = 0;
@@ -512,6 +619,10 @@ module.exports = {
   usedGoldenBase,
   parseMetadata,
   appendTransaction,
+  reserveForInvoice,
+  consumeReserve,
+  refundReserve,
+  getReserveState,
   getWalletHome,
   getWalletView,
   formatSignedAmount,
