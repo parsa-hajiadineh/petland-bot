@@ -50,12 +50,16 @@ async function getUpdates(offset = 0, token) {
   }
 }
 
-async function sendMessage(chatId, text, extra = {}) {
-  return apiCall("sendMessage", {
-    chat_id: chatId,
-    text,
-    ...extra,
-  });
+async function sendMessage(chatId, text, extra = {}, token) {
+  return apiCall(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text,
+      ...extra,
+    },
+    token
+  );
 }
 
 async function sendKeyboard(chatId, text, keyboard) {

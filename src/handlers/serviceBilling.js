@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { reply, notify } = require("../bot/messenger");
+const { reply, notifyMother } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { getBotContext } = require("../bot/context");
 const { ADMIN_BALE_IDS } = require("../config");
@@ -83,8 +83,8 @@ async function shopHasBot(tenantId) {
 
 async function tenantFlowKind(tenantId) {
   if (await shopHasBot(tenantId)) return "RENEWAL";
-  const hasInitial = await invoices.hasInitialInvoice(tenantId);
-  return hasInitial ? "RENEWAL" : "INITIAL";
+  const hasApproved = await invoices.hasApprovedInitialInvoice(tenantId);
+  return hasApproved ? "RENEWAL" : "INITIAL";
 }
 
 async function visiblePackages(tenantId) {
@@ -93,14 +93,28 @@ async function visiblePackages(tenantId) {
   return list.filter((pack) => pack.code !== REQUIRED_INITIAL);
 }
 
+const OPEN_INVOICE_MSG = `امکان خرید اشتراک جدید نیست.
+
+آخرین فاکتور خدمات هنوز تایید یا رد نشده است.
+اگر رسید نفرستاده‌اید از «فاکتورهای خدمات» همان فاکتور را پرداخت کنید.
+پس از تایید یا رد ادمین می‌توانید دوباره اشتراک بخرید.`;
+
 async function notifyMotherAdmins(text) {
   for (const adminId of ADMIN_BALE_IDS || []) {
     try {
-      await notify(adminId, text);
+      await notifyMother(adminId, text);
     } catch (err) {
       console.error("SERVICE INVOICE ADMIN NOTIFY:", adminId, err.message);
     }
   }
+}
+
+async function blockIfOpenInvoice(user, chatId, tenantId, source) {
+  const open = await invoices.getOpenInvoice(tenantId);
+  if (!open) return false;
+  const keyboard = source === "tenant" ? tenantAdminMenu() : mainMenu(user);
+  await reply(user, chatId, OPEN_INVOICE_MSG, keyboard);
+  return true;
 }
 
 function requiredCode(flow) {
@@ -303,6 +317,7 @@ async function showProforma(user, chatId) {
 }
 
 async function startInitial(user, chatId, tenantId) {
+  if (await blockIfOpenInvoice(user, chatId, tenantId, "mother")) return;
   await packages.replacePicks(user.id, []);
   await invoices.ensureServiceInvoices();
   await setMotherStep(user, MOTHER_LIST, tenantId);
@@ -314,6 +329,7 @@ async function startInitial(user, chatId, tenantId) {
 }
 
 async function startTenantSubscribe(user, chatId, tenantId) {
+  if (await blockIfOpenInvoice(user, chatId, tenantId, "tenant")) return;
   await packages.replacePicks(user.id, []);
   await invoices.ensureServiceInvoices();
   const flow = await tenantFlowKind(tenantId);
@@ -383,6 +399,15 @@ async function issueInvoice(user, chatId) {
     await packages.replacePicks(user.id, []);
     await startPayment(user, chatId, invoice, ctx.source, tenantId);
   } catch (err) {
+    if (err.message === "OPEN_INVOICE") {
+      await reply(
+        user,
+        chatId,
+        OPEN_INVOICE_MSG,
+        ctx.source === "tenant" ? tenantAdminMenu() : mainMenu(user)
+      );
+      return true;
+    }
     console.error("SERVICE INVOICE ISSUE:", err);
     await reply(user, chatId, "صدور فاکتور ممکن نشد. دوباره تلاش کنید.");
   }
@@ -434,7 +459,9 @@ async function handleReceiptPhoto(user, chatId, photo) {
   const fileId = photo[photo.length - 1]?.file_id || photo[photo.length - 1]?.fileId;
   if (!fileId) return false;
   const current = await invoices.getInvoice(invoiceId);
-  if (!current || current.status === "APPROVED") return false;
+  if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
+    return false;
+  }
   const invoice = await invoices.markWaitingApproval(invoiceId, fileId);
   if (tenantPay) {
     await prisma.user.update({

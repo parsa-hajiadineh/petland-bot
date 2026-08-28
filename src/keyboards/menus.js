@@ -397,7 +397,7 @@ function adminServiceDetailMenu() {
 
 function adminServiceInvoiceActions() {
   return kb([
-    [{ text: BTN.APPROVE }],
+    [{ text: BTN.APPROVE }, { text: BTN.REJECT }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }

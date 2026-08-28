@@ -3,15 +3,19 @@
 
 ---
 
-## وضعیت همین الان (۱۴۰۵/۰۶/۰۶ — کمپین ۴۸ساعته طلایی)
+## وضعیت همین الان (۱۴۰۵/۰۶/۰۶)
 
-کیف پول اعتباری: موجودی از جمع دفتر `CreditTransaction`. در پنل فروشگاه دکمه «کیف پول اعتباری» فقط موجودی و قانون را نشان می‌دهد؛ «دفتر تراکنش‌ها» دکمه جدا است. منوی پنل ادمین فروشگاه دو دکمه در هر ردیف.
+کیف پول اعتباری همکار در پنل فروشگاه: «📒 کیف پول اعتباری» فقط موجودی + قانون؛ «📋 دفتر تراکنش‌ها» دکمه جدا. موجودی فیلد جدا نیست = SUM از `CreditTransaction`. متن: «اعتبار این کیف پول فقط برای استفاده از خدمات مجاز پلتفرم قابل استفاده میباشد.» با `Wallet` بازاریابی مادر قاطی نشود. ردیف دفتر UPDATE/DELETE نمی‌شود. خرج اعتبار هنوز وصل نیست.
 
-کمپین طلایی با تبدیل User به همکار شروع می‌شود (`ColleagueGoldenPeriod`). مقادیر پیش‌فرض: ۴۸ ساعت، سقف ۱۰ میلیون، ۵۰۰٪ ویژه، ۱۰٪ عادی — از پنل ادمین مادر «تنظیمات ساخت اعتبار» قابل تغییر است و برای همکاران جدید اعمال می‌شود. ملاک پنجره طلایی زمان ارسال اسکرین‌شات رسید است (`OrderReceipt.uploadedAt`). اعتبار هنگام تایید فاکتور مادر ساخته می‌شود و روی مجموع خریدهای واجد شرایط حساب می‌شود. **فقط سفارش کالای مادر (`PL-` عمده)**؛ فاکتور خدمات (`SI-`) اعتبار نمی‌سازد.
+کمپین طلایی با اولین تبدیل به همکار (`ColleagueGoldenPeriod.startedAt`). چهار مقدار از پنل ادمین مادر → «⚙️ تنظیمات ساخت اعتبار» (`CreditCampaignSettings`) برای **فاکتورهای جدید همه همکاران** (قدیمی و جدید) زنده اعمال می‌شود: ساعات پنجره از `startedAt + goldenHours`، سقف و درصد ویژه/عادی از تنظیمات فعلی. `startedAt` عوض نمی‌شود. ادمین مادر (`ADMIN`) هم همکار خریدار است: قیمت عمده، شروع گلدن، ساخت اعتبار. ملاک پنجره زمان ارسال اسکرین‌شات (`OrderReceipt.uploadedAt`) است. اعتبار هنگام تایید فاکتور **کالای مادر** ساخته می‌شود. **فقط `PL-`**؛ فاکتور خدمات `SI-` اعتبار نمی‌سازد.
 
-فاکتور خدمات: صدور = `WAITING_PAYMENT` + دکمه رسید؛ بعد از اسکرین‌شات = `WAITING_APPROVAL`؛ ادمین مادر تایید می‌کند. لیست همکار: ۱۰ فاکتور آخر اینلاین با بازه دوره اشتراک (`siv:`). انتخاب سرویس بعد از افزودن به کاتالوگ برمی‌گردد.
+ساخت ربات: هر فروشگاه یک ربات + فاکتور راه‌اندازی INITIAL باید توسط ادمین مادر `APPROVED` باشد. تا تایید، توکن گرفته نمی‌شود.
 
-متن کیف: «اعتبار این کیف پول فقط برای استفاده از خدمات مجاز پلتفرم قابل استفاده میباشد.» با `Wallet` بازاریابی مادر قاطی نشود. ردیف دفتر UPDATE/DELETE نمی‌شود. روی `Order` موقع استارت ALTER نزن. توکن را لاگ نکن.
+خرید اشتراک: تا آخرین فاکتور خدمات `APPROVED` یا `REJECTED` نشود اشتراک جدید صادر نمی‌شود (`WAITING_PAYMENT` / `WAITING_APPROVAL` قفل است). رد ادمین مادر از «فاکتور خدمات همکاران» با `REJECTED` (نه `approveOrder`). فاکتور بعدی همان `periodStart`/`periodEnd` فاکتور ردشده را می‌گیرد؛ `lastPeriodEnd` فقط فاکتورهای `APPROVED` است. رسید اسکرین‌شات در ربات تننت با توکن **مادر** به ادمین مادر نوتیف می‌شود (`notifyMother` + `BOT_TOKEN`).
+
+منوی پنل ادمین مادر و پنل ادمین فروشگاه همکار: دو دکمه در هر ردیف. دکمه پکیج مادر: «🛠 تغییر پکیج های خدماتی».
+
+روی `Order` موقع استارت ALTER نزن. توکن را لاگ نکن. روی شل زنده لیارا `prisma generate` نزن.
 
 ---
 
@@ -44,15 +48,15 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 
 سبد تننت: جداول `ShopCart` / `ShopCartItem` با SQL در runtime — **مدل Prisma ندارند**. `Cart` مادر دست نخورد.
 
-سفارش تننت: `TS-` + `Order.tenantId`. مادر فقط `PL-`.
+سفارش تننت: `TS-` + `Order.tenantId`. مادر فقط `PL-`. فاکتور خدمات: `SI-`.
 
-کیف پول اعتباری تننت: `CreditWallet` (یک فروشگاه = یک کیف) + دفتر `CreditTransaction`. موجودی = SUM مبلغ‌های دفتر. `Wallet` مادر = پورسانت بازاریابی و قابل برداشت است؛ جدا بماند.
+کیف پول اعتباری: `CreditWallet` (tenantId و/یا userId) + دفتر `CreditTransaction`. `Wallet` مادر = پورسانت بازاریابی قابل برداشت؛ جدا بماند.
 
 ---
 
 ## Engine
 
-- `index.js`: اول `engine.start()` (poll)، بعد `ensureMotherCatalog()`
+- `index.js`: اول `engine.start()` (poll)، بعد `ensureMotherCatalog()` سپس ensure پکیج/فاکتور خدمات/دفتر اعتبار/کمپین طلایی
 - تننت‌ها poll هستند؛ قبل از poll `deleteWebhook` با توکن همان ربات
 - `getUpdates(offset, ctx.token)` — توکن را صریح بده
 - بعد از `getOrCreateUser` دوباره `runWithContext(ctx)` وگرنه پاسخ تست با توکن مادر می‌رود
@@ -64,36 +68,38 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 ## فایل‌ها
 
 ```
-src/bot/engine.js            poll + processUpdate(update, ctx)
-src/handlers/router.js       مادر vs تننت
-src/handlers/tenantShop.js   منوی فروشگاه همکار
-src/handlers/tenantOrder.js  سبد/تسویه/رسید/پیگیری مالک
-src/handlers/tenantAdmin.js  پنل مالک + کیف پول اعتباری
-src/services/shopCart.js     SQL خام
-src/services/shopProvision.js جدول‌های runtime + گیت فاکتور راه‌اندازی
-src/services/creditLedger.js دفتر اعتبار همکار (بدون فیلد موجودی)
-src/services/goldenCampaign.js کمپین ۴۸ساعته؛ زمان رسید؛ سقف تجمعی ۱۰M
-src/handlers/products.js     مادر + showTenantProducts
-src/services/servicePackages.js جدول و seed پکیج خدمات
-src/handlers/adminServices.js  ادمین مادر: CRUD پکیج + تایید فاکتور خدمات
-src/handlers/colleague.js      پروفایل همکار، گیت ساخت ربات
-src/handlers/serviceBilling.js ویزارد پکیج → خدمت → فاکتور
-src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
+src/bot/engine.js                 poll + processUpdate(update, ctx)
+src/handlers/router.js            مادر vs تننت
+src/handlers/tenantShop.js        منوی فروشگاه همکار
+src/handlers/tenantOrder.js       سبد/تسویه/رسید/پیگیری مالک
+src/handlers/tenantAdmin.js       پنل مالک + کیف اعتبار + دفتر
+src/services/shopCart.js          SQL خام
+src/services/shopProvision.js     جدول‌های runtime + گیت فاکتور راه‌اندازی
+src/services/creditLedger.js      دفتر اعتبار (بدون فیلد موجودی)
+src/services/goldenCampaign.js    کمپین طلایی + CreditCampaignSettings
+src/handlers/adminCreditSettings.js تنظیمات ساخت اعتبار ادمین مادر
+src/handlers/products.js          مادر + showTenantProducts
+src/services/servicePackages.js   جدول و seed پکیج خدمات
+src/handlers/adminServices.js     CRUD پکیج + تایید/رد فاکتور خدمات (sinv:)
+src/handlers/colleague.js         پروفایل همکار، گیت ساخت ربات، شروع گلدن
+src/handlers/serviceBilling.js    اشتراک → پیش‌فاکتور → فاکتور → رسید؛ نوتیف مادر با BOT_TOKEN
+src/services/serviceInvoices.js   snapshot قیمت؛ WAITING_PAYMENT / WAITING_APPROVAL / APPROVED / REJECTED
+src/bot/messenger.js              notifyMother با توکن مادر
+src/keyboards/menus.js            همه دکمه‌ها
 ```
 
-منوی تننت: محصولات، سبد، سفارشات من، راهنما. مالک: مدیریت فروشگاه + سفارش‌های فروشگاه.
-سفارش‌های فروشگاه: اول «سفارشات باز» / «سفارشات بسته». باز = همه جز `REJECTED` و `SHIPPED`. بسته = همان دو وضعیت. لیست اینلاین مثل قبل.
+منوی تننت: محصولات، سبد، سفارشات من، راهنما. مالک: مدیریت فروشگاه.
+سفارش‌های فروشگاه: «سفارشات باز» / «سفارشات بسته». باز = همه جز `REJECTED` و `SHIPPED`.
 محصولات تننت: **همیشه اول دسته‌ها**، بعد اینلاین ۱۰تایی.
 
-قدم‌های تننت: `TSC:` دسته، `TCK:QTY` تعداد، `TCK:NAME`… تسویه، `TCK:RECEIPT` رسید، `TS:` پنل مالک، `TS:CREDIT` کیف اعتبار، `TS:CREDIT_LEDGER` دفتر.
+قدم‌های تننت: `TSC:` دسته، `TCK:` تسویه/رسید، `TS:` پنل مالک، `TS:CREDIT` / `TS:CREDIT_LEDGER`، `TS:SUB:` خرید اشتراک، `TS:SINV:` لیست/جزئیات فاکتور خدمات.
 
-گیت ساخت ربات: `colleague.gateShopBotCreate` + `provisionShop` (`NEED_SETUP_INVOICE` / `NEED_APPROVED_SETUP` / `ALREADY_HAS_BOT`).
-تایید فاکتور خدمات: پنل ادمین مادر → «فاکتور خدمات همکاران» (`sinv:`). دکمه تایید سفارش فروشگاهی (`approveOrder`) را برای این فاکتورها صدا نزن.
+گیت ساخت ربات: `gateShopBotCreate` + `provisionShop` (`NEED_SETUP_INVOICE` / `NEED_APPROVED_SETUP` / `ALREADY_HAS_BOT`).
+تایید فاکتور خدمات مادر: «فاکتور خدمات همکاران» (`sinv:` تایید/رد). با `approveOrder` قاطی نشود. رسید خدمات با توکن مادر به ادمین مادر می‌رسد نه ربات تننت.
 
-کمپین طلایی: با اولین تبدیل به همکار. `multiplier=5` یعنی ۵۰۰٪. سقف ۱۰M روی مجموع مبلغ خریدهایی که رسیدشان داخل ۴۸ ساعت است. تایید دیرهنگام سقف را از بین نمی‌برد. ثبت سفارش در طلایی ولی رسید بعد از آن = ۱۰٪. فاکتور مادر عمده `PL-`؛ سفارش تننت نه. روی `Order` ستون نساز؛ زمان رسید در `OrderReceipt`.
+کمپین طلایی: رسید داخل پنجره زنده = سهم تا سقف تنظیم‌شده با درصد ویژهٔ فعلی؛ مازاد و رسید بعد از پنجره = درصد عادی فعلی. تایید دیر ادمین پنجره را خراب نمی‌کند. روی `Order` ستون نساز. ادمین مادر هم اعتبار همکار می‌گیرد.
 
-انواع دفتر اعتبار (عنوان فارسی روی هر ردیف قفل می‌شود):
-`GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `SERVICE_PAYMENT` پرداخت فاکتور خدمات، `REFUND` بازگشت اعتبار.
+انواع دفتر: `GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `SERVICE_PAYMENT` پرداخت فاکتور خدمات، `REFUND` بازگشت اعتبار.
 
 ---
 
@@ -107,16 +113,16 @@ src/services/serviceInvoices.js فاکتور خدمات با snapshot قیمت
 6. توکن را لاگ نکن.
 7. اسکیما additive. ShopCart را به Prisma برنگردان مگر db:push در دسترس باشد.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان نه.
-9. سفارش تننت `TS-`؛ مادر `PL-`.
+9. سفارش تننت `TS-`؛ مادر `PL-`؛ خدمات `SI-`.
 10. موجودی اعتبار را در فیلد جدا ذخیره نکن؛ از Ledger جمع بزن. ردیف دفتر را UPDATE/DELETE نکن.
+11. از فاکتور خدمات اعتبار نساز.
 
 ---
 
 ## کار بعدی
 1. خرج اعتبار برای فاکتور خدمات پلتفرم
-2. آپلود رسید پرداخت برای فاکتور خدمات
-3. ادمین مادر: خاموش/روشن Bot، TenantMessage
-4. TENANT_RESELL
-5. تیکت داخل ربات تننت
+2. ادمین مادر: خاموش/روشن Bot، TenantMessage
+3. TENANT_RESELL
+4. تیکت داخل ربات تننت
 
-`.ai/CURRENT_STATUS.md` و `ROADMAP.md` مال v22 تکی‌اند و قدیمی‌اند.
+`.ai/CURRENT_STATUS.md` و `ROADMAP.md` مال v22 تکی‌اند و قدیمی‌اند. منبع حقیقت همین فایل است.

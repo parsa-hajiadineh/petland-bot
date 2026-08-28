@@ -1,5 +1,6 @@
 const prisma = require("../database/prisma");
 const bale = require("../bot/bale");
+const { BOT_TOKEN } = require("../config");
 
 async function clearLastMessage(user, chatId) {
   if (!user?.lastMessageId) return;
@@ -52,13 +53,18 @@ async function replyPhoto(user, chatId, photo, caption, keyboard, options = {}) 
   return result;
 }
 
-async function notify(chatId, text) {
-  return bale.sendMessage(chatId, text);
+async function notify(chatId, text, token) {
+  return bale.sendMessage(chatId, text, {}, token);
+}
+
+async function notifyMother(chatId, text) {
+  return bale.sendMessage(chatId, text, {}, BOT_TOKEN);
 }
 
 module.exports = {
   reply,
   replyPhoto,
   notify,
+  notifyMother,
   clearLastMessage,
 };

@@ -125,8 +125,26 @@ function mapItem(row) {
 }
 
 async function hasApprovedInitialInvoice(tenantId) {
-  const invoice = await getInitialInvoice(tenantId);
-  return Boolean(invoice && invoice.status === "APPROVED");
+  if (!tenantId) return false;
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      const row = await prisma.serviceInvoice.findFirst({
+        where: { tenantId, kind: "INITIAL", status: "APPROVED" },
+        select: { id: true },
+      });
+      return Boolean(row);
+    } catch (err) {
+      console.error("SERVICE INVOICE APPROVED INITIAL SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT "id" FROM "ServiceInvoice"
+     WHERE "tenantId" = $1 AND "kind" = 'INITIAL' AND "status" = 'APPROVED'
+     LIMIT 1`,
+    tenantId
+  );
+  return Boolean(rows?.[0]);
 }
 
 async function getInitialInvoice(tenantId) {
@@ -209,8 +227,36 @@ async function listPendingInvoices(take = 20) {
   return invoices;
 }
 
+async function rejectInvoice(id) {
+  await ensureServiceInvoices();
+  const current = await getInvoice(id);
+  if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
+    return null;
+  }
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.update({
+        where: { id },
+        data: { status: "REJECTED" },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE REJECT PRISMA SKIP:", err.message);
+    }
+  }
+  await prisma.$executeRawUnsafe(
+    `UPDATE "ServiceInvoice" SET "status" = 'REJECTED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+    id
+  );
+  return getInvoice(id);
+}
+
 async function approveInvoice(id) {
   await ensureServiceInvoices();
+  const current = await getInvoice(id);
+  if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
+    return null;
+  }
   if (hasInvoiceModel()) {
     try {
       return await prisma.serviceInvoice.update({
@@ -273,13 +319,49 @@ async function hasInitialInvoice(tenantId) {
   return Boolean(rows?.[0]);
 }
 
+async function getLatestInvoice(tenantId) {
+  if (!tenantId) return null;
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      return await prisma.serviceInvoice.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: "desc" },
+        include: { items: true },
+      });
+    } catch (err) {
+      console.error("SERVICE INVOICE LATEST SKIP:", err.message);
+    }
+  }
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoice" WHERE "tenantId" = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+    tenantId
+  );
+  if (!rows?.[0]) return null;
+  const items = await prisma.$queryRawUnsafe(
+    `SELECT * FROM "ServiceInvoiceItem" WHERE "invoiceId" = $1`,
+    rows[0].id
+  );
+  return mapInvoice(rows[0], (items || []).map(mapItem));
+}
+
+function isOpenInvoiceStatus(status) {
+  return status === "WAITING_PAYMENT" || status === "WAITING_APPROVAL";
+}
+
+async function getOpenInvoice(tenantId) {
+  const latest = await getLatestInvoice(tenantId);
+  if (!latest || !isOpenInvoiceStatus(latest.status)) return null;
+  return latest;
+}
+
 async function lastPeriodEnd(tenantId) {
   if (!tenantId) return null;
   await ensureServiceInvoices();
   if (hasInvoiceModel()) {
     try {
       const row = await prisma.serviceInvoice.findFirst({
-        where: { tenantId, periodEnd: { not: null } },
+        where: { tenantId, status: "APPROVED", periodEnd: { not: null } },
         orderBy: { periodEnd: "desc" },
         select: { periodEnd: true },
       });
@@ -290,11 +372,28 @@ async function lastPeriodEnd(tenantId) {
   }
   const rows = await prisma.$queryRawUnsafe(
     `SELECT "periodEnd" FROM "ServiceInvoice"
-     WHERE "tenantId" = $1 AND "periodEnd" IS NOT NULL
+     WHERE "tenantId" = $1 AND "status" = 'APPROVED' AND "periodEnd" IS NOT NULL
      ORDER BY "periodEnd" DESC LIMIT 1`,
     tenantId
   );
   return rows?.[0]?.periodEnd || null;
+}
+
+async function resolveInvoicePeriod(tenantId, invoiceKind) {
+  const latest = await getLatestInvoice(tenantId);
+  if (latest?.status === "REJECTED" && latest.periodStart && latest.periodEnd) {
+    return {
+      periodStart: new Date(latest.periodStart),
+      periodEnd: new Date(latest.periodEnd),
+    };
+  }
+  const now = new Date();
+  let periodStart = now;
+  if (invoiceKind === "RENEWAL") {
+    const prevEnd = await lastPeriodEnd(tenantId);
+    if (prevEnd && new Date(prevEnd) > now) periodStart = new Date(prevEnd);
+  }
+  return { periodStart, periodEnd: addOneMonth(periodStart) };
 }
 
 function buildQuote(packs, invoiceKind) {
@@ -330,6 +429,7 @@ function buildQuote(packs, invoiceKind) {
 
 function invoiceStatusLabel(status) {
   if (status === "APPROVED") return "تایید شده";
+  if (status === "REJECTED") return "رد شده";
   if (status === "WAITING_APPROVAL") return "در انتظار تایید پرداخت";
   return "در انتظار پرداخت";
 }
@@ -410,13 +510,16 @@ async function createInvoice({ userId, tenantId, kind, packs }) {
   if (!quote.items.length) {
     throw new Error("EMPTY_INVOICE");
   }
-  const now = new Date();
-  let periodStart = now;
-  if (invoiceKind === "RENEWAL") {
-    const prevEnd = await lastPeriodEnd(tenantId);
-    if (prevEnd && new Date(prevEnd) > now) periodStart = new Date(prevEnd);
+  const open = await getOpenInvoice(tenantId);
+  if (open) {
+    const err = new Error("OPEN_INVOICE");
+    err.invoice = open;
+    throw err;
   }
-  const periodEnd = addOneMonth(periodStart);
+  const { periodStart, periodEnd } = await resolveInvoicePeriod(
+    tenantId,
+    invoiceKind
+  );
 
   for (let i = 0; i < 4; i++) {
     const trackingCode = generateServiceInvoiceCode();
@@ -547,8 +650,11 @@ module.exports = {
   hasApprovedInitialInvoice,
   getInitialInvoice,
   getInvoice,
+  getLatestInvoice,
+  getOpenInvoice,
   listPendingInvoices,
   approveInvoice,
+  rejectInvoice,
   markWaitingApproval,
   invoiceStatusLabel,
   formatPeriodButton,

@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { notify } = require("../bot/messenger");
+const { notifyMother } = require("../bot/messenger");
 const { formatPrice } = require("../utils/price");
 const creditLedger = require("./creditLedger");
 const { findOwnedTenant } = require("./shopProvision");
@@ -204,12 +204,17 @@ async function getGoldenPeriod(userId) {
   return mapPeriod(rows?.[0]);
 }
 
-async function startGoldenPeriod(userId) {
+async function startGoldenPeriod(userId, startedAtInput) {
   if (!userId) return null;
   const existing = await getGoldenPeriod(userId);
   if (existing) return existing;
   const settings = await getSettings();
-  const startedAt = new Date();
+  const startedAt =
+    startedAtInput instanceof Date
+      ? startedAtInput
+      : startedAtInput
+        ? new Date(startedAtInput)
+        : new Date();
   const endsAt = new Date(
     startedAt.getTime() + settings.goldenHours * 60 * 60 * 1000
   );
@@ -310,6 +315,21 @@ async function getReceiptUploadedAt(orderId) {
   return rows?.[0]?.uploadedAt ? new Date(rows[0].uploadedAt) : null;
 }
 
+function liveWindow(period, settings) {
+  if (!period) return null;
+  const hours = Number(settings?.goldenHours || DEFAULTS.goldenHours);
+  return {
+    ...period,
+    endsAt: new Date(period.startedAt.getTime() + hours * 60 * 60 * 1000),
+    limitToman: Number(settings?.goldenLimitToman || DEFAULTS.goldenLimitToman),
+    goldenPercent: Number(settings?.goldenPercent || DEFAULTS.goldenPercent),
+  };
+}
+
+function isColleagueBuyer(user) {
+  return user?.role === "COLLEAGUE" || user?.role === "ADMIN";
+}
+
 function isInGoldenWindow(receiptAt, period) {
   if (!receiptAt || !period) return false;
   const t = receiptAt.getTime();
@@ -334,13 +354,25 @@ async function grantPurchaseCredit(order, actorUserId) {
     if (!order?.id || !order.userId) return null;
     if (order.tenantId) return null;
     if (!String(order.trackingCode || "").startsWith("PL-")) return null;
-    if (!order.isWholesale) return null;
 
-    const period = await getGoldenPeriod(order.userId);
-    if (!period) return null;
+    const owner = await prisma.user.findUnique({
+      where: { id: order.userId },
+      select: { id: true, role: true, baleId: true },
+    });
+    if (!owner) return null;
+    if (!order.isWholesale && !isColleagueBuyer(owner)) return null;
 
+    const settings = await getSettings();
     const receiptAt = await getReceiptUploadedAt(order.id);
     if (!receiptAt) return null;
+
+    let period = await getGoldenPeriod(order.userId);
+    if (!period && isColleagueBuyer(owner)) {
+      period = await startGoldenPeriod(order.userId, receiptAt);
+    }
+    if (!period) return null;
+    period = liveWindow(period, settings);
+
     if (receiptAt.getTime() < period.startedAt.getTime()) return null;
 
     const tenant = await findOwnedTenant(order.userId);
@@ -376,7 +408,8 @@ async function grantPurchaseCredit(order, actorUserId) {
     const created = [];
     if (goldenBase > 0 && !hasGolden) {
       const amount = Math.floor(
-        (goldenBase * Number(period.goldenPercent || 500)) / 100
+        (goldenBase * Number(period.goldenPercent || settings.goldenPercent)) /
+          100
       );
       if (amount > 0) {
         created.push(
@@ -401,7 +434,6 @@ async function grantPurchaseCredit(order, actorUserId) {
       }
     }
     if (standardBase > 0 && !hasStandard) {
-      const settings = await getSettings();
       const amount = Math.floor(
         (standardBase * Number(settings.standardPercent || 10)) / 100
       );
@@ -430,13 +462,9 @@ async function grantPurchaseCredit(order, actorUserId) {
     if (!created.length) return { created: [], totalCredit: 0 };
 
     const totalCredit = created.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const owner = await prisma.user.findUnique({
-      where: { id: order.userId },
-      select: { baleId: true },
-    });
-    if (owner?.baleId && totalCredit > 0) {
+    if (owner.baleId && totalCredit > 0) {
       try {
-        await notify(
+        await notifyMother(
           owner.baleId,
           `✅ اعتبار خرید همکار به کیف پول اعتباری اضافه شد.\n\n🔖 ${order.trackingCode}\n💰 ${formatPrice(totalCredit)}\n\nجزئیات را در مدیریت فروشگاه → کیف پول اعتباری ببینید.`
         );

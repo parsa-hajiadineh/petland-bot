@@ -16,10 +16,11 @@ function formatPrice(amount) {
 }
 
 function isWholesaleUser(user) {
-  return user.role === "COLLEAGUE";
+  return user.role === "COLLEAGUE" || user.role === "ADMIN";
 }
 
 function getMinOrderAmount(user) {
+  if (user.role === "ADMIN") return 0;
   return isWholesaleUser(user) ? WHOLESALE_MIN_ORDER : 0;
 }
 

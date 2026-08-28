@@ -238,7 +238,40 @@ async function showInvoiceDetail(user, chatId, invoiceId) {
     await reply(user, chatId, `${text}\n\nاین فاکتور قبلاً تایید شده.`, adminBackMenu());
     return;
   }
+  if (invoice.status === "REJECTED") {
+    await reply(user, chatId, `${text}\n\nاین فاکتور رد شده.`, adminBackMenu());
+    return;
+  }
   await reply(user, chatId, text, adminServiceInvoiceActions());
+}
+
+async function rejectServiceInvoice(user, chatId) {
+  const invoice = await invoices.rejectInvoice(user.pendingOrderId);
+  if (!invoice) {
+    await reply(user, chatId, "رد فاکتور ممکن نشد.", adminBackMenu());
+    return;
+  }
+  try {
+    const owner = await prisma.user.findUnique({
+      where: { id: invoice.userId },
+      select: { baleId: true },
+    });
+    if (owner?.baleId) {
+      await notify(
+        owner.baleId,
+        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`
+      );
+    }
+  } catch (err) {
+    console.error("SERVICE INVOICE USER REJECT NOTIFY:", err.message);
+  }
+  await reply(
+    user,
+    chatId,
+    `❌ فاکتور ${invoice.trackingCode} رد شد.`,
+    adminBackMenu()
+  );
+  await showPendingInvoices(user, chatId);
 }
 
 async function approveServiceInvoice(user, chatId) {
@@ -319,6 +352,14 @@ async function handleText(user, chatId, text) {
     user.pendingOrderId
   ) {
     await approveServiceInvoice(user, chatId);
+    return true;
+  }
+  if (
+    text === BTN.REJECT &&
+    user.adminStep === "SINV:VIEW" &&
+    user.pendingOrderId
+  ) {
+    await rejectServiceInvoice(user, chatId);
     return true;
   }
   if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
