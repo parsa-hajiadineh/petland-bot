@@ -154,6 +154,7 @@ const BTN = {
   ADMIN_TICKETS: "🎫 مدیریت تیکت‌ها",
   TICKET_OPEN: "📭 پاسخ داده نشده",
   TICKET_ANSWERED: "📬 پاسخ داده شده",
+  TICKET_SEARCH: "🔍 جستجوی تیکت",
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
@@ -233,7 +234,7 @@ function mainMenu(user) {
     [{ text: BTN.SUPPORT }, { text: BTN.HELP }],
   ];
 
-  if (user.marketingEnabled) {
+  if (user.marketingEnabled && user.role !== "COLLEAGUE") {
     rows.push([{ text: BTN.MARKETING }, { text: BTN.WALLET }]);
   }
 
@@ -241,14 +242,10 @@ function mainMenu(user) {
     rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
   }
 
-  if (user.role === "COLLEAGUE") {
-    rows.push([{ text: BTN.RETAIL_MODE }]);
-  } else if (user.role !== "ADMIN") {
-    rows.push([{ text: BTN.COLLEAGUE }]);
-  }
-
   if (user.role === "ADMIN") {
-    rows.push([{ text: BTN.ADMIN_PANEL }]);
+    rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
+    rows.push([{ text: BTN.RETAIL_MODE }]);
+  } else if (user.role !== "COLLEAGUE") {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }
 
@@ -481,7 +478,7 @@ function adminApprovedActions() {
 function adminTicketsMenu() {
   return kb([
     [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
-    [{ text: BTN.BACK_PRODUCT_LIST }],
+    [{ text: BTN.TICKET_SEARCH }, { text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 

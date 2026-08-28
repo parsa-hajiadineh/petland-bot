@@ -296,7 +296,11 @@ async function goAdminBack(user, chatId) {
     return true;
   }
 
-  if (step === "ADMIN_TICKET_OPEN" || step === "ADMIN_TICKET_ANSWERED") {
+  if (
+    step === "ADMIN_TICKET_OPEN" ||
+    step === "ADMIN_TICKET_ANSWERED" ||
+    step === "ADMIN_TICKET_SEARCH"
+  ) {
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: "ADMIN_TICKETS" },
@@ -574,6 +578,21 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.TICKET_SEARCH) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_TICKET_SEARCH" },
+    });
+    user.adminStep = "ADMIN_TICKET_SEARCH";
+    await reply(
+      user,
+      chatId,
+      "🔍 کد تیکت را وارد کنید.\nمثال: #a1b2c3",
+      adminBackMenu()
+    );
+    return true;
+  }
+
   if (text === BTN.ADMIN_PRODUCTS) {
     await prisma.user.update({
       where: { id: user.id },
@@ -596,6 +615,12 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
   if (Object.values(BTN).includes(text)) {
     return false;
+  }
+
+  if (user.adminStep === "ADMIN_TICKET_SEARCH") {
+    const support = require("./support");
+    await support.adminSearchTicket(user, chatId, text);
+    return true;
   }
 
   if (user.adminStep === "SET_IMAGE_CODE") {

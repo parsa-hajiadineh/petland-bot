@@ -5,7 +5,7 @@ const {
 } = require("../config");
 const { reply } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
-const { formatPrice } = require("../utils/price");
+const { formatPrice, setAdminRetailView } = require("../utils/price");
 const {
   provisionShop,
   findOwnedTenant,
@@ -443,17 +443,27 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (text === BTN.RETAIL_MODE) {
+    if (user.role !== "ADMIN") {
+      await reply(
+        user,
+        chatId,
+        "بازگشت به خرید خرد در حالت همکار امکان‌پذیر نیست.",
+        mainMenu(user)
+      );
+      return true;
+    }
+
+    setAdminRetailView(user.id, true);
     await prisma.user.update({
       where: { id: user.id },
-      data: { role: "CUSTOMER", orderStep: null },
+      data: { orderStep: null },
     });
-
-    user.role = "CUSTOMER";
+    user.orderStep = null;
 
     await reply(
       user,
       chatId,
-      "✅ به حالت خرید عادی بازگشتید.",
+      "✅ حالت تست خرید خرد فعال شد.\nقیمت‌ها مثل یوزر نمایش داده می‌شوند. نقش ادمین تغییر نکرد.",
       mainMenu(user)
     );
 
@@ -493,7 +503,8 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       where: { id: user.id },
       data: roleData,
     });
-    if (user.role !== "ADMIN") user.role = "COLLEAGUE";
+    if (user.role === "ADMIN") setAdminRetailView(user.id, false);
+    else user.role = "COLLEAGUE";
 
     await require("../services/goldenCampaign")
       .startGoldenPeriod(user.id)

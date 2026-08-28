@@ -87,22 +87,48 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
-  if (text === BTN.MARKETING) {
-    await marketingHandler.showMarketing(user, chatId);
-    return;
-  }
-
-  if (text === BTN.WALLET) {
+  if (text === BTN.MARKETING || text === BTN.WALLET) {
+    if (user.role === "COLLEAGUE") {
+      await reply(
+        user,
+        chatId,
+        "این بخش در حالت همکار در دسترس نیست.",
+        mainMenu(user)
+      );
+      return;
+    }
+    if (text === BTN.MARKETING) {
+      await marketingHandler.showMarketing(user, chatId);
+      return;
+    }
     await walletHandler.showWallet(user, chatId);
     return;
   }
 
   if (text === BTN.WITHDRAW_NEW) {
+    if (user.role === "COLLEAGUE") {
+      await reply(
+        user,
+        chatId,
+        "این بخش در حالت همکار در دسترس نیست.",
+        mainMenu(user)
+      );
+      return;
+    }
     await walletHandler.startWithdrawal(user, chatId);
     return;
   }
 
   if (text === BTN.WITHDRAW_HISTORY) {
+    if (user.role === "COLLEAGUE") {
+      await reply(
+        user,
+        chatId,
+        "این بخش در حالت همکار در دسترس نیست.",
+        mainMenu(user)
+      );
+      return;
+    }
     await walletHandler.showWithdrawalHistory(user, chatId);
     return;
   }
@@ -278,6 +304,14 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text.trim() === MARKETING_ACCESS_CODE) {
+    if (user.role === "COLLEAGUE") {
+      await reply(
+        user,
+        chatId,
+        "لطفاً از دکمه‌های منو استفاده کنید.\nبرای راهنما: 📖 راهنما"
+      );
+      return;
+    }
     await prisma.user.update({
       where: { id: user.id },
       data: { marketingEnabled: true },

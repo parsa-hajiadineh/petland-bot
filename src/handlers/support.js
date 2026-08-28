@@ -4,6 +4,60 @@ const { reply, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { BTN, supportMenu, backMain, activeTicketMenu, adminTicketsMenu, adminBackMenu, inlineKb } = require("../keyboards/menus");
 
+const TICKET_INCLUDE = {
+  user: true,
+  messages: { orderBy: { createdAt: "asc" } },
+};
+
+function ticketCode(ticket) {
+  return String(ticket.id).slice(-6);
+}
+
+function toEnDigits(value) {
+  const fa = "۰۱۲۳۴۵۶۷۸۹";
+  const ar = "٠١٢٣٤٥٦٧٨٩";
+  return String(value || "")
+    .replace(/[۰-۹]/g, (d) => String(fa.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String(ar.indexOf(d)));
+}
+
+function parseTicketCode(raw) {
+  return toEnDigits(raw).trim().replace(/^#/, "").trim();
+}
+
+function accountKind(role) {
+  if (role === "COLLEAGUE") return "همکار";
+  if (role === "ADMIN") return "ادمین";
+  return "یوزر";
+}
+
+function ticketSnippet(ticket, max = 35) {
+  const raw = String(ticket.messages?.[0]?.message || ticket.title || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!raw) return "بدون متن";
+  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+}
+
+function statusLabel(status) {
+  return status === "ANSWERED" ? "پاسخ داده شده" : "در انتظار پاسخ";
+}
+
+function ticketListButton(ticket) {
+  const name = ticket.user?.fullName || ticket.user?.baleId || "نامشخص";
+  const kind = accountKind(ticket.user?.role);
+  return {
+    text: `👤 ${name} | ${kind} | ${ticketSnippet(ticket, 24)}`,
+    callback_data: `tkt:view:${ticket.id}`,
+  };
+}
+
+function senderLine(user) {
+  const name = user.fullName || user.baleId;
+  const kind = accountKind(user.role);
+  return `👤 ارسال‌کننده: ${name}\n🏷 نوع حساب: ${kind}\n🆔 آیدی بله: ${user.baleId}`;
+}
+
 module.exports.showSupportMenu = async function showSupportMenu(user, chatId) {
   await reply(user, chatId, "🎫 پشتیبانی", supportMenu());
 };
@@ -27,7 +81,7 @@ module.exports.handleSupport = async function handleSupport(
     await reply(
       user,
       chatId,
-      "📝 پیام خود را بنویسید:",
+      "📝 متن تیکت را بنویسید:",
       backMain()
     );
     return true;
@@ -38,6 +92,7 @@ module.exports.handleSupport = async function handleSupport(
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       take: 10,
+      include: { messages: { orderBy: { createdAt: "asc" }, take: 1 } },
     });
 
     if (!tickets.length) {
@@ -45,13 +100,10 @@ module.exports.handleSupport = async function handleSupport(
       return true;
     }
 
-    const statusLabel = (s) =>
-      s === "ANSWERED" ? "پاسخ داده شده" : "در انتظار پاسخ";
-
     let msg = "📋 تیکت‌های شما\n\n";
     for (const t of tickets) {
-      msg += `#${t.id.slice(-6)} | ${t.title}\n`;
-      msg += `وضعیت: ${statusLabel(t.status)}\n\n`;
+      msg += `#${ticketCode(t)} | ${statusLabel(t.status)}\n`;
+      msg += `متن: ${ticketSnippet(t, 80)}\n\n`;
     }
 
     await reply(user, chatId, msg, supportMenu());
@@ -81,14 +133,14 @@ module.exports.handleSupport = async function handleSupport(
       await reply(
         user,
         chatId,
-        "✅ تیکت ثبت شد.\nبرای بستن تیکت از دکمه زیر استفاده کنید:",
+        `✅ تیکت ثبت شد.\nکد پیگیری: #${ticketCode(ticket)}\nپاسخ پشتیبانی در همین گفتگو برایتان ارسال می‌شود.`,
         activeTicketMenu()
       );
 
       for (const adminId of ADMIN_BALE_IDS) {
         await notify(
           adminId,
-          `🎫 تیکت جدید\nکاربر: ${user.fullName || user.baleId}\n\n${text}`
+          `🎫 تیکت جدید #${ticketCode(ticket)}\n${senderLine(user)}\n\nمتن تیکت:\n${text}`
         );
       }
 
@@ -111,7 +163,10 @@ module.exports.handleSupport = async function handleSupport(
     await reply(user, chatId, "✅ پیام ارسال شد.", activeTicketMenu());
 
     for (const adminId of ADMIN_BALE_IDS) {
-      await notify(adminId, `💬 پیام تیکت\nکاربر: ${user.fullName || user.baleId}\n\n${text}`);
+      await notify(
+        adminId,
+        `💬 پیام تیکت #${String(user.activeTicketId).slice(-6)}\n${senderLine(user)}\n\n${text}`
+      );
     }
 
     return true;
@@ -128,7 +183,10 @@ module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) 
   const tickets = await prisma.ticket.findMany({
     where: { status: "OPEN" },
     orderBy: { createdAt: "desc" },
-    include: { user: true },
+    include: {
+      user: true,
+      messages: { orderBy: { createdAt: "asc" }, take: 1 },
+    },
   });
 
   if (!tickets.length) {
@@ -136,10 +194,7 @@ module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) 
     return;
   }
 
-  const rows = tickets.map((t) => [{
-    text: `👤 ${t.user.fullName || t.user.baleId} — ${t.title.slice(0, 35)}`,
-    callback_data: `tkt:view:${t.id}`,
-  }]);
+  const rows = tickets.map((t) => [ticketListButton(t)]);
 
   await reply(
     user,
@@ -157,7 +212,10 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
     orderBy: { createdAt: "desc" },
     skip: offset,
     take: take + 1,
-    include: { user: true },
+    include: {
+      user: true,
+      messages: { orderBy: { createdAt: "asc" }, take: 1 },
+    },
   });
 
   if (!tickets.length) {
@@ -168,10 +226,7 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
   const hasMore = tickets.length > take;
   const shown = tickets.slice(0, take);
 
-  const rows = shown.map((t) => [{
-    text: `👤 ${t.user.fullName || t.user.baleId} — ${t.title.slice(0, 35)}`,
-    callback_data: `tkt:view:${t.id}`,
-  }]);
+  const rows = shown.map((t) => [ticketListButton(t)]);
 
   if (hasMore) {
     rows.push([{ text: "⬅️ ۱۰ تیکت قدیمی‌تر", callback_data: `tkt:more:${offset + take}` }]);
@@ -189,7 +244,7 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
 module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ticketId) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    include: { user: true, messages: { orderBy: { createdAt: "asc" } } },
+    include: TICKET_INCLUDE,
   });
 
   if (!ticket) {
@@ -197,14 +252,14 @@ module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ti
     return;
   }
 
-  let text = `🎫 تیکت #${ticket.id.slice(-6)}\n`;
-  text += `👤 کاربر: ${ticket.user.fullName || ticket.user.baleId}\n`;
-  text += `📋 عنوان: ${ticket.title}\n`;
+  const kind = accountKind(ticket.user.role);
+  let text = `🎫 تیکت #${ticketCode(ticket)}\n`;
+  text += `${senderLine(ticket.user)}\n`;
   text += `📊 وضعیت: ${ticket.status === "OPEN" ? "⏳ بی‌پاسخ" : "✅ پاسخ داده شده"}\n`;
   text += `━━━━━━━━━━━━━━━━━━\n\n`;
 
   for (const msg of ticket.messages) {
-    const who = msg.senderType === "USER" ? "👤 کاربر" : "🔧 پشتیبانی";
+    const who = msg.senderType === "USER" ? `👤 ${kind}` : "🔧 پشتیبانی";
     text += `${who}:\n${msg.message}\n\n`;
   }
 
@@ -218,6 +273,58 @@ module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ti
   } else {
     await reply(user, chatId, text, adminTicketsMenu());
   }
+};
+
+module.exports.adminSearchTicket = async function adminSearchTicket(user, chatId, raw) {
+  const code = parseTicketCode(raw);
+  if (!code) {
+    await reply(
+      user,
+      chatId,
+      "کد تیکت را وارد کنید. مثال: #a1b2c3",
+      adminBackMenu()
+    );
+    return;
+  }
+
+  let matches = [];
+  if (code.length >= 20) {
+    const exact = await prisma.ticket.findUnique({
+      where: { id: code },
+      include: TICKET_INCLUDE,
+    });
+    if (exact) matches = [exact];
+  }
+
+  if (!matches.length) {
+    matches = await prisma.ticket.findMany({
+      where: { id: { endsWith: code } },
+      include: {
+        user: true,
+        messages: { orderBy: { createdAt: "asc" }, take: 1 },
+      },
+      take: 8,
+    });
+  }
+
+  if (!matches.length) {
+    await reply(user, chatId, "تیکتی با این کد پیدا نشد.", adminBackMenu());
+    return;
+  }
+
+  if (matches.length === 1) {
+    await module.exports.adminShowTicket(user, chatId, matches[0].id);
+    return;
+  }
+
+  const rows = matches.map((t) => [ticketListButton(t)]);
+  await reply(
+    user,
+    chatId,
+    `چند تیکت با این کد پیدا شد (${matches.length}). یکی را انتخاب کنید:`,
+    adminBackMenu()
+  );
+  await bale.sendKeyboard(chatId, "روی تیکت کلیک کنید:", inlineKb(rows));
 };
 
 module.exports.adminReplyTicketDirect = async function adminReplyTicketDirect(user, chatId, ticketId, message) {

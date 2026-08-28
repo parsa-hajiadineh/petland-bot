@@ -15,8 +15,17 @@ function formatPrice(amount) {
   return `${Number(amount).toLocaleString("fa-IR")} تومان`;
 }
 
+const adminRetailView = new Set();
+
+function setAdminRetailView(userId, enabled) {
+  if (enabled) adminRetailView.add(userId);
+  else adminRetailView.delete(userId);
+}
+
 function isWholesaleUser(user) {
-  return user.role === "COLLEAGUE" || user.role === "ADMIN";
+  if (user.role === "COLLEAGUE") return true;
+  if (user.role === "ADMIN") return !adminRetailView.has(user.id);
+  return false;
 }
 
 function getMinOrderAmount(user) {
@@ -30,4 +39,5 @@ module.exports = {
   formatPrice,
   isWholesaleUser,
   getMinOrderAmount,
+  setAdminRetailView,
 };
