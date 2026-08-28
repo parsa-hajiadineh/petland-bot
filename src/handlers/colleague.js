@@ -534,7 +534,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
 🛒 از طریق دکمه «خرید اشتراک» می‌توانید تعرفه خدمات را بررسی نمایید و پس از انتخاب تعرفه خود، فروشگاه خود را به سادگی آماده نمایید
 
-Pow Ora | More Than Care`
+Paw Ora | More Than Care`
     );
 
     const tenant = await findOwnedTenant(user.id);

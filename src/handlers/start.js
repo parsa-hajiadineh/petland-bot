@@ -5,7 +5,7 @@ module.exports = async function startHandler(user, msg) {
   await reply(
     user,
     msg.chat.id,
-    `Pow Ora
+    `Paw Ora
 
 برای انتخاب های بهتر.
 خوش آمدید.`,
