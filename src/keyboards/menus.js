@@ -159,6 +159,9 @@ const BTN = {
   ADMIN_SALES: "📊 آمار فروش",
   ADMIN_SERVICES: "🛠 تغییر پکیج های خدماتی",
   ADMIN_SVC_INVOICES: "🧾 فاکتور خدمات همکاران",
+  ADMIN_SVC_INV_PENDING: "🧾 فاکتورهای در انتظار",
+  ADMIN_SVC_INV_APPROVED: "✅ فاکتورهای تایید شده",
+  ADMIN_SVC_INV_REJECTED: "❌ فاکتورهای رد شده",
   ADMIN_CREDIT_SETTINGS: "⚙️ تنظیمات ساخت اعتبار",
   CREDIT_SET_HOURS: "⏱ زمان گلدن تایم",
   CREDIT_SET_LIMIT: "💰 سقف اعتبار ویژه",
@@ -413,6 +416,14 @@ function adminServiceInvoiceActions() {
   ]);
 }
 
+function adminServiceInvoicesMenu() {
+  return kb([
+    [{ text: BTN.ADMIN_SVC_INV_PENDING }, { text: BTN.ADMIN_SVC_INV_APPROVED }],
+    [{ text: BTN.ADMIN_SVC_INV_REJECTED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
 function adminInvoicesMenu() {
   return kb([
     [{ text: BTN.ADMIN_PENDING }, { text: BTN.ADMIN_APPROVED }],
@@ -516,6 +527,7 @@ module.exports = {
   adminServicesMenu,
   adminServiceDetailMenu,
   adminServiceInvoiceActions,
+  adminServiceInvoicesMenu,
   adminInvoicesMenu,
   adminCreditSettingsMenu,
   adminBackMenu,

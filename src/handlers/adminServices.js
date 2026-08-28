@@ -9,12 +9,24 @@ const {
   adminServicesMenu,
   adminServiceDetailMenu,
   adminServiceInvoiceActions,
+  adminServiceInvoicesMenu,
 } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const services = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
 
 const STEP_PREFIX = "SVC:";
+const PAGE_SIZE = 10;
+const LIST_KIND = {
+  p: { step: "SINV:WAIT", statuses: ["WAITING_APPROVAL"], title: "🧾 فاکتورهای در انتظار", prefix: "silp" },
+  a: { step: "SINV:OK", statuses: ["APPROVED"], title: "✅ فاکتورهای تایید شده", prefix: "sila" },
+  r: { step: "SINV:NO", statuses: ["REJECTED"], title: "❌ فاکتورهای رد شده", prefix: "silr" },
+};
+const LIST_BY_STEP = {
+  "SINV:WAIT": "p",
+  "SINV:OK": "a",
+  "SINV:NO": "r",
+};
 
 function isServiceAdminStep(step) {
   return Boolean(step && String(step).startsWith(STEP_PREFIX));
@@ -60,6 +72,7 @@ async function setStep(user, step, extras = {}) {
     data: { adminStep: step, ...extras },
   });
   user.adminStep = step;
+  Object.assign(user, extras);
 }
 
 function packageSummary(pack) {
@@ -158,6 +171,12 @@ async function startCreate(user, chatId) {
 }
 
 async function handleCallback(user, chatId, data) {
+  if (data.startsWith("silp:") || data.startsWith("sila:") || data.startsWith("silr:")) {
+    const kind = data.slice(3, 4);
+    const offset = Number(data.slice(5)) || 0;
+    await showInvoiceList(user, chatId, kind, offset);
+    return true;
+  }
   if (data.startsWith("sinv:")) {
     await showInvoiceDetail(user, chatId, data.slice(5));
     return true;
@@ -182,35 +201,58 @@ async function shopLabel(tenantId) {
   }
 }
 
-async function showPendingInvoices(user, chatId) {
-  await setStep(user, "SINV:LIST", { pendingOrderId: null });
-  user.pendingOrderId = null;
-  const rows = await invoices.listPendingInvoices(20);
+async function showInvoiceHub(user, chatId) {
+  await setStep(user, "SINV:HUB", { pendingOrderId: null, lastProductCode: null });
+  await reply(user, chatId, "🧾 فاکتور خدمات همکاران", adminServiceInvoicesMenu());
+}
+
+function listKindFromUser(user) {
+  if (user.lastProductCode && LIST_KIND[user.lastProductCode]) return user.lastProductCode;
+  return LIST_BY_STEP[user.adminStep] || "p";
+}
+
+async function showInvoiceList(user, chatId, kind, offset = 0) {
+  const meta = LIST_KIND[kind] || LIST_KIND.p;
+  const skip = Math.max(0, Number(offset) || 0);
+  await setStep(user, meta.step, { pendingOrderId: null, lastProductCode: kind });
+  let rows = [];
+  try {
+    rows = await invoices.listInvoicesByStatus(meta.statuses, skip, PAGE_SIZE + 1);
+  } catch (err) {
+    console.error("ADMIN SERVICE INVOICE LIST:", err);
+    await reply(user, chatId, "خواندن فاکتورها ممکن نشد.", adminServiceInvoicesMenu());
+    return;
+  }
   if (!rows.length) {
     await reply(
       user,
       chatId,
-      "🧾 فاکتور خدمات همکاران\n\nفاکتور در انتظار تاییدی نیست.",
-      adminBackMenu()
+      skip ? `${meta.title}\n\nمورد قدیمی‌تری نیست.` : `${meta.title}\n\nموردی نیست.`,
+      adminServiceInvoicesMenu()
     );
     return;
   }
+  const hasMore = rows.length > PAGE_SIZE;
+  if (hasMore) rows = rows.slice(0, PAGE_SIZE);
   const buttons = [];
   for (const inv of rows) {
-    const kind = inv.kind === "INITIAL" ? "راه‌اندازی" : "ماهانه";
+    const labelKind = inv.kind === "INITIAL" ? "راه‌اندازی" : "ماهانه";
     buttons.push([
       {
-        text: `${inv.trackingCode} | ${kind} | ${formatPrice(inv.totalAmount)}`,
+        text: `${inv.trackingCode} | ${labelKind} | ${formatPrice(inv.totalAmount)}`,
         callback_data: `sinv:${inv.id}`.slice(0, 64),
       },
     ]);
   }
-  await reply(
-    user,
-    chatId,
-    "🧾 فاکتور خدمات همکاران\nروی هر فاکتور بزنید تا تایید کنید.",
-    adminBackMenu()
-  );
+  if (hasMore) {
+    buttons.push([
+      {
+        text: "ده مورد قبلی",
+        callback_data: `${meta.prefix}:${skip + PAGE_SIZE}`.slice(0, 64),
+      },
+    ]);
+  }
+  await reply(user, chatId, `${meta.title}\nروی هر فاکتور بزنید.`, adminServiceInvoicesMenu());
   const result = await bale.sendKeyboard(chatId, "فاکتورها:", inlineKb(buttons));
   const msgId = result?.result?.message_id;
   if (msgId) {
@@ -221,14 +263,22 @@ async function showPendingInvoices(user, chatId) {
   }
 }
 
+async function showPendingInvoices(user, chatId) {
+  await showInvoiceList(user, chatId, "p", 0);
+}
+
 async function showInvoiceDetail(user, chatId, invoiceId) {
   const invoice = await invoices.getInvoice(invoiceId);
   if (!invoice) {
-    await reply(user, chatId, "این فاکتور پیدا نشد.", adminBackMenu());
-    await showPendingInvoices(user, chatId);
+    await reply(user, chatId, "این فاکتور پیدا نشد.", adminServiceInvoicesMenu());
+    await showInvoiceList(user, chatId, listKindFromUser(user), 0);
     return;
   }
-  await setStep(user, "SINV:VIEW", { pendingOrderId: invoice.id });
+  const listKind = listKindFromUser(user);
+  await setStep(user, "SINV:VIEW", {
+    pendingOrderId: invoice.id,
+    lastProductCode: listKind,
+  });
   user.pendingOrderId = invoice.id;
   const shop = await shopLabel(invoice.tenantId);
   const extra = [`🏪 فروشگاه: ${shop}`, ""];
@@ -291,9 +341,9 @@ async function rejectServiceInvoice(user, chatId, reason) {
     user,
     chatId,
     `❌ فاکتور ${invoice.trackingCode} رد شد.`,
-    adminBackMenu()
+    adminServiceInvoicesMenu()
   );
-  await showPendingInvoices(user, chatId);
+  await showInvoiceList(user, chatId, "p", 0);
 }
 
 async function approveServiceInvoice(user, chatId) {
@@ -325,17 +375,21 @@ async function approveServiceInvoice(user, chatId) {
     user,
     chatId,
     `✅ فاکتور ${invoice.trackingCode} تایید شد.`,
-    adminBackMenu()
+    adminServiceInvoicesMenu()
   );
-  await showPendingInvoices(user, chatId);
+  await showInvoiceList(user, chatId, "p", 0);
 }
 
 async function goBack(user, chatId) {
   const step = user.adminStep || "";
   if (isInvoiceAdminStep(step)) {
-    if (step === "SINV:LIST") return false;
+    if (step === "SINV:HUB" || step === "SINV:LIST") return false;
+    if (step === "SINV:WAIT" || step === "SINV:OK" || step === "SINV:NO") {
+      await showInvoiceHub(user, chatId);
+      return true;
+    }
     if (step === "SINV:VIEW") {
-      await showPendingInvoices(user, chatId);
+      await showInvoiceList(user, chatId, listKindFromUser(user), 0);
       return true;
     }
     if (step === "SINV:REJECT" && user.pendingOrderId) {
@@ -373,7 +427,19 @@ async function handleText(user, chatId, text) {
     return true;
   }
   if (text === BTN.ADMIN_SVC_INVOICES) {
-    await showPendingInvoices(user, chatId);
+    await showInvoiceHub(user, chatId);
+    return true;
+  }
+  if (text === BTN.ADMIN_SVC_INV_PENDING && isInvoiceAdminStep(user.adminStep)) {
+    await showInvoiceList(user, chatId, "p", 0);
+    return true;
+  }
+  if (text === BTN.ADMIN_SVC_INV_APPROVED && isInvoiceAdminStep(user.adminStep)) {
+    await showInvoiceList(user, chatId, "a", 0);
+    return true;
+  }
+  if (text === BTN.ADMIN_SVC_INV_REJECTED && isInvoiceAdminStep(user.adminStep)) {
+    await showInvoiceList(user, chatId, "r", 0);
     return true;
   }
   if (

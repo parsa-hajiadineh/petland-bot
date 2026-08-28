@@ -238,22 +238,36 @@ async function getInvoice(id) {
 }
 
 async function listPendingInvoices(take = 20) {
+  return listInvoicesByStatus(["WAITING_APPROVAL"], 0, take);
+}
+
+async function listInvoicesByStatus(statuses, skip = 0, take = 10) {
   await ensureServiceInvoices();
+  const statusList = Array.isArray(statuses) ? statuses : [statuses];
+  const offset = Math.max(0, Number(skip) || 0);
+  const limit = Math.max(1, Number(take) || 10);
   if (hasInvoiceModel()) {
     try {
       return await prisma.serviceInvoice.findMany({
-        where: { status: "WAITING_APPROVAL" },
+        where: { status: { in: statusList } },
         orderBy: { createdAt: "desc" },
-        take,
+        skip: offset,
+        take: limit,
         include: { items: true },
       });
     } catch (err) {
-      console.error("SERVICE INVOICE PENDING SKIP:", err.message);
+      console.error("SERVICE INVOICE LIST STATUS SKIP:", err.message);
     }
   }
+  const placeholders = statusList.map((_, i) => `$${i + 1}`).join(", ");
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT * FROM "ServiceInvoice" WHERE "status" = 'WAITING_APPROVAL' ORDER BY "createdAt" DESC LIMIT $1`,
-    take
+    `SELECT * FROM "ServiceInvoice"
+     WHERE "status" IN (${placeholders})
+     ORDER BY "createdAt" DESC
+     LIMIT $${statusList.length + 1} OFFSET $${statusList.length + 2}`,
+    ...statusList,
+    limit,
+    offset
   );
   const invoices = [];
   for (const row of rows || []) {
@@ -341,6 +355,11 @@ async function approveInvoice(id) {
   }
   invoice = await getInvoice(id);
   await settleCredit(invoice, "consume");
+  try {
+    await require("./tenantSubscriptions").applyApprovedInvoice(invoice);
+  } catch (err) {
+    console.error("SERVICE INVOICE SUBSCRIPTION SKIP:", err.message);
+  }
   return invoice;
 }
 
@@ -785,6 +804,7 @@ module.exports = {
   getLatestInvoice,
   getOpenInvoice,
   listPendingInvoices,
+  listInvoicesByStatus,
   approveInvoice,
   rejectInvoice,
   markWaitingApproval,

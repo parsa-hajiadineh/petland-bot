@@ -34,6 +34,7 @@ app.listen(PORT, async () => {
   try {
     await ensureServicePackages();
     await ensureServiceInvoices();
+    await require("./services/tenantSubscriptions").ensureTenantSubscriptions();
     await require("./services/creditLedger").ensureCreditLedger();
     await require("./services/goldenCampaign").ensureGoldenCampaign();
   } catch (err) {

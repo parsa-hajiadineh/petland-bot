@@ -514,6 +514,9 @@ model TenantSubscription {
 
   lastPurchaseVolume   Int                @default(0)
 
+  lastInvoiceId        String?
+  servicesJson         String?
+
   tenantId             String
   tenant               Tenant             @relation(fields: [tenantId], references: [id])
 

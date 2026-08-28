@@ -319,6 +319,7 @@ async function goAdminBack(user, chatId) {
     step === "ADMIN_TICKETS" ||
     step === "ADMIN_INVOICES" ||
     step === "SVC:LIST" ||
+    step === "SINV:HUB" ||
     step === "CRSET:LIST"
   ) {
     await module.exports.showAdminPanel(user, chatId);
