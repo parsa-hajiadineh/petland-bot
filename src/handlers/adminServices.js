@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { reply } = require("../bot/messenger");
+const { reply, notifyShop } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const {
   BTN,
@@ -13,7 +13,6 @@ const {
 const { formatPrice } = require("../utils/price");
 const services = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
-const { notify } = require("../bot/messenger");
 
 const STEP_PREFIX = "SVC:";
 
@@ -257,9 +256,10 @@ async function rejectServiceInvoice(user, chatId) {
       select: { baleId: true },
     });
     if (owner?.baleId) {
-      await notify(
+      await notifyShop(
         owner.baleId,
-        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`
+        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`,
+        invoice.tenantId
       );
     }
   } catch (err) {
@@ -290,7 +290,11 @@ async function approveServiceInvoice(user, chatId) {
         invoice.kind === "INITIAL"
           ? "فاکتور راه‌اندازی تایید شد.\nاز ربات مادر دکمه «ساخت ربات فروشگاهی» را بزنید و توکن را بفرستید."
           : "فاکتور اشتراک تایید شد.";
-      await notify(owner.baleId, `✅ ${next}\n🔖 ${invoice.trackingCode}`);
+      await notifyShop(
+        owner.baleId,
+        `✅ ${next}\n🔖 ${invoice.trackingCode}`,
+        invoice.tenantId
+      );
     }
   } catch (err) {
     console.error("SERVICE INVOICE USER NOTIFY:", err.message);

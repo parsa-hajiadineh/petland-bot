@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { notifyMother } = require("../bot/messenger");
+const { notifyShop } = require("../bot/messenger");
 const { formatPrice } = require("../utils/price");
 const creditLedger = require("./creditLedger");
 const { findOwnedTenant } = require("./shopProvision");
@@ -464,9 +464,10 @@ async function grantPurchaseCredit(order, actorUserId) {
     const totalCredit = created.reduce((sum, row) => sum + Number(row.amount || 0), 0);
     if (owner.baleId && totalCredit > 0) {
       try {
-        await notifyMother(
+        await notifyShop(
           owner.baleId,
-          `✅ اعتبار خرید همکار به کیف پول اعتباری اضافه شد.\n\n🔖 ${order.trackingCode}\n💰 ${formatPrice(totalCredit)}\n\nجزئیات را در مدیریت فروشگاه → کیف پول اعتباری ببینید.`
+          `✅ اعتبار خرید همکار به کیف پول اعتباری اضافه شد.\n\n🔖 ${order.trackingCode}\n💰 ${formatPrice(totalCredit)}\n\nجزئیات را در مدیریت فروشگاه → کیف پول اعتباری ببینید.`,
+          tenant?.id || null
         );
       } catch (err) {
         console.error("GOLDEN CREDIT NOTIFY SKIP:", err.message);
