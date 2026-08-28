@@ -23,6 +23,7 @@ const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
 const adminManage = require("./adminManage");
 const adminBroadcast = require("./adminBroadcast");
+const adminProducts = require("./adminProducts");
 const salesStats = require("../services/salesStats");
 
 async function showSalesStats(user, chatId) {
@@ -154,24 +155,6 @@ async function goAdminBack(user, chatId) {
     return true;
   }
 
-  if (step === "SET_IMAGE_UPLOAD") {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: "SET_IMAGE_CODE" },
-    });
-    await reply(user, chatId, "کد محصول را وارد کنید:", adminBackMenu());
-    return true;
-  }
-
-  if (step === "SET_IMAGE_CODE") {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: "ADMIN_PRODUCTS", lastProductCode: null },
-    });
-    await replyProductAdmin(user, chatId);
-    return true;
-  }
-
   if (user.pendingOrderId && ["ADMIN_PENDING", "ADMIN_APPROVED", "ADMIN_REJECTED", "ADMIN_SHIPPED"].includes(step)) {
     await prisma.user.update({
       where: { id: user.id },
@@ -228,6 +211,7 @@ async function goAdminBack(user, chatId) {
   if (await adminServices.goBack(user, chatId)) return true;
   if (await adminCreditSettings.goBack(user, chatId)) return true;
   if (await adminBroadcast.goBack(user, chatId)) return true;
+  if (await adminProducts.goBack(user, chatId)) return true;
   if (await adminManage.goBack(user, chatId)) return true;
 
   await prisma.user.update({
@@ -239,20 +223,7 @@ async function goAdminBack(user, chatId) {
 }
 
 async function replyProductAdmin(user, chatId) {
-  await reply(
-    user,
-    chatId,
-    `📦 مدیریت محصولات
-
-• برای تغییر موجودی: PL-کد محصول AVAILABLE یا UNAVAILABLE
-  مثال: JMK-001 AVAILABLE
-
-• برای تنظیم عکس: دکمه «🖼 تنظیم عکس محصول» سپس کد محصول سپس عکس`,
-    kb([
-      [{ text: BTN.SET_IMAGE }],
-      [{ text: BTN.BACK_PRODUCT_LIST }],
-    ])
-  );
+  await adminProducts.showHub(user, chatId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -348,6 +319,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (await adminCreditSettings.handleText(user, chatId, text)) return true;
   if (await adminManage.handleText(user, chatId, text)) return true;
   if (await adminBroadcast.handleText(user, chatId, text)) return true;
+  if (await adminProducts.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);
@@ -487,22 +459,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (text === BTN.ADMIN_PRODUCTS) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: "ADMIN_PRODUCTS" },
-    });
-    user.adminStep = "ADMIN_PRODUCTS";
-    await replyProductAdmin(user, chatId);
-    return true;
-  }
-
-  if (text === BTN.SET_IMAGE) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: "SET_IMAGE_CODE" },
-    });
-    user.adminStep = "SET_IMAGE_CODE";
-    await reply(user, chatId, "کد محصول را وارد کنید:", adminBackMenu());
+    await adminProducts.showHub(user, chatId);
     return true;
   }
 
@@ -513,28 +470,6 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (user.adminStep === "ADMIN_TICKET_SEARCH") {
     const support = require("./support");
     await support.adminSearchTicket(user, chatId, text);
-    return true;
-  }
-
-  if (user.adminStep === "SET_IMAGE_CODE") {
-    const product = await prisma.product.findUnique({
-      where: { code: text.trim().toUpperCase() },
-    });
-
-    if (!product) {
-      await reply(user, chatId, "محصول پیدا نشد.", adminBackMenu());
-      return true;
-    }
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        adminStep: "SET_IMAGE_UPLOAD",
-        lastProductCode: product.code,
-      },
-    });
-
-    await reply(user, chatId, "عکس محصول را ارسال کنید:", adminBackMenu());
     return true;
   }
 
@@ -914,22 +849,5 @@ module.exports.handleAdminPhoto = async function handleAdminPhoto(
   chatId,
   photo
 ) {
-  if (user.adminStep !== "SET_IMAGE_UPLOAD" || !user.lastProductCode) {
-    return false;
-  }
-
-  const fileId = photo[photo.length - 1].file_id;
-
-  await prisma.product.update({
-    where: { code: user.lastProductCode },
-    data: { imageUrl: fileId },
-  });
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { adminStep: "ADMIN_PRODUCTS", lastProductCode: null },
-  });
-
-  await reply(user, chatId, "✅ عکس محصول ذخیره شد.", adminBackMenu());
-  return true;
+  return adminProducts.handlePhoto(user, chatId, photo);
 };

@@ -220,6 +220,8 @@ const BTN = {
   PACK: "📦 بسته‌بندی شد",
   SHIP: "🚚 ثبت ارسال",
   SET_IMAGE: "🖼 تنظیم عکس محصول",
+  AP_ADD: "➕ افزودن محصول",
+  AP_DEL: "🗑 حذف محصول",
   CONFIRM_ADDRESS: "✅ اطلاعات ارسال مورد تایید است",
   DELETE_ADDRESS: "🗑 حذف مشخصات ثبت شده",
   NEW_ADDRESS: "➕ آدرس جدید",
@@ -484,6 +486,13 @@ function adminApprovedActions() {
   ]);
 }
 
+function adminProductsMenu() {
+  return kb([
+    [{ text: BTN.AP_ADD }, { text: BTN.AP_DEL }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
 function adminTicketsMenu() {
   return kb([
     [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
@@ -562,6 +571,7 @@ module.exports = {
   adminOrderActions,
   adminApprovedActions,
   adminTicketsMenu,
+  adminProductsMenu,
   supportMenu,
   activeTicketMenu,
   confirmAddressMenu,

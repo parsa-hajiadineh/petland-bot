@@ -493,6 +493,10 @@ ${status}
   product.status === "AVAILABLE"
     ? `\n\nبرای انتخاب محصول از دکمه "افزودن به سبد" استفاده نمایید.`
     : "\n\nاین محصول ناموجود است."
+}${
+  user.role === "ADMIN" && isMother()
+    ? `\n\n✏️ ویرایش ادمین: photo-s | desc-s | price-s`
+    : ""
 }`;
 
   const menu = productDetailMenu(product);
