@@ -127,7 +127,6 @@ function tsOrderQueries(whereExtra) {
   });
   queries.push({
     trackingCode: { startsWith: "TS-" },
-    tenantId: null,
     items: { some: { product: { tenantId: ctx.tenantId } } },
     ...extra,
   });
@@ -188,29 +187,28 @@ async function createTenantOrder(user, data, retries = 4) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
     const trackingCode = generateTenantTrackingCode();
-    const payload = {
+    const base = {
       ...data,
       trackingCode,
-      tenantId: ctx.tenantId,
-      botId: ctx.botId || null,
+      userId: data.userId || user.id,
     };
-    try {
-      return await prisma.order.create({
-        data: payload,
-        select: ORDER_WITH_ITEMS_SELECT,
-      });
-    } catch (err) {
-      lastErr = err;
-      const msg = String(err.message || "");
-      if (payload.botId && /column|does not exist|Unknown arg/i.test(msg)) {
-        try {
-          const { botId, ...withoutBot } = payload;
-          return await prisma.order.create({
-            data: withoutBot,
-            select: ORDER_WITH_ITEMS_SELECT,
-          });
-        } catch (err2) {
-          lastErr = err2;
+    const payloads = [
+      { ...base, tenantId: ctx.tenantId, botId: ctx.botId || null },
+      { ...base, tenantId: ctx.tenantId },
+      base,
+    ];
+    for (const payload of payloads) {
+      try {
+        return await prisma.order.create({
+          data: payload,
+          select: ORDER_WITH_ITEMS_SELECT,
+        });
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err.message || "");
+        if (/unique|duplicate/i.test(msg)) break;
+        if (!/column|does not exist|Unknown arg/i.test(msg)) {
+          throw err;
         }
       }
     }

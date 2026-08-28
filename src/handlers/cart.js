@@ -66,7 +66,10 @@ module.exports.showCart = async function showCart(user, chatId) {
   text += `💰 جمع کل: ${formatPrice(total)}`;
 
   if (wholesale) {
-    text += `\n🤝 حداقل سفارش همکار: ${formatPrice(getMinOrderAmount(user))}`;
+    const minOrder = getMinOrderAmount(user);
+    if (minOrder > 0) {
+      text += `\n🤝 حداقل سفارش همکار: ${formatPrice(minOrder)}`;
+    }
   }
 
   await reply(user, chatId, text, cartMenu());

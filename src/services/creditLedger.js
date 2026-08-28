@@ -576,12 +576,13 @@ function formatWalletHome(balance) {
 }
 
 function formatLedgerList(entries) {
-  const lines = ["📋 دفتر تراکنش‌ها", "━━━━━━━━━━━━━━━━━━"];
-  if (!entries.length) {
+  const rows = (entries || []).slice(0, 20);
+  const lines = ["📋 دفتر تراکنش‌ها", "۲۰ تراکنش آخر", "━━━━━━━━━━━━━━━━━━"];
+  if (!rows.length) {
     lines.push("", "هنوز تراکنشی ثبت نشده است.");
     return lines.join("\n");
   }
-  for (const entry of entries) {
+  for (const entry of rows) {
     const when = entry.createdAt
       ? new Date(entry.createdAt).toLocaleDateString("fa-IR")
       : "";
@@ -618,8 +619,7 @@ async function getWalletHome(input) {
 }
 
 async function getWalletView(input, take = 20) {
-  const tenantId = typeof input === "string" ? input : input;
-  const state = await loadWalletState(tenantId, take);
+  const state = await loadWalletState(input, Math.min(20, take || 20));
   return {
     ...state,
     text: formatLedgerList(state.entries),
