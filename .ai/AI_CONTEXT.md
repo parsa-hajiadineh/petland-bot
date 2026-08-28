@@ -151,7 +151,8 @@ src/services/shopBlock.js           تعلیق ربات همکار و بازگر
 src/utils/smartSearch.js            نرمال‌سازی جستجوی فارسی
 src/utils/price.js                  قیمت + setAdminRetailView برای تست خرد ادمین
 src/services/receiptCleanup.js      پاکسازی رسید پرداخت (نه عکس کالا)
-src/services/scheduler.js         یادآوری طلایی/اشتراک/فاکتور خدمات
+src/services/scheduler.js         کرون ساعتی → Motivation Engine + پاکسازی رسید
+src/services/motivation/          نوتیف هوشمند همکار (قوانین زنده، نه متن ثابت)
 src/services/servicePackages.js   جدول و seed پکیج خدمات
 src/services/tenantSubscriptions.js اشتراک مستقل همکار + lifecycle
 src/handlers/adminServices.js     CRUD پکیج + فاکتور خدمات همکاران (زیرمنو + sinv:)
@@ -173,6 +174,8 @@ src/database/selects.js           select صریح؛ Order.tenantId / Product.ten
 تایید فاکتور خدمات مادر: «فاکتور خدمات همکاران» (`sinv:` تایید/رد). با `approveOrder` قاطی نشود. رسید خدمات با توکن مادر به ادمین مادر می‌رسد نه ربات تننت.
 
 کمپین طلایی: رسید داخل پنجره زنده = سهم تا سقف تنظیم‌شده با درصد ویژهٔ فعلی؛ مازاد و رسید بعد از پنجره = درصد عادی فعلی. تایید دیر ادمین پنجره را خراب نمی‌کند. روی `Order` ستون نساز. ادمین مادر هم اعتبار همکار می‌گیرد.
+
+Motivation Engine: نوتیف همکار از قوانین زنده است (`src/services/motivation`). کرون ساعتی + بعد از اعتبار خرید `PL-` + بعد از تایید فاکتور خدمات. در هر تیک حداکثر یک پیام برنده (اولویت). متن با عدد واقعی: مانده سقف طلایی، روز اشتراک، موجودی اعتبار، خرید لازم تا تمدید. ساعت سکوت تهران ۲۳–۸ مگر فوریت. سقف تکرار ۱۲ ساعت (کرون) / ۴ ساعت (رویداد). جدول همان `ColleagueNotice`.
 
 انواع دفتر: `GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `CREDIT_RESERVE` رزرو، `CREDIT_RELEASE` آزادسازی رزرو، `SERVICE_PAYMENT` مصرف قطعی، `REFUND` بازگشت اعتبار.
 

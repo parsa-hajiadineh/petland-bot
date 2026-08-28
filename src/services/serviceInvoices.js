@@ -364,6 +364,16 @@ async function approveInvoice(id) {
   } catch (err) {
     console.error("SERVICE INVOICE SUBSCRIPTION SKIP:", err.message);
   }
+  if (invoice?.userId) {
+    require("./motivation")
+      .nudgeColleague({
+        userId: invoice.userId,
+        tenantId: invoice.tenantId || null,
+        trigger: "invoice_approved",
+        extra: { invoiceId: invoice.id },
+      })
+      .catch((err) => console.error("MOTIVATION AFTER INVOICE:", err.message));
+  }
   return invoice;
 }
 

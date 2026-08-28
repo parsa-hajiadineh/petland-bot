@@ -475,6 +475,16 @@ async function grantPurchaseCredit(order, actorUserId, options = {}) {
         console.error("GOLDEN CREDIT NOTIFY SKIP:", err.message);
       }
     }
+    if (totalCredit > 0) {
+      require("./motivation")
+        .nudgeColleague({
+          userId: order.userId,
+          tenantId: tenant?.id || null,
+          trigger: "credit_granted",
+          extra: { orderId: order.id },
+        })
+        .catch((err) => console.error("MOTIVATION AFTER CREDIT:", err.message));
+    }
     return { created, totalCredit, goldenBase, standardBase };
   } catch (err) {
     console.error("GOLDEN CREDIT GRANT:", err);
