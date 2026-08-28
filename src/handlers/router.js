@@ -115,7 +115,7 @@ module.exports = async function messageHandler(message, user) {
     await reply(
       user,
       chatId,
-      "🔍 نام یا بخشی از نام محصول مورد نظرت را بنویس:",
+      "🔍 نام، برند، کد یا حتی بخشی از نام محصول را بنویسید:",
       kb([[{ text: BTN.BACK_MAIN }]])
     );
     return;

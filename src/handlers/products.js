@@ -12,6 +12,7 @@ const {
   subMenuKb,
 } = require("../keyboards/menus");
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
+const { sqlCompact, buildAndLikes, scoreText } = require("../utils/smartSearch");
 const { isMother } = require("../bot/context");
 
 const PRODUCT_LIST_SELECT = {
@@ -561,22 +562,44 @@ module.exports.backToProductList = async function backToProductList(user, chatId
 
 module.exports.handleSearch = async function handleSearch(user, chatId, query) {
   const term = (query || "").trim();
-  if (!term || term.length < 2) {
-    await reply(user, chatId, "⚠️ حداقل ۲ حرف وارد کن.", kb([[{ text: BTN.BACK_MAIN }]]));
+  if (!term) {
+    await reply(user, chatId, "⚠️ عبارتی برای جستجو بنویسید.", kb([[{ text: BTN.BACK_MAIN }]]));
     return;
   }
 
-  let products;
+  let products = [];
   try {
-    products = await prisma.product.findMany({
-      where: motherCatalogWhere({
-        title: { contains: term, mode: "insensitive" },
-        status: "AVAILABLE",
-      }),
-      orderBy: { title: "asc" },
-      take: 30,
-      select: PRODUCT_LIST_SELECT,
-    });
+    const like = buildAndLikes(
+      sqlCompact(`concat_ws(' ', p."title", p."code", p."brand", p."description", c."title")`),
+      term
+    );
+    if (like) {
+      const motherId = getMotherTenantId();
+      const tenantSql = motherId
+        ? `(p."tenantId" IS NULL OR p."tenantId" = $${like.params.length + 1})`
+        : `p."tenantId" IS NULL`;
+      const params = motherId ? [...like.params, motherId] : like.params;
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT p."id", p."code", p."title", p."costPrice", p."profitPercent", p."status", p."brand"
+         FROM "Product" p
+         LEFT JOIN "Category" c ON c."id" = p."categoryId"
+         WHERE p."status" = 'AVAILABLE'
+           AND ${tenantSql}
+           AND ${like.sql}
+         LIMIT 80`,
+        ...params
+      );
+      products = (rows || [])
+        .map((row) => ({
+          ...row,
+          _score: scoreText(
+            `${row.title || ""} ${row.code || ""} ${row.brand || ""}`,
+            term
+          ),
+        }))
+        .sort((a, b) => b._score - a._score)
+        .slice(0, 30);
+    }
   } catch (err) {
     console.error("SEARCH PRODUCTS QUERY:", err);
     await reply(

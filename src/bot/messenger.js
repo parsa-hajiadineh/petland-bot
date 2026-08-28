@@ -63,16 +63,19 @@ async function notifyMother(chatId, text) {
   return bale.sendMessage(chatId, text, {}, BOT_TOKEN);
 }
 
-async function getShopBotToken(tenantId) {
+async function getShopBotToken(tenantId, options = {}) {
   if (!tenantId) return null;
+  const liveOnly = Boolean(options.liveOnly);
   let payload = null;
   try {
     if (prisma.bot?.findUnique) {
       const bot = await prisma.bot.findUnique({
         where: { tenantId },
-        select: { token: true },
+        select: { token: true, isEnabled: true, status: true },
       });
-      payload = bot?.token || null;
+      if (bot && (!liveOnly || (bot.isEnabled && bot.status === "ACTIVE"))) {
+        payload = bot.token || null;
+      }
     }
   } catch (err) {
     console.error("SHOP BOT TOKEN PRISMA SKIP:", err.message);
@@ -80,7 +83,9 @@ async function getShopBotToken(tenantId) {
   if (!payload) {
     try {
       const rows = await prisma.$queryRawUnsafe(
-        `SELECT "token" FROM "Bot" WHERE "tenantId" = $1 LIMIT 1`,
+        liveOnly
+          ? `SELECT "token" FROM "Bot" WHERE "tenantId" = $1 AND "isEnabled" = true AND "status" = 'ACTIVE' LIMIT 1`
+          : `SELECT "token" FROM "Bot" WHERE "tenantId" = $1 LIMIT 1`,
         tenantId
       );
       payload = rows?.[0]?.token || null;
@@ -98,8 +103,11 @@ async function getShopBotToken(tenantId) {
 }
 
 async function notifyShop(chatId, text, tenantId) {
-  const token = await getShopBotToken(tenantId);
-  if (token) return bale.sendMessage(chatId, text, {}, token);
+  const token = await getShopBotToken(tenantId, { liveOnly: true });
+  if (token) {
+    const result = await bale.sendMessage(chatId, text, {}, token);
+    if (result?.ok) return result;
+  }
   return notifyMother(chatId, text);
 }
 

@@ -230,6 +230,7 @@ async function runDaily() {
   const now = new Date();
   await tickSubscriptions(now);
   await tickInvoices(now);
+  await require("./receiptCleanup").purgeExpiredReceipts();
 }
 
 async function tick() {

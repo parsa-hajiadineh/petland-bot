@@ -76,6 +76,10 @@ async function ensureInner() {
     `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "receiptImage" TEXT`
   );
   await execSql(
+    "SERVICE INVOICE RECEIPT AT COL SKIP:",
+    `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "receiptUploadedAt" TIMESTAMP(3)`
+  );
+  await execSql(
     "SERVICE INVOICE REJECT REASON COL SKIP:",
     `ALTER TABLE "ServiceInvoice" ADD COLUMN IF NOT EXISTS "rejectReason" TEXT`
   );
@@ -365,20 +369,12 @@ async function approveInvoice(id) {
 
 async function markWaitingApproval(id, receiptImage) {
   await ensureServiceInvoices();
-  if (hasInvoiceModel()) {
-    try {
-      return await prisma.serviceInvoice.update({
-        where: { id },
-        data: { status: "WAITING_APPROVAL", receiptImage: receiptImage || null },
-        include: { items: true },
-      });
-    } catch (err) {
-      console.error("SERVICE INVOICE RECEIPT PRISMA SKIP:", err.message);
-    }
-  }
   await prisma.$executeRawUnsafe(
     `UPDATE "ServiceInvoice"
-     SET "status" = 'WAITING_APPROVAL', "receiptImage" = $2, "updatedAt" = CURRENT_TIMESTAMP
+     SET "status" = 'WAITING_APPROVAL',
+         "receiptImage" = $2,
+         "receiptUploadedAt" = CURRENT_TIMESTAMP,
+         "updatedAt" = CURRENT_TIMESTAMP
      WHERE "id" = $1`,
     id,
     receiptImage || null

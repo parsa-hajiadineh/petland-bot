@@ -686,6 +686,12 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
     return false;
   }
 
+  await require("../services/goldenCampaign")
+    .recordReceiptUpload(order.id)
+    .catch((err) => {
+      console.error("TENANT RECEIPT TIME SKIP:", err.message);
+    });
+
   await prisma.user.update({
     where: { id: user.id },
     data: { orderStep: null, pendingOrderId: null },

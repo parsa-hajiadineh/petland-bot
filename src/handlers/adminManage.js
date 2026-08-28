@@ -13,6 +13,7 @@ const shopBlock = require("../services/shopBlock");
 const subscriptions = require("../services/tenantSubscriptions");
 const creditLedger = require("../services/creditLedger");
 const campaign = require("../services/goldenCampaign");
+const { sqlCompact, buildAndLikes, scoreText } = require("../utils/smartSearch");
 
 const STEP_HUB = "MGR:HUB";
 const STEP_LIST = "MGR:LIST";
@@ -75,36 +76,6 @@ function faDate(value) {
   }
 }
 
-function foldDigits(text) {
-  const map = {
-    "۰": "0",
-    "۱": "1",
-    "۲": "2",
-    "۳": "3",
-    "۴": "4",
-    "۵": "5",
-    "۶": "6",
-    "۷": "7",
-    "۸": "8",
-    "۹": "9",
-    "٠": "0",
-    "١": "1",
-    "٢": "2",
-    "٣": "3",
-    "٤": "4",
-    "٥": "5",
-    "٦": "6",
-    "٧": "7",
-    "٨": "8",
-    "٩": "9",
-  };
-  return String(text || "").replace(/[۰-۹٠-٩]/g, (d) => map[d] || d);
-}
-
-function likePattern(query) {
-  return `%${foldDigits(query).replace(/[%_]/g, " ").trim()}%`;
-}
-
 async function setStep(user, step, extras = {}) {
   await prisma.user.update({
     where: { id: user.id },
@@ -133,65 +104,41 @@ async function showHub(user, chatId) {
 }
 
 async function searchPeople(query) {
-  const pattern = likePattern(query);
-  if (pattern === "%%") return [];
-  const raw = String(query || "").trim();
-  const folded = foldDigits(raw);
+  const like = buildAndLikes(
+    sqlCompact(`concat_ws(' ',
+      u."fullName", u."phone", u."baleId", u."id",
+      c."fullName", c."phone", c."shopName",
+      t."name", t."ownerName", t."phone", t."nationalId", t."pageName",
+      s."shopName", s."supportPhone", s."shopAddress",
+      a."fullName", a."phone", a."address",
+      o."fullName", o."phone"
+    )`),
+    query
+  );
+  if (!like) return [];
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT DISTINCT u."id"
+      `SELECT DISTINCT u."id", u."fullName", u."phone", u."baleId", u."role"
        FROM "User" u
        LEFT JOIN "Customer" c ON c."userId" = u."id"
        LEFT JOIN "Tenant" t ON t."ownerUserId" = u."id"
        LEFT JOIN "TenantSettings" s ON s."tenantId" = t."id"
        LEFT JOIN "SavedAddress" a ON a."userId" = u."id"
        LEFT JOIN "Order" o ON o."userId" = u."id"
-       WHERE u."fullName" ILIKE $1
-          OR u."phone" ILIKE $1
-          OR u."phone" ILIKE $2
-          OR u."baleId" ILIKE $1
-          OR u."baleId" = $3
-          OR u."id" = $3
-          OR c."fullName" ILIKE $1
-          OR c."phone" ILIKE $1
-          OR c."phone" ILIKE $2
-          OR c."shopName" ILIKE $1
-          OR t."name" ILIKE $1
-          OR t."ownerName" ILIKE $1
-          OR t."phone" ILIKE $1
-          OR t."phone" ILIKE $2
-          OR t."nationalId" ILIKE $1
-          OR t."pageName" ILIKE $1
-          OR s."shopName" ILIKE $1
-          OR s."supportPhone" ILIKE $1
-          OR s."shopAddress" ILIKE $1
-          OR a."fullName" ILIKE $1
-          OR a."phone" ILIKE $1
-          OR a."phone" ILIKE $2
-          OR a."address" ILIKE $1
-          OR o."fullName" ILIKE $1
-          OR o."phone" ILIKE $1
-          OR o."phone" ILIKE $2
-       LIMIT 50`,
-      pattern,
-      `%${folded}%`,
-      folded
+       WHERE ${like.sql}
+       LIMIT 80`,
+      ...like.params
     );
-    const ids = (rows || []).map((row) => row.id).filter(Boolean);
-    if (!ids.length) return [];
-    const users = await prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: {
-        id: true,
-        baleId: true,
-        fullName: true,
-        phone: true,
-        role: true,
-      },
-    });
-    const order = new Map(ids.map((id, i) => [id, i]));
-    users.sort((a, b) => (order.get(a.id) || 0) - (order.get(b.id) || 0));
-    return users;
+    return (rows || [])
+      .map((row) => ({
+        ...row,
+        _score: scoreText(
+          `${row.fullName || ""} ${row.phone || ""} ${row.baleId || ""}`,
+          query
+        ),
+      }))
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 50);
   } catch (err) {
     console.error("ADMIN MANAGE SEARCH:", err.message);
     return [];

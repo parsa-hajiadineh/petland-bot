@@ -339,14 +339,15 @@ async function showCategories(user, chatId, tenantId) {
   await reply(
     user,
     chatId,
-    `📂 دسته‌بندی‌های فروشگاه\n\n${lines.join("\n")}\n\nبرای حذف، روی دکمه همان دسته بزنید.`,
+    `📂 دسته‌بندی‌های فروشگاه\n\n${lines.join("\n")}\n\n✏️ تغییر نام یا 🗑 حذف را از دکمه‌های زیر بزنید.`,
     tenantCategoriesMenu()
   );
   const { sendKeyboard } = require("../bot/bale");
   const rows = cats.map((c) => [
-    { text: `🗑 ${c.title}`, callback_data: `tcd:${c.id}`.slice(0, 64) },
+    { text: `✏️ ${c.title}`.slice(0, 32), callback_data: `tcr:${c.id}`.slice(0, 64) },
+    { text: `🗑 ${c.title}`.slice(0, 32), callback_data: `tcd:${c.id}`.slice(0, 64) },
   ]);
-  await sendKeyboard(chatId, "حذف دسته:", inlineKb(rows.slice(0, 30)));
+  await sendKeyboard(chatId, "تغییر نام یا حذف دسته:", inlineKb(rows.slice(0, 15)));
 }
 
 async function findOrCreateCategory(tenantId, title) {
@@ -700,6 +701,13 @@ async function handleAdminText(user, chatId, text) {
       return true;
     }
     if (
+      user.adminStep === "TS:CAT_NEW" ||
+      user.adminStep === "TS:CAT_RENAME"
+    ) {
+      await showCategories(user, chatId, tenantId);
+      return true;
+    }
+    if (
       user.adminStep === "TS:PROFILE" ||
       user.adminStep === "TS:BANK" ||
       user.adminStep === "TS:CATS" ||
@@ -897,6 +905,41 @@ async function handleAdminText(user, chatId, text) {
     return true;
   }
 
+  if (user.adminStep === "TS:CAT_RENAME" && user.pendingOrderId) {
+    const name = String(text || "").trim();
+    if (!name) {
+      await reply(user, chatId, "نام دسته را بفرستید.", kb([[{ text: BTN.BACK_PRODUCT_LIST }]]));
+      return true;
+    }
+    try {
+      const cat = await prisma.category.findUnique({
+        where: { id: user.pendingOrderId },
+      });
+      const owned =
+        cat &&
+        (cat.tenantId === tenantId ||
+          (!cat.tenantId &&
+            (await prisma.product.count({
+              where: { tenantId, categoryId: cat.id },
+            })) > 0));
+      if (!owned) {
+        await reply(user, chatId, "این دسته پیدا نشد.");
+        await showCategories(user, chatId, tenantId);
+        return true;
+      }
+      await prisma.category.update({
+        where: { id: cat.id },
+        data: { title: name },
+      });
+      await reply(user, chatId, `✅ نام دسته به «${name}» تغییر کرد.`);
+    } catch (err) {
+      console.error("CATEGORY RENAME:", err.message);
+      await reply(user, chatId, "تغییر نام دسته ممکن نشد.");
+    }
+    await showCategories(user, chatId, tenantId);
+    return true;
+  }
+
   if (user.adminStep === "TS:P_TITLE") {
     await prisma.user.update({
       where: { id: user.id },
@@ -1078,6 +1121,31 @@ async function handleAdminCallback(user, chatId, data) {
   const ctx = getBotContext();
   const tenantId = ctx.tenantId;
   if (!(await isShopOwner(user, tenantId))) return false;
+
+  if (data.startsWith("tcr:")) {
+    const categoryId = data.slice(4);
+    const cat = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+    const owned =
+      cat &&
+      (cat.tenantId === tenantId ||
+        (!cat.tenantId &&
+          (await prisma.product.count({ where: { tenantId, categoryId: cat.id } })) > 0));
+    if (!owned) {
+      await reply(user, chatId, "این دسته پیدا نشد.", tenantCategoriesMenu());
+      return true;
+    }
+    await setStep(user, "TS:CAT_RENAME", { pendingOrderId: categoryId });
+    user.pendingOrderId = categoryId;
+    await reply(
+      user,
+      chatId,
+      `نام جدید دسته «${cat.title}» را بفرستید:`,
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
+    return true;
+  }
 
   if (data.startsWith("tcd:")) {
     const categoryId = data.slice(4);
