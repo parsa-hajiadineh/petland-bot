@@ -9,7 +9,6 @@ const PRODUCT_SAFE_SELECT = {
   status: true,
   brand: true,
   categoryId: true,
-  tenantId: true,
 };
 
 const ORDER_SAFE_SELECT = {
@@ -31,8 +30,6 @@ const ORDER_SAFE_SELECT = {
   createdAt: true,
   updatedAt: true,
   userId: true,
-  tenantId: true,
-  botId: true,
 };
 
 const ORDER_WITH_ITEMS_SELECT = {

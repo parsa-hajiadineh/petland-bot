@@ -438,7 +438,12 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
       where: { userId: user.id, trackingCode: { startsWith: "PL-" } },
       orderBy: { createdAt: "desc" },
       take: 10,
-      select: ORDER_WITH_ITEMS_SELECT,
+      select: {
+        id: true,
+        trackingCode: true,
+        status: true,
+        totalAmount: true,
+      },
     });
   } catch (err) {
     console.error("SHOW MY ORDERS:", err);

@@ -135,13 +135,10 @@ function tsOrderQueries(whereExtra) {
 }
 
 async function findTsOrders(whereExtra, select, take = 20, skip = 0) {
-  const { queries, tenantId } = tsOrderQueries(whereExtra);
+  const { queries } = tsOrderQueries(whereExtra);
   if (!queries.length) return [];
   let lastErr;
-  let scopedOk = false;
   for (let i = 0; i < queries.length; i++) {
-    const isLast = i === queries.length - 1;
-    if (isLast && scopedOk && tenantId) return [];
     try {
       const rows = await prisma.order.findMany({
         where: queries[i],
@@ -150,8 +147,7 @@ async function findTsOrders(whereExtra, select, take = 20, skip = 0) {
         skip,
         select,
       });
-      if (!isLast) scopedOk = true;
-      if (rows.length || isLast) return rows;
+      if (rows.length || i === queries.length - 1) return rows;
     } catch (err) {
       lastErr = err;
       console.error("TENANT ORDERS QUERY SKIP:", err.message);
@@ -205,6 +201,18 @@ async function createTenantOrder(user, data, retries = 4) {
       });
     } catch (err) {
       lastErr = err;
+      const msg = String(err.message || "");
+      if (payload.botId && /column|does not exist|Unknown arg/i.test(msg)) {
+        try {
+          const { botId, ...withoutBot } = payload;
+          return await prisma.order.create({
+            data: withoutBot,
+            select: ORDER_WITH_ITEMS_SELECT,
+          });
+        } catch (err2) {
+          lastErr = err2;
+        }
+      }
     }
   }
   throw lastErr;
@@ -721,7 +729,12 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
   try {
     orders = await findTsOrders(
       { userId: user.id },
-      ORDER_WITH_ITEMS_SELECT,
+      {
+        id: true,
+        trackingCode: true,
+        status: true,
+        totalAmount: true,
+      },
       10
     );
   } catch (err) {
@@ -808,12 +821,6 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   return true;
 };
 
-function orderBelongsToShop(order, tenantId) {
-  if (!order || !tenantId) return false;
-  if (order.tenantId) return order.tenantId === tenantId;
-  return (order.items || []).some((item) => item.product?.tenantId === tenantId);
-}
-
 async function loadShopOrder(orderId, tenantId) {
   if (!orderId || !tenantId) return null;
   try {
@@ -824,8 +831,7 @@ async function loadShopOrder(orderId, tenantId) {
         user: { select: { fullName: true, baleId: true } },
       }
     );
-    if (!orderBelongsToShop(order, tenantId)) return null;
-    return order;
+    return order || null;
   } catch (err) {
     console.error("LOAD SHOP ORDER:", err.message);
     return null;

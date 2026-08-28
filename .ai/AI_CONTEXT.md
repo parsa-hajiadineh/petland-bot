@@ -91,9 +91,10 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 هدف: فروشگاه A هیچ‌وقت سفارش، فاکتور، کالا، دسته، سبد، یا اعتبار فروشگاه B (یا کاتالوگ مادر) را نخواند و ننویسد.
 
 ### سفارش TS-
-- `tsOrderQueries` فقط با `ctx.tenantId`. بدون tenantId = هیچ ردیفی. کوئری بدون scope (فقط `TS-`) ممنوع.
-- سفارش قدیمی `tenantId=null`: فقط اگر آیتم‌هایش کالای همین فروشگاه باشد.
-- `createTenantOrder` بدون `tenantId` ساخته نمی‌شود (fallback حذف tenantId ممنوع).
+- `tsOrderQueries` فقط با `ctx.tenantId` در **where**. بدون tenantId = هیچ ردیفی. کوئری بدون scope (فقط `TS-`) ممنوع.
+- روی `ORDER_SAFE_SELECT` / `PRODUCT_SAFE_SELECT` فیلد `tenantId` یا `botId` نگذار؛ جدول `Order` را موقع استارت ALTER نمی‌کنیم و select اضافه سفارش‌های مادر و تننت را می‌خواباند. ایزوله از where است نه از select.
+- سفارش قدیمی `tenantId=null`: اگر آیتم‌هایش کالای همین فروشگاه باشد در لیست می‌آید (کوئری دوم).
+- `createTenantOrder` بدون `tenantId` ساخته نمی‌شود. `botId` اگر ستون نباشد حذف می‌شود، `tenantId` نه.
 - پیگیری مشتری (`showOrderByTracking`) با `findTsOrder` + `userId` + همین tenant.
 - لیست/جزئیات مالک (`tcld:` / `tord:`) فقط `isShopOwner`. مشتری از callback کد `TS-...` استفاده می‌کند نه `tord:`.
 - تغییر وضعیت مالک فقط بعد از `loadShopOrder(id, tenantId)`.
