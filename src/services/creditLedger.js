@@ -625,18 +625,9 @@ async function refundReserve({ userId, tenantId, invoiceId, createdByUserId, not
 
 async function usedGoldenBase(walletId, excludeOrderId) {
   const rows = await listTransactions(walletId, 500);
-  const reversedIds = new Set();
-  for (const row of rows) {
-    if (row.type !== CREDIT_TYPE.REFUND) continue;
-    const meta = parseMetadata(row.metadata);
-    if (meta.reversesTransactionId) {
-      reversedIds.add(String(meta.reversesTransactionId));
-    }
-  }
   let used = 0;
   for (const row of rows) {
     if (row.type !== CREDIT_TYPE.GOLDEN_REWARD) continue;
-    if (reversedIds.has(String(row.id))) continue;
     const meta = parseMetadata(row.metadata);
     if (
       excludeOrderId &&
@@ -652,48 +643,6 @@ async function usedGoldenBase(walletId, excludeOrderId) {
     used += Math.floor(Number(row.amount || 0) / 5);
   }
   return used;
-}
-
-const REF_ORDER = "Order";
-const REF_TX = "CreditTransaction";
-
-async function reverseOrderRewards({ order, actorUserId, reason }) {
-  if (!order?.id || !order.userId) return [];
-  if (order.tenantId) return [];
-  if (!String(order.trackingCode || "").startsWith("PL-")) return [];
-  const wallet = await getOrCreateWallet({ userId: order.userId });
-  if (!wallet) return [];
-  const rewards = (await listByReference(wallet.id, REF_ORDER, order.id)).filter(
-    (row) =>
-      row.type === CREDIT_TYPE.GOLDEN_REWARD ||
-      row.type === CREDIT_TYPE.PURCHASE_REWARD
-  );
-  const out = [];
-  for (const reward of rewards) {
-    const amount = Math.abs(Math.trunc(Number(reward.amount || 0)));
-    if (!amount) continue;
-    out.push(
-      await appendTransaction({
-        userId: order.userId,
-        amount: -amount,
-        type: CREDIT_TYPE.REFUND,
-        title: "برگشت پاداش سفارش",
-        note: reason || null,
-        referenceType: REF_TX,
-        referenceId: reward.id,
-        createdByUserId: actorUserId || null,
-        reason: reason || "order_rejected",
-        metadata: {
-          reversesTransactionId: reward.id,
-          orderId: order.id,
-          trackingCode: order.trackingCode,
-          originalType: reward.type,
-          originalAmount: reward.amount,
-        },
-      })
-    );
-  }
-  return out;
 }
 
 function formatWalletHome(balance) {
@@ -769,7 +718,6 @@ module.exports = {
   usedGoldenBase,
   parseMetadata,
   appendTransaction,
-  reverseOrderRewards,
   reserveForInvoice,
   consumeReserve,
   refundReserve,

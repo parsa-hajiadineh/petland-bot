@@ -179,7 +179,7 @@ Motivation Engine: نوتیف همکار از قوانین زنده است (`src
 
 انواع دفتر: `GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `CREDIT_RESERVE` رزرو، `CREDIT_RELEASE` آزادسازی رزرو، `SERVICE_PAYMENT` مصرف قطعی، `REFUND` بازگشت اعتبار.
 
-یکتایی مالی: ایندکس یکتا روی `(walletId, type, referenceType, referenceId)` تا هر سفارش/فاکتور برای هر نوع تراکنش فقط یک ردیف بسازد. تایید سفارش `PL-` فقط از `WAITING_APPROVAL` با `updateMany`؛ کلیک دوم اعتبار و پورسانت نمی‌سازد. رد بعد از تایید، `REFUND` منفی لینک‌شده به تراکنش اصلی (`reversesTransactionId`) می‌زند نه مبلغ جدا. تایید/رد فاکتور خدمات هم فقط از وضعیت باز. جدول `FinancialAudit`: who / what / when / before / after / reason. ردیف دفتر را UPDATE/DELETE نکن.
+یکتایی مالی: ایندکس یکتا روی `(walletId, type, referenceType, referenceId)` تا هر سفارش/فاکتور برای هر نوع تراکنش فقط یک ردیف بسازد. تایید سفارش `PL-` فقط از `WAITING_APPROVAL` با `updateMany`؛ کلیک دوم اعتبار و پورسانت نمی‌سازد. پورسانت بازاریابی فقط همان لحظهٔ تایید است نه ثبت سفارش. بعد از تایید سفارش کالا کنسل نمی‌شود؛ پاداش برنمی‌گردد. رد فقط قبل از تایید (`WAITING_APPROVAL`). تایید/رد فاکتور خدمات هم فقط از وضعیت باز؛ رد فاکتور خدمات رزرو اعتبار را آزاد می‌کند (`REFUND`). جدول `FinancialAudit`: who / what / when / before / after / reason. ردیف دفتر را UPDATE/DELETE نکن.
 
 ---
 

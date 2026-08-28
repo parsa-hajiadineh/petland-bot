@@ -549,7 +549,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
       const moved = await prisma.order.updateMany({
         where: {
           id: orderId,
-          status: { in: ["WAITING_APPROVAL", "PACKAGING", "APPROVED"] },
+          status: "WAITING_APPROVAL",
         },
         data: {
           status: "REJECTED",
@@ -574,16 +574,6 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
         where: { id: user.id },
         data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
       });
-
-      await require("../services/creditLedger")
-        .reverseOrderRewards({
-          order,
-          actorUserId: user.id,
-          reason: text,
-        })
-        .catch((err) => {
-          console.error("CREDIT REVERSE SKIP:", err.message);
-        });
 
       await notifyOrderStatus(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
       await reply(user, chatId, "فاکتور رد شد.", adminInvoicesMenu());
