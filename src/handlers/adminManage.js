@@ -618,4 +618,5 @@ module.exports = {
   handleCallback,
   goBack,
   showHub,
+  searchPeople,
 };

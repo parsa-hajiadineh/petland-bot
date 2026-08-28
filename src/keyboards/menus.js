@@ -155,6 +155,15 @@ const BTN = {
   TICKET_OPEN: "📭 پاسخ داده نشده",
   TICKET_ANSWERED: "📬 پاسخ داده شده",
   TICKET_SEARCH: "🔍 جستجوی تیکت",
+  TICKET_BROADCAST: "✉️ ارسال پیام",
+  BC_MOTHER: "👤 مشتری‌های ربات مادر",
+  BC_COLLEAGUES: "🤝 همکاران",
+  BC_SHOP: "🏪 مشتری یک همکار",
+  BC_ALL_CUST: "🌐 مشتری همه ربات‌ها",
+  BC_ALL_USERS: "👥 تمام کاربرها",
+  BC_MANUAL: "🎯 نفر / لیست دستی",
+  BC_DONE_PICK: "✅ ادامه و نوشتن پیام",
+  BC_CONFIRM: "✅ ارسال پیام",
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",
   ADMIN_WITHDRAWALS: "💸 درخواست‌های پورسانت",
   ADMIN_SALES: "📊 آمار فروش",
@@ -478,7 +487,8 @@ function adminApprovedActions() {
 function adminTicketsMenu() {
   return kb([
     [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
-    [{ text: BTN.TICKET_SEARCH }, { text: BTN.BACK_PRODUCT_LIST }],
+    [{ text: BTN.TICKET_SEARCH }, { text: BTN.TICKET_BROADCAST }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 

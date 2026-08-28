@@ -22,121 +22,40 @@ const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
 const adminManage = require("./adminManage");
-
-// ─── Sales Stats Helpers ─────────────────────────────────────────────────────
-
-function toYearMonth(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function formatMonthLabel(yearMonth) {
-  const [year, month] = yearMonth.split("-").map(Number);
-  const date = new Date(year, month - 1, 1);
-  return date.toLocaleDateString("fa-IR", { year: "numeric", month: "long" });
-}
-
-async function calcMonthStats(yearMonth) {
-  const [year, month] = yearMonth.split("-").map(Number);
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 1);
-
-  const orders = await prisma.order.findMany({
-    where: {
-      createdAt: { gte: start, lt: end },
-      status: { in: ["APPROVED", "PACKAGING", "SHIPPED", "DELIVERED"] },
-      trackingCode: { startsWith: "PL-" },
-    },
-    select: {
-      totalAmount: true,
-      user: { select: { referrerId: true } },
-      items: {
-        select: {
-          quantity: true,
-          unitPrice: true,
-          product: { select: { costPrice: true } },
-        },
-      },
-    },
-  });
-
-  let totalRevenue = 0;
-  let totalProfit = 0;
-  let totalCommission = 0;
-
-  for (const order of orders) {
-    totalRevenue += order.totalAmount;
-
-    for (const item of order.items) {
-      totalProfit += (item.unitPrice - item.product.costPrice) * item.quantity;
-    }
-
-    if (order.user?.referrerId) {
-      const commission = Math.floor(order.totalAmount * 0.05);
-      totalCommission += commission;
-    }
-  }
-
-  return { totalRevenue, totalProfit, totalCommission, orderCount: orders.length };
-}
-
-async function archiveOldMonths() {
-  const now = new Date();
-
-  // Archive past months (up to 6) that haven't been saved yet
-  for (let i = 1; i <= 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const ym = toYearMonth(d);
-
-    const existing = await prisma.monthlySalesReport.findUnique({
-      where: { yearMonth: ym },
-    });
-
-    if (!existing) {
-      const stats = await calcMonthStats(ym);
-      await prisma.monthlySalesReport.create({
-        data: { yearMonth: ym, ...stats },
-      });
-    }
-  }
-
-  // Delete reports older than 6 months
-  const cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-  const cutoffYM = toYearMonth(cutoffDate);
-  await prisma.monthlySalesReport.deleteMany({
-    where: { yearMonth: { lt: cutoffYM } },
-  });
-}
+const adminBroadcast = require("./adminBroadcast");
+const salesStats = require("../services/salesStats");
 
 async function showSalesStats(user, chatId) {
   try {
-    await archiveOldMonths();
-
-    const now = new Date();
-    const currentYM = toYearMonth(now);
-
-    const reports = await prisma.monthlySalesReport.findMany({
-      orderBy: { yearMonth: "desc" },
-      take: 6,
-    });
-
+    const currentYM = salesStats.toYearMonth(new Date());
+    const months = salesStats.lastMonths(12);
     const rows = [];
-
-    rows.push([{
-      text: `📊 ${formatMonthLabel(currentYM)} (جاری)`,
-      callback_data: `stats:${currentYM}:live`,
-    }]);
-
-    for (const r of reports) {
-      rows.push([{
-        text: `📅 ${formatMonthLabel(r.yearMonth)}`,
-        callback_data: `stats:${r.yearMonth}:arch`,
-      }]);
+    for (let i = 0; i < months.length; i += 2) {
+      const a = months[i];
+      const b = months[i + 1];
+      const row = [
+        {
+          text: a === currentYM
+            ? `📊 ${salesStats.formatMonthLabel(a)} (جاری)`
+            : `📅 ${salesStats.formatMonthLabel(a)}`,
+          callback_data: `stats:${a}:live`,
+        },
+      ];
+      if (b) {
+        row.push({
+          text: b === currentYM
+            ? `📊 ${salesStats.formatMonthLabel(b)} (جاری)`
+            : `📅 ${salesStats.formatMonthLabel(b)}`,
+          callback_data: `stats:${b}:live`,
+        });
+      }
+      rows.push(row);
     }
 
     await reply(
       user,
       chatId,
-      "📊 آمار فروش\n\nماه مورد نظر را انتخاب کنید:",
+      "📊 آمار فروش\n\nماه مورد نظر را انتخاب کنید (۱۲ ماه اخیر، به‌روز):",
       adminBackMenu()
     );
     await bale.sendKeyboard(chatId, "ماه مورد نظر را انتخاب کنید:", inlineKb(rows));
@@ -146,43 +65,15 @@ async function showSalesStats(user, chatId) {
   }
 }
 
-module.exports.showMonthStats = async function showMonthStats(
-  user,
-  chatId,
-  yearMonth,
-  isLive
-) {
+module.exports.showMonthStats = async function showMonthStats(user, chatId, yearMonth) {
   try {
-    let stats;
-
-    if (isLive) {
-      stats = await calcMonthStats(yearMonth);
-    } else {
-      const report = await prisma.monthlySalesReport.findUnique({
-        where: { yearMonth },
-      });
-      if (!report) {
-        await reply(user, chatId, "❌ آمار این ماه موجود نیست.", adminBackMenu());
-        return;
-      }
-      stats = report;
-    }
-
-    const label = formatMonthLabel(yearMonth);
-    const currentNote = isLive ? " (در جریان)" : "";
-
-    const netProfit = stats.totalProfit - stats.totalCommission;
-
-    const text = [
-      `📊 آمار فروش — ${label}${currentNote}`,
-      "━━━━━━━━━━━━━━━━━━",
-      `🛒 تعداد سفارشات: ${stats.orderCount}`,
-      `💰 حجم فروش: ${stats.totalRevenue.toLocaleString("fa-IR")} تومان`,
-      `📈 سود ناخالص: ${stats.totalProfit.toLocaleString("fa-IR")} تومان`,
-      `🎁 مجموع پورسانت: ${stats.totalCommission.toLocaleString("fa-IR")} تومان`,
-      `✅ سود خالص: ${netProfit.toLocaleString("fa-IR")} تومان`,
-    ].join("\n");
-
+    const currentYM = salesStats.toYearMonth(new Date());
+    const stats = await salesStats.calcMonthStats(yearMonth);
+    const text = salesStats.formatMonthReport(
+      yearMonth,
+      stats,
+      yearMonth === currentYM
+    );
     await reply(user, chatId, text, adminBackMenu());
   } catch (err) {
     console.error("MONTH STATS:", err);
@@ -336,6 +227,7 @@ async function goAdminBack(user, chatId) {
 
   if (await adminServices.goBack(user, chatId)) return true;
   if (await adminCreditSettings.goBack(user, chatId)) return true;
+  if (await adminBroadcast.goBack(user, chatId)) return true;
   if (await adminManage.goBack(user, chatId)) return true;
 
   await prisma.user.update({
@@ -455,6 +347,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (await adminServices.handleText(user, chatId, text)) return true;
   if (await adminCreditSettings.handleText(user, chatId, text)) return true;
   if (await adminManage.handleText(user, chatId, text)) return true;
+  if (await adminBroadcast.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);

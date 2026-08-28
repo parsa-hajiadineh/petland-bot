@@ -387,6 +387,17 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     return;
   }
 
+  if (
+    (data.startsWith("bcsh:") ||
+      data.startsWith("bcm:") ||
+      data.startsWith("bcu:") ||
+      data.startsWith("bcp:")) &&
+    isAdmin(user)
+  ) {
+    await require("./adminBroadcast").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (data.startsWith("PL-")) {
     const shown = await orderHandler.showOrderByTracking(user, chatId, data);
     if (!shown) {
@@ -473,10 +484,8 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
   }
 
   if (data.startsWith("stats:") && isAdmin(user)) {
-    const parts = data.split(":");
-    const yearMonth = parts[1];
-    const isLive = parts[2] === "live";
-    await adminHandler.showMonthStats(user, chatId, yearMonth, isLive);
+    const yearMonth = data.split(":")[1];
+    await adminHandler.showMonthStats(user, chatId, yearMonth);
     return;
   }
 
