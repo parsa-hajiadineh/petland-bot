@@ -27,6 +27,7 @@ app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   try {
     await engine.start();
+    require("./services/scheduler").start();
   } catch (err) {
     console.error("ENGINE START:", err);
   }

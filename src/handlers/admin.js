@@ -3,6 +3,8 @@ const prisma = require("../database/prisma");
 const { ORDER_WITH_ITEMS_SELECT } = require("../database/selects");
 const bale = require("../bot/bale");
 const { reply, notify, replyPhoto } = require("../bot/messenger");
+const partnerNotify = require("../services/partnerNotify");
+const { formatPrice } = require("../utils/price");
 const {
   BTN,
   adminMenu,
@@ -808,13 +810,20 @@ async function approveOrder(user, chatId) {
     return;
   }
 
-  await notifyOrderStatus(order, "✅ فاکتور تایید شد. در حال آماده‌سازی.");
-
-  await require("../services/goldenCampaign")
-    .grantPurchaseCredit(order, user.id)
+  const credit = await require("../services/goldenCampaign")
+    .grantPurchaseCredit(order, user.id, { silent: true })
     .catch((err) => {
       console.error("GOLDEN CREDIT APPROVE SKIP:", err.message);
+      return null;
     });
+  const creditAmount = Number(credit?.totalCredit || 0);
+  const statusMsg =
+    creditAmount > 0
+      ? `✅ سفارش شما تایید شد و این خرید ${formatPrice(
+          creditAmount
+        )} اعتبار به کیف پول شما اضافه کرد.`
+      : "✅ سفارش شما تایید شد و در حال آماده‌سازی است.";
+  await notifyOrderStatus(order, statusMsg);
 
   try {
     const pdfPath = await generateInvoicePdf(order, order.items);
@@ -833,7 +842,10 @@ async function approveOrder(user, chatId) {
   });
 
   if (owner) {
-    await notify(owner.baleId, buildInvoiceText(order, order.items));
+    await partnerNotify.notifyOrderBuyer(
+      order,
+      buildInvoiceText(order, order.items)
+    );
 
     if (owner.referrerId) {
       const commission = Math.floor(order.totalAmount * 0.05);

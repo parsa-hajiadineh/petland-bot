@@ -349,7 +349,7 @@ function splitBases({ orderAmount, receiptAt, period, alreadyGoldenBase }) {
   return { goldenBase, standardBase: amount - goldenBase };
 }
 
-async function grantPurchaseCredit(order, actorUserId) {
+async function grantPurchaseCredit(order, actorUserId, options = {}) {
   try {
     if (!order?.id || !order.userId) return null;
     if (order.tenantId) return null;
@@ -462,11 +462,13 @@ async function grantPurchaseCredit(order, actorUserId) {
     if (!created.length) return { created: [], totalCredit: 0 };
 
     const totalCredit = created.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    if (owner.baleId && totalCredit > 0) {
+    if (!options.silent && owner.baleId && totalCredit > 0) {
       try {
         await notifyShop(
           owner.baleId,
-          `✅ اعتبار خرید همکار به کیف پول اعتباری اضافه شد.\n\n🔖 ${order.trackingCode}\n💰 ${formatPrice(totalCredit)}\n\nجزئیات را در مدیریت فروشگاه → کیف پول اعتباری ببینید.`,
+          `✅ سفارش شما تایید شد و این خرید ${formatPrice(
+            totalCredit
+          )} اعتبار به کیف پول شما اضافه کرد.\n\n🔖 ${order.trackingCode}`,
           tenant?.id || null
         );
       } catch (err) {

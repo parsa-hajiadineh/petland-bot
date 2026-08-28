@@ -2,6 +2,7 @@ const prisma = require("../database/prisma");
 const { ORDER_WITH_ITEMS_SELECT, CART_ITEMS_SELECT } = require("../database/selects");
 const { ADMIN_BALE_IDS } = require("../config");
 const { reply, notify } = require("../bot/messenger");
+const partnerNotify = require("../services/partnerNotify");
 const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu } = require("../keyboards/menus");
 const bale = require("../bot/bale");
 const { validateCheckout } = require("./cart");
@@ -416,6 +417,17 @@ ${summary}
 🔖 ${order.trackingCode}`
   );
 
+  if (partnerNotify.isColleagueBuyer(user) || order.isWholesale) {
+    await partnerNotify
+      .notifyColleague(
+        user.id,
+        `📦 سفارش جدید شما ثبت شد.\n\n🔖 ${order.trackingCode}\nپس از تایید ادمین، نتیجه و اعتبار خرید (در صورت شمول) از همین ربات فروشگاه اعلام می‌شود.`
+      )
+      .catch((err) => {
+        console.error("PARTNER ORDER REGISTER SKIP:", err.message);
+      });
+  }
+
   return true;
 };
 
@@ -528,17 +540,9 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
 module.exports.notifyOrderStatus = notifyOrderStatus;
 
 async function notifyOrderStatus(order, message) {
-  const owner = await prisma.user.findUnique({
-    where: { id: order.userId },
-  });
-
-  if (!owner) return;
-
-  await notify(
-    owner.baleId,
-    `📢 ${message}
+  const text = `📢 ${message}
 
 🔖 ${order.trackingCode}
-📊 ${statusLabel(order.status)}`
-  );
+📊 ${statusLabel(order.status)}`;
+  await partnerNotify.notifyOrderBuyer(order, text);
 }
