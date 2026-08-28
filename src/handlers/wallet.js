@@ -129,20 +129,48 @@ module.exports.handleWithdrawalStep = async function handleWithdrawalStep(user, 
       return true;
     }
 
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { userId: user.id },
-        data: { balance: { decrement: amount } },
-      }),
-      prisma.withdrawal.create({
-        data: {
-          amount,
-          cardNumber: card,
-          cardHolder: holder,
-          walletId: wallet.id,
-        },
-      }),
-    ]);
+    const before = Number(wallet.balance || 0);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const moved = await tx.wallet.updateMany({
+          where: { userId: user.id, balance: { gte: amount } },
+          data: { balance: { decrement: amount } },
+        });
+        if (moved.count !== 1) {
+          throw new Error("WALLET_INSUFFICIENT");
+        }
+        await tx.withdrawal.create({
+          data: {
+            amount,
+            cardNumber: card,
+            cardHolder: holder,
+            walletId: wallet.id,
+          },
+        });
+      });
+    } catch (err) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { orderStep: null, tempDescription: null, tempProvince: null },
+      });
+      if (err.message === "WALLET_INSUFFICIENT") {
+        await reply(user, chatId, "❌ موجودی کافی نیست. عملیات لغو شد.", walletMenu());
+        return true;
+      }
+      console.error("WALLET WITHDRAW:", err);
+      await reply(user, chatId, "❌ ثبت درخواست ممکن نشد. دوباره تلاش کنید.", walletMenu());
+      return true;
+    }
+    await require("../services/financialAudit").logFinancial({
+      actorUserId: user.id,
+      action: "COMMISSION_WITHDRAW_REQUEST",
+      entityType: "Wallet",
+      entityId: wallet.id,
+      amount: -amount,
+      balanceBefore: before,
+      balanceAfter: before - amount,
+      reason: "withdrawal_request",
+    });
 
     await prisma.user.update({
       where: { id: user.id },

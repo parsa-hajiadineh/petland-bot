@@ -545,12 +545,28 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
   if (user.adminStep === "REJECT_REASON" && user.pendingOrderId) {
     try {
-      const order = await prisma.order.update({
-        where: { id: user.pendingOrderId },
+      const orderId = user.pendingOrderId;
+      const moved = await prisma.order.updateMany({
+        where: {
+          id: orderId,
+          status: { in: ["WAITING_APPROVAL", "PACKAGING", "APPROVED"] },
+        },
         data: {
           status: "REJECTED",
           rejectReason: text,
         },
+      });
+      if (moved.count !== 1) {
+        await reply(
+          user,
+          chatId,
+          "این فاکتور قابل رد نیست یا قبلاً پردازش شده.",
+          adminBackMenu()
+        );
+        return true;
+      }
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
         select: ORDER_WITH_ITEMS_SELECT,
       });
 
@@ -558,6 +574,16 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
         where: { id: user.id },
         data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
       });
+
+      await require("../services/creditLedger")
+        .reverseOrderRewards({
+          order,
+          actorUserId: user.id,
+          reason: text,
+        })
+        .catch((err) => {
+          console.error("CREDIT REVERSE SKIP:", err.message);
+        });
 
       await notifyOrderStatus(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
       await reply(user, chatId, "فاکتور رد شد.", adminInvoicesMenu());
@@ -569,11 +595,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (user.adminStep === "SHIP_INFO" && user.pendingOrderId) {
-    const order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
-      data: { status: "SHIPPED", shipmentInfo: text },
-      select: ORDER_WITH_ITEMS_SELECT,
-    });
+    const order = await claimShipOrder(user.pendingOrderId, text);
+    if (!order) {
+      await reply(user, chatId, "ارسال ثبت نشد؛ سفارش دیگر قابل ارسال نیست.", adminBackMenu());
+      return true;
+    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -586,11 +612,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (user.adminStep === "SHIP_SNAPP" && user.pendingOrderId) {
-    const order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
-      data: { status: "SHIPPED", shipmentInfo: `اسنپ | ${text}` },
-      select: ORDER_WITH_ITEMS_SELECT,
-    });
+    const order = await claimShipOrder(user.pendingOrderId, `اسنپ | ${text}`);
+    if (!order) {
+      await reply(user, chatId, "ارسال ثبت نشد؛ سفارش دیگر قابل ارسال نیست.", adminBackMenu());
+      return true;
+    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -603,11 +629,14 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (user.adminStep === "SHIP_POST" && user.pendingOrderId) {
-    const order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
-      data: { status: "SHIPPED", shipmentInfo: `پست | کد پیگیری: ${text}` },
-      select: ORDER_WITH_ITEMS_SELECT,
-    });
+    const order = await claimShipOrder(
+      user.pendingOrderId,
+      `پست | کد پیگیری: ${text}`
+    );
+    if (!order) {
+      await reply(user, chatId, "ارسال ثبت نشد؛ سفارش دیگر قابل ارسال نیست.", adminBackMenu());
+      return true;
+    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -621,6 +650,21 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
   return false;
 };
+
+async function claimShipOrder(orderId, shipmentInfo) {
+  const moved = await prisma.order.updateMany({
+    where: {
+      id: orderId,
+      status: { in: ["PACKAGING", "APPROVED"] },
+    },
+    data: { status: "SHIPPED", shipmentInfo },
+  });
+  if (moved.count !== 1) return null;
+  return prisma.order.findUnique({
+    where: { id: orderId },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+}
 
 async function showAdminOrderDetail(user, chatId, order) {
   await prisma.user.update({
@@ -650,15 +694,32 @@ async function showAdminOrderDetail(user, chatId, order) {
 }
 
 async function approveOrder(user, chatId) {
+  const orderId = user.pendingOrderId;
   let order;
   try {
-    order = await prisma.order.update({
-      where: { id: user.pendingOrderId },
+    const moved = await prisma.order.updateMany({
+      where: { id: orderId, status: "WAITING_APPROVAL" },
       data: { status: "PACKAGING" },
+    });
+    if (moved.count !== 1) {
+      await reply(
+        user,
+        chatId,
+        "این فاکتور قبلاً تایید شده یا قابل تایید نیست.",
+        adminBackMenu()
+      );
+      return;
+    }
+    order = await prisma.order.findUnique({
+      where: { id: orderId },
       select: ORDER_WITH_ITEMS_SELECT,
     });
   } catch (err) {
     console.error("ADMIN APPROVE:", err);
+    await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminOrderActions());
+    return;
+  }
+  if (!order) {
     await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminOrderActions());
     return;
   }
@@ -703,10 +764,22 @@ async function approveOrder(user, chatId) {
     if (owner.referrerId) {
       const commission = Math.floor(order.totalAmount * 0.05);
       if (commission > 0) {
-        await getOrCreateWallet(owner.referrerId);
+        const referrerWallet = await getOrCreateWallet(owner.referrerId);
+        const before = Number(referrerWallet?.balance || 0);
         await prisma.wallet.update({
           where: { userId: owner.referrerId },
           data: { balance: { increment: commission } },
+        });
+        await require("../services/financialAudit").logFinancial({
+          actorUserId: user.id,
+          action: "COMMISSION",
+          entityType: "Order",
+          entityId: order.id,
+          amount: commission,
+          balanceBefore: before,
+          balanceAfter: before + commission,
+          reason: "referral_commission_5pct",
+          detail: { trackingCode: order.trackingCode },
         });
 
         const referrer = await prisma.user.findUnique({
@@ -825,9 +898,26 @@ async function confirmWithdrawal(user, chatId, withdrawalId, trackingCode) {
     return;
   }
 
-  await prisma.withdrawal.update({
-    where: { id: withdrawalId },
+  const moved = await prisma.withdrawal.updateMany({
+    where: { id: withdrawalId, status: "PENDING" },
     data: { status: "PAID", trackingCode: trackingCode.trim() },
+  });
+  if (moved.count !== 1) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: null },
+    });
+    await reply(user, chatId, "این درخواست قبلاً تایید شده یا پیدا نشد.", adminBackMenu());
+    return;
+  }
+  await require("../services/financialAudit").logFinancial({
+    actorUserId: user.id,
+    action: "COMMISSION_WITHDRAW_PAID",
+    entityType: "Withdrawal",
+    entityId: withdrawalId,
+    amount: w.amount,
+    reason: "withdrawal_paid",
+    detail: { trackingCode: trackingCode.trim() },
   });
 
   await prisma.user.update({

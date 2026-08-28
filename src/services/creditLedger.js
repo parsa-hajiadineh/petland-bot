@@ -106,6 +106,12 @@ async function ensureInner() {
     `CREATE INDEX IF NOT EXISTS "CreditTransaction_reference_idx"
      ON "CreditTransaction"("referenceType", "referenceId")`
   );
+  await execSql(
+    "CREDIT TRANSACTION IDEMPOTENCY SKIP:",
+    `CREATE UNIQUE INDEX IF NOT EXISTS "CreditTransaction_idempotency_key"
+     ON "CreditTransaction" ("walletId", "type", "referenceType", "referenceId")
+     WHERE "referenceId" IS NOT NULL`
+  );
 }
 
 function mapWallet(row) {
@@ -331,6 +337,16 @@ async function listTransactions(walletId, take = 20) {
   return (rows || []).map(mapTransaction);
 }
 
+async function findIdempotentTx(walletId, type, referenceType, referenceId) {
+  if (!walletId || !referenceId || !type) return null;
+  const rows = await listByReference(walletId, referenceType, referenceId);
+  return rows.find((row) => row.type === type) || null;
+}
+
+function isUniqueError(err) {
+  return /unique|duplicate/i.test(String(err?.message || ""));
+}
+
 async function appendTransaction({
   tenantId,
   userId,
@@ -342,6 +358,7 @@ async function appendTransaction({
   referenceId,
   createdByUserId,
   metadata,
+  reason,
 }) {
   const n = Math.trunc(Number(amount));
   if (!Number.isFinite(n) || n === 0) {
@@ -349,6 +366,16 @@ async function appendTransaction({
   }
   const wallet = await getOrCreateWallet({ tenantId, userId });
   if (!wallet) throw new Error("CREDIT_WALLET_MISSING");
+  if (referenceId) {
+    const existing = await findIdempotentTx(
+      wallet.id,
+      type,
+      referenceType,
+      referenceId
+    );
+    if (existing) return existing;
+  }
+  const before = await getBalance(wallet.id);
   const row = {
     id: newId(),
     amount: n,
@@ -368,9 +395,10 @@ async function appendTransaction({
     walletId: wallet.id,
   };
 
+  let created = null;
   if (hasTransactionModel()) {
     try {
-      return mapTransaction(
+      created = mapTransaction(
         await prisma.creditTransaction.create({
           data: {
             amount: row.amount,
@@ -386,26 +414,67 @@ async function appendTransaction({
         })
       );
     } catch (err) {
+      if (isUniqueError(err) && referenceId) {
+        const dup = await findIdempotentTx(
+          wallet.id,
+          row.type,
+          row.referenceType,
+          row.referenceId
+        );
+        if (dup) return dup;
+      }
       console.error("CREDIT TX PRISMA SKIP:", err.message);
     }
   }
 
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "CreditTransaction"
-      ("id","amount","type","title","note","referenceType","referenceId","createdByUserId","metadata","createdAt","walletId")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_TIMESTAMP,$10)`,
-    row.id,
-    row.amount,
-    row.type,
-    row.title,
-    row.note,
-    row.referenceType,
-    row.referenceId,
-    row.createdByUserId,
-    row.metadata,
-    row.walletId
-  );
-  return mapTransaction(row);
+  if (!created) {
+    try {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CreditTransaction"
+          ("id","amount","type","title","note","referenceType","referenceId","createdByUserId","metadata","createdAt","walletId")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_TIMESTAMP,$10)`,
+        row.id,
+        row.amount,
+        row.type,
+        row.title,
+        row.note,
+        row.referenceType,
+        row.referenceId,
+        row.createdByUserId,
+        row.metadata,
+        row.walletId
+      );
+      created = mapTransaction(row);
+    } catch (err) {
+      if (isUniqueError(err) && referenceId) {
+        const dup = await findIdempotentTx(
+          wallet.id,
+          row.type,
+          row.referenceType,
+          row.referenceId
+        );
+        if (dup) return dup;
+      }
+      throw err;
+    }
+  }
+
+  await require("./financialAudit").logFinancial({
+    actorUserId: createdByUserId || null,
+    action: "CREDIT_TX",
+    entityType: row.referenceType || "CreditWallet",
+    entityId: row.referenceId || wallet.id,
+    amount: n,
+    balanceBefore: before,
+    balanceAfter: before + n,
+    reason: reason || row.title,
+    detail: {
+      walletId: wallet.id,
+      type: row.type,
+      txId: created.id,
+    },
+  });
+  return created;
 }
 
 function parseMetadata(raw) {
@@ -477,7 +546,13 @@ async function reserveForInvoice({
   const wallet = await getOrCreateWallet({ tenantId, userId });
   if (!wallet) throw new Error("CREDIT_WALLET_MISSING");
   const state = await getReserveState(wallet.id, invoiceId);
+  if (state.consumed > 0) {
+    return { wallet, amount: 0, already: true, consumed: true };
+  }
   if (state.open > 0) return { wallet, amount: state.open, already: true };
+  if (state.refunded > 0) {
+    return { wallet, amount: 0, already: true, refunded: true };
+  }
   const available = await getBalance(wallet.id);
   if (available < n) throw new Error("CREDIT_INSUFFICIENT");
   const row = await appendTransaction({
@@ -490,6 +565,7 @@ async function reserveForInvoice({
     referenceId: invoiceId,
     createdByUserId: createdByUserId || null,
     metadata: { invoiceId, phase: "reserved" },
+    reason: "invoice_reserve",
   });
   return { wallet, amount: n, row };
 }
@@ -498,6 +574,7 @@ async function consumeReserve({ userId, tenantId, invoiceId, createdByUserId }) 
   const wallet = await getOrCreateWallet({ tenantId, userId });
   if (!wallet || !invoiceId) return null;
   const state = await getReserveState(wallet.id, invoiceId);
+  if (state.consumed > 0) return { already: true, amount: state.consumed };
   if (state.open <= 0) return null;
   const release = await appendTransaction({
     tenantId,
@@ -509,6 +586,7 @@ async function consumeReserve({ userId, tenantId, invoiceId, createdByUserId }) 
     referenceId: invoiceId,
     createdByUserId: createdByUserId || null,
     metadata: { invoiceId, phase: "released" },
+    reason: "invoice_consume_release",
   });
   const payment = await appendTransaction({
     tenantId,
@@ -520,6 +598,7 @@ async function consumeReserve({ userId, tenantId, invoiceId, createdByUserId }) 
     referenceId: invoiceId,
     createdByUserId: createdByUserId || null,
     metadata: { invoiceId, phase: "consumed" },
+    reason: "invoice_consume",
   });
   return { release, payment, amount: state.open };
 }
@@ -540,14 +619,24 @@ async function refundReserve({ userId, tenantId, invoiceId, createdByUserId, not
     referenceId: invoiceId,
     createdByUserId: createdByUserId || null,
     metadata: { invoiceId, phase: "refunded" },
+    reason: note || "invoice_rejected",
   });
 }
 
 async function usedGoldenBase(walletId, excludeOrderId) {
   const rows = await listTransactions(walletId, 500);
+  const reversedIds = new Set();
+  for (const row of rows) {
+    if (row.type !== CREDIT_TYPE.REFUND) continue;
+    const meta = parseMetadata(row.metadata);
+    if (meta.reversesTransactionId) {
+      reversedIds.add(String(meta.reversesTransactionId));
+    }
+  }
   let used = 0;
   for (const row of rows) {
     if (row.type !== CREDIT_TYPE.GOLDEN_REWARD) continue;
+    if (reversedIds.has(String(row.id))) continue;
     const meta = parseMetadata(row.metadata);
     if (
       excludeOrderId &&
@@ -563,6 +652,48 @@ async function usedGoldenBase(walletId, excludeOrderId) {
     used += Math.floor(Number(row.amount || 0) / 5);
   }
   return used;
+}
+
+const REF_ORDER = "Order";
+const REF_TX = "CreditTransaction";
+
+async function reverseOrderRewards({ order, actorUserId, reason }) {
+  if (!order?.id || !order.userId) return [];
+  if (order.tenantId) return [];
+  if (!String(order.trackingCode || "").startsWith("PL-")) return [];
+  const wallet = await getOrCreateWallet({ userId: order.userId });
+  if (!wallet) return [];
+  const rewards = (await listByReference(wallet.id, REF_ORDER, order.id)).filter(
+    (row) =>
+      row.type === CREDIT_TYPE.GOLDEN_REWARD ||
+      row.type === CREDIT_TYPE.PURCHASE_REWARD
+  );
+  const out = [];
+  for (const reward of rewards) {
+    const amount = Math.abs(Math.trunc(Number(reward.amount || 0)));
+    if (!amount) continue;
+    out.push(
+      await appendTransaction({
+        userId: order.userId,
+        amount: -amount,
+        type: CREDIT_TYPE.REFUND,
+        title: "برگشت پاداش سفارش",
+        note: reason || null,
+        referenceType: REF_TX,
+        referenceId: reward.id,
+        createdByUserId: actorUserId || null,
+        reason: reason || "order_rejected",
+        metadata: {
+          reversesTransactionId: reward.id,
+          orderId: order.id,
+          trackingCode: order.trackingCode,
+          originalType: reward.type,
+          originalAmount: reward.amount,
+        },
+      })
+    );
+  }
+  return out;
 }
 
 function formatWalletHome(balance) {
@@ -638,6 +769,7 @@ module.exports = {
   usedGoldenBase,
   parseMetadata,
   appendTransaction,
+  reverseOrderRewards,
   reserveForInvoice,
   consumeReserve,
   refundReserve,

@@ -422,6 +422,7 @@ async function grantPurchaseCredit(order, actorUserId, options = {}) {
             referenceType: REF_ORDER,
             referenceId: order.id,
             createdByUserId: actorUserId || null,
+            reason: "order_approved",
             metadata: {
               orderId: order.id,
               trackingCode: order.trackingCode,
@@ -448,6 +449,7 @@ async function grantPurchaseCredit(order, actorUserId, options = {}) {
             referenceType: REF_ORDER,
             referenceId: order.id,
             createdByUserId: actorUserId || null,
+            reason: "order_approved",
             metadata: {
               orderId: order.id,
               trackingCode: order.trackingCode,

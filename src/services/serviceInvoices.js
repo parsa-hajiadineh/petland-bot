@@ -284,7 +284,7 @@ async function listInvoicesByStatus(statuses, skip = 0, take = 10) {
   return invoices;
 }
 
-async function settleCredit(invoice, action) {
+async function settleCredit(invoice, action, actorUserId) {
   if (!invoice?.id || !Number(invoice.creditAmount || 0)) return;
   try {
     const creditLedger = require("./creditLedger");
@@ -292,6 +292,7 @@ async function settleCredit(invoice, action) {
       userId: invoice.userId,
       tenantId: invoice.tenantId,
       invoiceId: invoice.id,
+      createdByUserId: actorUserId || null,
     };
     if (action === "consume") await creditLedger.consumeReserve(payload);
     else await creditLedger.refundReserve(payload);
@@ -300,65 +301,67 @@ async function settleCredit(invoice, action) {
   }
 }
 
-async function rejectInvoice(id, reason) {
+const OPEN_INVOICE_STATUSES = ["WAITING_PAYMENT", "WAITING_APPROVAL"];
+
+async function claimInvoiceStatus(id, toStatus, extra = {}) {
+  if (hasInvoiceModel()) {
+    try {
+      const moved = await prisma.serviceInvoice.updateMany({
+        where: { id, status: { in: OPEN_INVOICE_STATUSES } },
+        data: { status: toStatus, ...extra },
+      });
+      return Number(moved?.count || 0);
+    } catch (err) {
+      console.error("SERVICE INVOICE CLAIM PRISMA SKIP:", err.message);
+    }
+  }
+  if (extra.rejectReason !== undefined) {
+    return Number(
+      await prisma.$executeRawUnsafe(
+        `UPDATE "ServiceInvoice"
+         SET "status" = $2, "rejectReason" = $3, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "id" = $1 AND "status" IN ('WAITING_PAYMENT','WAITING_APPROVAL')`,
+        id,
+        toStatus,
+        extra.rejectReason
+      )
+    );
+  }
+  return Number(
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ServiceInvoice"
+       SET "status" = $2, "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "id" = $1 AND "status" IN ('WAITING_PAYMENT','WAITING_APPROVAL')`,
+      id,
+      toStatus
+    )
+  );
+}
+
+async function rejectInvoice(id, reason, actorUserId) {
   await ensureServiceInvoices();
   const current = await getInvoice(id);
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return null;
   }
   const rejectReason = String(reason || "").trim() || null;
-  let invoice = null;
-  if (hasInvoiceModel()) {
-    try {
-      invoice = await prisma.serviceInvoice.update({
-        where: { id },
-        data: { status: "REJECTED", rejectReason },
-        include: { items: true },
-      });
-    } catch (err) {
-      console.error("SERVICE INVOICE REJECT PRISMA SKIP:", err.message);
-    }
-  }
-  if (!invoice) {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "ServiceInvoice"
-       SET "status" = 'REJECTED', "rejectReason" = $2, "updatedAt" = CURRENT_TIMESTAMP
-       WHERE "id" = $1`,
-      id,
-      rejectReason
-    );
-  }
-  invoice = await getInvoice(id);
-  await settleCredit(invoice, "refund");
+  const moved = await claimInvoiceStatus(id, "REJECTED", { rejectReason });
+  if (moved !== 1) return null;
+  const invoice = await getInvoice(id);
+  await settleCredit(invoice, "refund", actorUserId);
   return invoice;
 }
 
-async function approveInvoice(id) {
+async function approveInvoice(id, actorUserId) {
   await ensureServiceInvoices();
   const current = await getInvoice(id);
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return null;
   }
-  let invoice = null;
-  if (hasInvoiceModel()) {
-    try {
-      invoice = await prisma.serviceInvoice.update({
-        where: { id },
-        data: { status: "APPROVED" },
-        include: { items: true },
-      });
-    } catch (err) {
-      console.error("SERVICE INVOICE APPROVE PRISMA SKIP:", err.message);
-    }
-  }
-  if (!invoice) {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "ServiceInvoice" SET "status" = 'APPROVED', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
-      id
-    );
-  }
-  invoice = await getInvoice(id);
-  await settleCredit(invoice, "consume");
+  const moved = await claimInvoiceStatus(id, "APPROVED");
+  if (moved !== 1) return null;
+  const invoice = await getInvoice(id);
+  await settleCredit(invoice, "consume", actorUserId);
   try {
     await require("./tenantSubscriptions").applyApprovedInvoice(invoice);
   } catch (err) {

@@ -480,8 +480,8 @@ function adminOrderActions() {
 
 function adminApprovedActions() {
   return kb([
-    [{ text: BTN.PACK }],
-    [{ text: BTN.SHIP }],
+    [{ text: BTN.PACK }, { text: BTN.SHIP }],
+    [{ text: BTN.REJECT }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }

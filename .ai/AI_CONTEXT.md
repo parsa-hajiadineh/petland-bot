@@ -179,6 +179,8 @@ Motivation Engine: نوتیف همکار از قوانین زنده است (`src
 
 انواع دفتر: `GOLDEN_REWARD` پاداش دوره طلایی، `PURCHASE_REWARD` پاداش خرید استاندارد، `CREDIT_RESERVE` رزرو، `CREDIT_RELEASE` آزادسازی رزرو، `SERVICE_PAYMENT` مصرف قطعی، `REFUND` بازگشت اعتبار.
 
+یکتایی مالی: ایندکس یکتا روی `(walletId, type, referenceType, referenceId)` تا هر سفارش/فاکتور برای هر نوع تراکنش فقط یک ردیف بسازد. تایید سفارش `PL-` فقط از `WAITING_APPROVAL` با `updateMany`؛ کلیک دوم اعتبار و پورسانت نمی‌سازد. رد بعد از تایید، `REFUND` منفی لینک‌شده به تراکنش اصلی (`reversesTransactionId`) می‌زند نه مبلغ جدا. تایید/رد فاکتور خدمات هم فقط از وضعیت باز. جدول `FinancialAudit`: who / what / when / before / after / reason. ردیف دفتر را UPDATE/DELETE نکن.
+
 ---
 
 ## قوانین چت بعد
@@ -192,7 +194,7 @@ Motivation Engine: نوتیف همکار از قوانین زنده است (`src
 7. اسکیما additive. ShopCart را به Prisma برنگردان مگر db:push در دسترس باشد.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان نه.
 9. سفارش تننت `TS-`؛ مادر `PL-`؛ خدمات `SI-`.
-10. موجودی اعتبار را در فیلد جدا ذخیره نکن؛ از Ledger جمع بزن. ردیف دفتر را UPDATE/DELETE نکن.
+10. موجودی اعتبار را در فیلد جدا ذخیره نکن؛ از Ledger جمع بزن. ردیف دفتر را UPDATE/DELETE نکن. تراکنش مالی را بدون idempotency و audit ننویس.
 11. از فاکتور خدمات اعتبار نساز.
 12. روی جدول `Order` موقع استارت `ALTER` نزن.
 13. فقط وقتی کاربر خواست commit بساز. در پایان نام پیشنهادی commit را بده.

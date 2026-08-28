@@ -317,7 +317,7 @@ async function rejectServiceInvoice(user, chatId, reason) {
     await reply(user, chatId, "دلیل رد را بنویسید.", adminBackMenu());
     return;
   }
-  const invoice = await invoices.rejectInvoice(user.pendingOrderId, note);
+  const invoice = await invoices.rejectInvoice(user.pendingOrderId, note, user.id);
   if (!invoice) {
     await reply(user, chatId, "رد فاکتور ممکن نشد.", adminBackMenu());
     return;
@@ -347,7 +347,7 @@ async function rejectServiceInvoice(user, chatId, reason) {
 }
 
 async function approveServiceInvoice(user, chatId) {
-  const invoice = await invoices.approveInvoice(user.pendingOrderId);
+  const invoice = await invoices.approveInvoice(user.pendingOrderId, user.id);
   if (!invoice) {
     await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminBackMenu());
     return;
