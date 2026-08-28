@@ -303,7 +303,7 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
-  if (text.trim() === MARKETING_ACCESS_CODE) {
+  if (MARKETING_ACCESS_CODE && text.trim() === MARKETING_ACCESS_CODE) {
     if (user.role === "COLLEAGUE") {
       await reply(
         user,

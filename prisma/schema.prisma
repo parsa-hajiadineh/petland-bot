@@ -342,8 +342,6 @@ model MonthlySalesReport {
   createdAt       DateTime @default(now())
 }
 
-// --- Multi-tenant (additive; unused by current bot logic) ---
-
 model Tenant {
   id          String       @id @default(cuid())
   name        String

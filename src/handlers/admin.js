@@ -226,8 +226,6 @@ async function replyProductAdmin(user, chatId) {
   await adminProducts.showHub(user, chatId);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 module.exports.showAdminPanel = async function showAdminPanel(user, chatId) {
   await prisma.user.update({
     where: { id: user.id },

@@ -1,13 +1,19 @@
 # Dependencies
 node_modules/
 
-# Environment variables
+# Environment
 .env
+.env.*
+!.env.example
 
-# Generated assets (fonts, logos copied by setup-assets.js)
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Generated / temporary
 src/assets/
-
-# Temporary files
 tmp/
 
 # OS

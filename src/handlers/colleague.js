@@ -485,7 +485,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (user.orderStep === "COLLEAGUE_CODE") {
-    if (text.trim() !== COLLEAGUE_ACCESS_CODE) {
+    if (!COLLEAGUE_ACCESS_CODE || text.trim() !== COLLEAGUE_ACCESS_CODE) {
       await reply(
         user,
         chatId,
