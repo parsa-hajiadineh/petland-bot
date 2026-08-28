@@ -364,6 +364,8 @@ model Tenant {
   ownerUserId String?      @unique
   ownerUser   User?        @relation("TenantOwner", fields: [ownerUserId], references: [id])
 
+  statusBeforeBlock String?
+
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -485,6 +487,8 @@ model Bot {
 
   status      BotStatus @default(PENDING)
   isEnabled   Boolean   @default(false)
+  statusBeforeBlock     String?
+  isEnabledBeforeBlock  Boolean?
 
   activatedAt DateTime?
   lastSeenAt  DateTime?

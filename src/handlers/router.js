@@ -342,6 +342,17 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     return;
   }
 
+  if (
+    (data.startsWith("mgru:") ||
+      data.startsWith("mgrb:") ||
+      data.startsWith("mgrq:") ||
+      data.startsWith("mgrk:")) &&
+    isAdmin(user)
+  ) {
+    await require("./adminManage").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (data.startsWith("PL-")) {
     const shown = await orderHandler.showOrderByTracking(user, chatId, data);
     if (!shown) {

@@ -58,7 +58,7 @@ async function setStep(user, step) {
 
 function settingsSummary(settings) {
   return [
-    "⚙️ تنظیمات ساخت اعتبار",
+    "⚙️ تنظیمات اعتباردهی",
     "━━━━━━━━━━━━━━━━━━",
     `⏱ زمان گلدن تایم: ${settings.goldenHours} ساعت`,
     `💰 سقف اعتبار ویژه: ${formatPrice(settings.goldenLimitToman)}`,
@@ -108,6 +108,8 @@ async function handleText(user, chatId, text) {
   }
 
   if (!isCreditSettingsStep(user.adminStep)) return false;
+
+  if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
 
   if (text === BTN.CREDIT_SET_HOURS) {
     await askValue(

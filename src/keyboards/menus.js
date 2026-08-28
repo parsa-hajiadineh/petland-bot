@@ -146,7 +146,7 @@ const BTN = {
   MY_TICKETS: "📋 تیکت‌های من",
   CLOSE_TICKET: "🔒 بستن تیکت",
   ADMIN_PANEL: "⚙️ پنل ادمین",
-  ADMIN_INVOICES: "🧾 فاکتورها",
+  ADMIN_INVOICES: "🧾 سفارش‌های مشتریان",
   ADMIN_PENDING: "🧾 فاکتورهای در انتظار",
   ADMIN_APPROVED: "✅ فاکتورهای تایید شده",
   ADMIN_REJECTED: "❌ فاکتورهای رد شده",
@@ -162,7 +162,11 @@ const BTN = {
   ADMIN_SVC_INV_PENDING: "🧾 فاکتورهای در انتظار",
   ADMIN_SVC_INV_APPROVED: "✅ فاکتورهای تایید شده",
   ADMIN_SVC_INV_REJECTED: "❌ فاکتورهای رد شده",
-  ADMIN_CREDIT_SETTINGS: "⚙️ تنظیمات ساخت اعتبار",
+  ADMIN_MANAGE: "🛡 مدیریت",
+  ADMIN_BLOCKED: "🚫 مسدود شدگان",
+  BLOCK_SHOP: "🚫 مسدود کردن",
+  UNBLOCK_SHOP: "✅ رفع مسدودی",
+  ADMIN_CREDIT_SETTINGS: "⚙️ تنظیمات اعتباردهی",
   CREDIT_SET_HOURS: "⏱ زمان گلدن تایم",
   CREDIT_SET_LIMIT: "💰 سقف اعتبار ویژه",
   CREDIT_SET_GOLDEN_PCT: "⭐ درصد اعتبار ویژه",
@@ -385,6 +389,7 @@ function adminMenu() {
     [{ text: BTN.ADMIN_PRODUCTS }, { text: BTN.ADMIN_SERVICES }],
     [{ text: BTN.ADMIN_SVC_INVOICES }, { text: BTN.ADMIN_WITHDRAWALS }],
     [{ text: BTN.ADMIN_SALES }, { text: BTN.ADMIN_CREDIT_SETTINGS }],
+    [{ text: BTN.ADMIN_MANAGE }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }
@@ -428,6 +433,20 @@ function adminInvoicesMenu() {
   return kb([
     [{ text: BTN.ADMIN_PENDING }, { text: BTN.ADMIN_APPROVED }],
     [{ text: BTN.ADMIN_REJECTED }, { text: BTN.ADMIN_SHIPPED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminManageMenu() {
+  return kb([
+    [{ text: BTN.ADMIN_BLOCKED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminColleagueActions(blocked) {
+  return kb([
+    [{ text: blocked ? BTN.UNBLOCK_SHOP : BTN.BLOCK_SHOP }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
@@ -529,6 +548,8 @@ module.exports = {
   adminServiceInvoiceActions,
   adminServiceInvoicesMenu,
   adminInvoicesMenu,
+  adminManageMenu,
+  adminColleagueActions,
   adminCreditSettingsMenu,
   adminBackMenu,
   adminOrderActions,

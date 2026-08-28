@@ -19,6 +19,7 @@ const { notifyOrderStatus } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
+const adminManage = require("./adminManage");
 
 // ─── Sales Stats Helpers ─────────────────────────────────────────────────────
 
@@ -194,7 +195,7 @@ async function showInvoicesMenu(user, chatId) {
   });
   user.adminStep = "ADMIN_INVOICES";
   user.pendingOrderId = null;
-  await reply(user, chatId, "🧾 فاکتورها", adminInvoicesMenu());
+  await reply(user, chatId, "🧾 سفارش‌های مشتریان", adminInvoicesMenu());
 }
 
 async function replayInvoiceList(user, chatId, step) {
@@ -320,7 +321,8 @@ async function goAdminBack(user, chatId) {
     step === "ADMIN_INVOICES" ||
     step === "SVC:LIST" ||
     step === "SINV:HUB" ||
-    step === "CRSET:LIST"
+    step === "CRSET:LIST" ||
+    step === "MGR:HUB"
   ) {
     await module.exports.showAdminPanel(user, chatId);
     return true;
@@ -328,6 +330,7 @@ async function goAdminBack(user, chatId) {
 
   if (await adminServices.goBack(user, chatId)) return true;
   if (await adminCreditSettings.goBack(user, chatId)) return true;
+  if (await adminManage.goBack(user, chatId)) return true;
 
   await prisma.user.update({
     where: { id: user.id },
@@ -445,6 +448,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
 
   if (await adminServices.handleText(user, chatId, text)) return true;
   if (await adminCreditSettings.handleText(user, chatId, text)) return true;
+  if (await adminManage.handleText(user, chatId, text)) return true;
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);
