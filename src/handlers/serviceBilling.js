@@ -623,7 +623,7 @@ async function startPayment(user, chatId, invoice, source, tenantId) {
   );
   const extra =
     source === "mother"
-      ? "\n\nتا تایید پرداخت توسط ادمین پت‌لند امکان ساخت ربات نیست."
+      ? "\n\nتا تایید پرداخت توسط ادمین پائورا امکان ساخت ربات نیست."
       : "";
   const cashLine =
     cashDue !== Number(invoice.totalAmount || 0)

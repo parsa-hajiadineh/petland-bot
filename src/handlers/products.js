@@ -246,7 +246,7 @@ module.exports.showTenantProducts = async function showTenantProducts(
       await reply(
         user,
         chatId,
-        "هنوز دسته‌بندی یا محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پت‌لند اینجا نمایش داده نمی‌شود.",
+        "هنوز دسته‌بندی یا محصولی در این فروشگاه ثبت نشده است.\nکاتالوگ پائورا اینجا نمایش داده نمی‌شود.",
         kb([[{ text: BTN.BACK_MAIN }]])
       );
       return;

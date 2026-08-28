@@ -351,7 +351,7 @@ async function formatCustomerText(person) {
   const lines = ["مشتری", "━━━━━━━━━━━━━━━━━━", ...identityBlock(person), ""];
   const shops = await shopNamesForUser(person.id);
   const botNames = [];
-  if (shops.hasMother) botNames.push("ربات مادر (پت‌لند)");
+  if (shops.hasMother) botNames.push("ربات مادر (پائورا)");
   botNames.push(...shops.names.map((name) => `ربات همکار «${name}»`));
   lines.push(`مشتری کدام ربات: ${botNames.length ? botNames.join("، ") : "هنوز سفارشی ندارد"}`);
   const addresses = await uniqueAddresses(person.id);

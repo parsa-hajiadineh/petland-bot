@@ -15,7 +15,7 @@ module.exports = {
   MARKETING_ACCESS_CODE: process.env.MARKETING_ACCESS_CODE || "petland-vip",
   DEFAULT_PROFIT_PERCENT: Number(process.env.DEFAULT_PROFIT_PERCENT || 15),
   WHOLESALE_MIN_ORDER: Number(process.env.WHOLESALE_MIN_ORDER || 10000000),
-  SHOP_NAME: process.env.SHOP_NAME || "پت لند",
+  SHOP_NAME: process.env.SHOP_NAME || "پائورا",
   BANK_CARD: process.env.BANK_CARD || "",
   BANK_IBAN: process.env.BANK_IBAN || "",
   BANK_HOLDER: process.env.BANK_HOLDER || "",

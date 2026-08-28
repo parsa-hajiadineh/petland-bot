@@ -22,7 +22,7 @@ const DEFAULT_PACKAGES = [
   {
     code: "FULL_SETUP",
     title: "تنظیمات کامل توسط تیم",
-    description: "پیکربندی کامل فروشگاه توسط تیم پت‌لند",
+    description: "پیکربندی کامل فروشگاه توسط تیم پائورا",
     priceToman: 10000000,
     sortOrder: 30,
     kind: "SERVICE",
