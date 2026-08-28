@@ -149,3 +149,16 @@ Decisions inferred from source code (not explicitly documented) are marked with 
   - Archive updated when admin opens the stats page (lazy archiving)
   - Maximum 6 months retained — older entries are deleted
   - Current month is always calculated live
+
+---
+
+### ADR-019: Tenant data isolation
+- **Decision:** Every tenant read/write is scoped by `ctx.tenantId`. No unscoped fallback for `TS-` orders, product `code`, category `title`, service invoices, or credit wallets.
+- **Reason:** Shared PostgreSQL + shared `User` row. Unscoped queries leaked shop A data into shop B (orders, invoices, mother categories attached to tenant products, credit wallet merge via unique `userId`).
+- **Consequence:**
+  - Legacy `Order.tenantId=null` is visible to a shop only if its line items belong to that shop
+  - `TS-` orders are never created without `tenantId`
+  - Credit wallet lookup by tenant does not fall back to another shop's user-linked wallet
+  - Mother catalog queries never run unscoped if `getMotherTenantId()` is missing (`tenantId: null` only)
+  - Details live in `.ai/AI_CONTEXT.md` Isolation
+

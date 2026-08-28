@@ -49,6 +49,7 @@
 - `BOT_TOKEN` and `DATABASE_URL` must never be hardcoded
 - Sensitive variables only in `.env` (which must be in `.gitignore`)
 - No sensitive information in logs
+- Multi-tenant isolation: never query/update Order, Product, Category, ShopCart, ServiceInvoice, or CreditWallet across shops. Tenant queries require `ctx.tenantId`. Do not create `TS-` orders without `tenantId`. Do not fall back to unscoped `{ code }` / `{ title }` / `{ trackingCode startsWith TS- }`. See `.ai/AI_CONTEXT.md` Isolation.
 
 ### Deployment
 - Use `npm run build` for Liara (with Iran mirror)

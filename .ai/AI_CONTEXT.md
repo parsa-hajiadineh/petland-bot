@@ -1,9 +1,11 @@
 # AI_CONTEXT.md — PetLand
-> این فایل را در شروع هر چت جدید بخوان. حافظهٔ پروژه است تا کار در پنجرهٔ دیگر ادامه پیدا کند.
+> این فایل را در شروع هر چت جدید بخوان. حافظهٔ پروژه است. `.ai/CURRENT_STATUS.md` و `ROADMAP.md` مال v22 تکی‌اند و قدیمی‌اند.
 
 ---
 
 ## وضعیت همین الان (۱۴۰۵/۰۶/۰۶)
+
+ایزوله‌سازی multi-tenant جدی اعمال شد تا سفارش / فاکتور خدمات / کاتالوگ / دسته / اعتبار بین فروشگاه‌ها نشت نکند. جزئیات در بخش «Isolation» پایین.
 
 کیف پول اعتباری همکار در پنل فروشگاه: «📒 کیف پول اعتباری» فقط موجودی + قانون؛ «📋 دفتر تراکنش‌ها» دکمه جدا. موجودی فیلد جدا نیست = SUM از `CreditTransaction`. متن: «اعتبار این کیف پول فقط برای استفاده از خدمات مجاز پلتفرم قابل استفاده میباشد.» با `Wallet` بازاریابی مادر قاطی نشود. ردیف دفتر UPDATE/DELETE نمی‌شود.
 
@@ -36,6 +38,8 @@ Payment Engine فاکتور خدمات: پیش‌فاکتور پیش‌فرض ت
 ## این پروژه چیست؟
 فروشگاه روی **پیام‌رسان بله** (نه وب، نه تلگرام). UI کیبورد فارسی بله است.
 
+کاربر این چت‌ها: ادمین مادر (`ADMIN_BALE_IDS`) و همزمان مالک یک فروشگاه تست.
+
 ```
  Shared Bot Engine  (یک پروسه Node)
               │
@@ -64,18 +68,62 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 
 سفارش تننت: `TS-` + `Order.tenantId`. مادر فقط `PL-`. فاکتور خدمات: `SI-`.
 
-کیف پول اعتباری: `CreditWallet` (tenantId و/یا userId) + دفتر `CreditTransaction`. `Wallet` مادر = پورسانت بازاریابی قابل برداشت؛ جدا بماند.
+کیف پول اعتباری: `CreditWallet` (ترجیحاً با `tenantId`) + دفتر `CreditTransaction`. `Wallet` مادر = پورسانت بازاریابی قابل برداشت؛ جدا بماند.
+
+`Product.code` در کل دیتابیس unique است. ایزوله با `tenantId` است نه با پیشوند کد.
 
 ---
 
 ## Engine
 
-- `index.js`: اول `engine.start()` (poll)، بعد `ensureMotherCatalog()` سپس ensure پکیج/فاکتور خدمات/دفتر اعتبار/کمپین طلایی
+- `index.js`: اول `ensureMotherCatalog()` (تا `getMotherTenantId()` خالی نباشد)، بعد `engine.start()` (poll)، سپس ensure پکیج/فاکتور خدمات/دفتر اعتبار/کمپین طلایی
 - تننت‌ها poll هستند؛ قبل از poll `deleteWebhook` با توکن همان ربات
 - `getUpdates(offset, ctx.token)` — توکن را صریح بده
 - بعد از `getOrCreateUser` دوباره `runWithContext(ctx)` وگرنه پاسخ تست با توکن مادر می‌رود
 - `router.js` تننت را **lazy** `require('./tenantShop')` می‌کند تا خطای لود مادر را نخواباند
 - روی جدول `Order` موقع استارت `ALTER` نزن (قفل → هر دو ربات ساکت)
+- `getBotContext()` اگر ALS خالی باشد به `motherContext()` برمی‌گردد. هندلر تننت را بدون `runWithContext` صدا نزن
+
+---
+
+## Isolation (قانون سخت)
+
+هدف: فروشگاه A هیچ‌وقت سفارش، فاکتور، کالا، دسته، سبد، یا اعتبار فروشگاه B (یا کاتالوگ مادر) را نخواند و ننویسد.
+
+### سفارش TS-
+- `tsOrderQueries` فقط با `ctx.tenantId`. بدون tenantId = هیچ ردیفی. کوئری بدون scope (فقط `TS-`) ممنوع.
+- سفارش قدیمی `tenantId=null`: فقط اگر آیتم‌هایش کالای همین فروشگاه باشد.
+- `createTenantOrder` بدون `tenantId` ساخته نمی‌شود (fallback حذف tenantId ممنوع).
+- پیگیری مشتری (`showOrderByTracking`) با `findTsOrder` + `userId` + همین tenant.
+- لیست/جزئیات مالک (`tcld:` / `tord:`) فقط `isShopOwner`. مشتری از callback کد `TS-...` استفاده می‌کند نه `tord:`.
+- تغییر وضعیت مالک فقط بعد از `loadShopOrder(id, tenantId)`.
+
+### فاکتور خدمات SI-
+- روی ربات فروشگاه: `siv:` فقط مالک + `invoice.tenantId === ctx.tenantId`.
+- روی مادر: فقط صاحب فاکتور (`userId`) یا مالک همان tenant یا ADMIN. ادمین مادر لیست اصلی را با `sinv:` می‌بیند.
+- آپلود رسید خدمات روی ربات فروشگاه، فاکتور فروشگاه دیگر را عوض نمی‌کند.
+
+### کاتالوگ
+- مادر: `motherCatalogWhere` اگر `getMotherTenantId()` خالی باشد فقط `{ tenantId: null }` است نه کل جدول.
+- دسته مادر با `motherCategoryWhere(title)` نه `findFirst({ title })`.
+- تننت: `loadTenantProductByCode(code, tenantId)` / `loadOwnedProduct`. آپدیت/حذف کالا با `id` کالای owned نه فقط `where: { code }`.
+- ساخت/تغییر نام/حذف دسته فقط `Category.tenantId === این فروشگاه`. fallback به دسته مادر/فروشگاه دیگر ممنوع.
+
+### سبد و اعتبار
+- `ShopCart` با `(userId, tenantId)`. هیدرات کالا فقط همان `tenantId`.
+- `CreditWallet` وقتی `tenantId` داده شده فقط همان tenant جستجو می‌شود؛ کیف کاربر/فروشگاه دیگر به این فروشگاه وصله نمی‌شود. `userId` روی CreditWallet globally unique است؛ اگر لینک کاربر به کیف دوم بخورد، کیف دوم بدون userId می‌ماند ولی با tenantId کار می‌کند.
+
+### سشن User سراسری است
+یک ردیف `User` برای مادر + همه فروشگاه‌ها. `orderStep` / `adminStep` / `pendingOrderId` / `lastProductCode` مشترک‌اند.
+- رسید فروشگاه فقط `TCK:RECEIPT` است نه `UPLOAD_RECEIPT` مادر.
+- اگر `pendingOrderId` مال این فروشگاه نباشد، رسید به سفارش فروشگاه دیگر چسبانده نمی‌شود.
+- `/start` فروشگاه `orderStep` را خالی می‌کند و `adminStep` با پیشوند `TS:` را پاک می‌کند؛ `ADMIN_*` مادر را بی‌دلیل پاک نکن.
+
+### چیزهایی که درست‌اند و نباید «فیکس» شوند
+- `router.js`: اگر `!isMother()` فقط `tenantShop`. هندلر ادمین/سبد/سفارش مادر روی ربات فروشگاه نمی‌آید.
+- جستجوی مادر روی ربات تننت اجرا نمی‌شود.
+- سفارش مادر با پیشوند `PL-` فیلتر می‌شود.
+- مادر ادمین callbackهای `ordr:` / `tkt:` / `sinv:` / `mgr*` / `bc*` با `isAdmin` گیت شده‌اند.
 
 ---
 
@@ -83,31 +131,35 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 
 ```
 src/bot/engine.js                 poll + processUpdate(update, ctx)
+src/bot/context.js                ALS؛ fallback مادر اگر store خالی باشد
 src/handlers/router.js            مادر vs تننت
-src/handlers/tenantShop.js        منوی فروشگاه همکار
-src/handlers/tenantOrder.js       سبد/تسویه/رسید/پیگیری مالک
-src/handlers/tenantAdmin.js       پنل مالک + کیف اعتبار + دفتر
-src/services/shopCart.js          SQL خام
+src/handlers/tenantShop.js        منوی فروشگاه همکار؛ گیت tord/tcld/siv
+src/handlers/tenantOrder.js       سبد/تسویه/رسید/پیگیری مالک (همه scoped)
+src/handlers/tenantAdmin.js       پنل مالک + کیف اعتبار + دفتر؛ کالا/دسته owned
+src/handlers/products.js          کاتالوگ مادر + لیست تننت
+src/handlers/adminProducts.js     پنل کالای مادر (mother-scoped)
+src/services/shopCart.js          SQL خام؛ هیدرات با tenantId
 src/services/shopProvision.js     جدول‌های runtime + گیت فاکتور راه‌اندازی
-src/services/creditLedger.js      دفتر اعتبار (بدون فیلد موجودی)
+src/services/creditLedger.js      دفتر اعتبار per-tenant (بدون فیلد موجودی)
 src/services/goldenCampaign.js    کمپین طلایی + CreditCampaignSettings
 src/handlers/adminCreditSettings.js تنظیمات اعتباردهی ادمین مادر
 src/handlers/adminManage.js         جستجوی هویتی + مسدود/رفع مسدودی فروشگاه
-src/handlers/adminProducts.js       ویرایش سریع کالا + افزودن/حذف کاتالوگ مادر
 src/handlers/adminBroadcast.js      پیام همگانی ادمین مادر از مدیریت تیکت
 src/services/salesStats.js          آمار فروش ماهانه زنده (۱۲ ماه)
 src/services/shopBlock.js           تعلیق ربات همکار و بازگردانی وضعیت قبلی
 src/utils/smartSearch.js            نرمال‌سازی جستجوی فارسی
+src/utils/price.js                  قیمت + setAdminRetailView برای تست خرد ادمین
 src/services/receiptCleanup.js      پاکسازی رسید پرداخت (نه عکس کالا)
 src/services/scheduler.js         یادآوری طلایی/اشتراک/فاکتور خدمات
 src/services/servicePackages.js   جدول و seed پکیج خدمات
 src/services/tenantSubscriptions.js اشتراک مستقل همکار + lifecycle
 src/handlers/adminServices.js     CRUD پکیج + فاکتور خدمات همکاران (زیرمنو + sinv:)
 src/handlers/colleague.js         پروفایل همکار، گیت ساخت ربات، شروع گلدن
-src/handlers/serviceBilling.js    اشتراک → پیش‌فاکتور → فاکتور → رسید؛ نوتیف مادر با BOT_TOKEN
+src/handlers/serviceBilling.js    اشتراک → پیش‌فاکتور → فاکتور → رسید؛ دسترسی per-tenant
 src/services/serviceInvoices.js   snapshot قیمت؛ WAITING_PAYMENT / WAITING_APPROVAL / APPROVED / REJECTED
 src/bot/messenger.js              notifyMother با توکن مادر
 src/keyboards/menus.js            همه دکمه‌ها
+src/database/selects.js           select صریح؛ Order.tenantId / Product.tenantId
 ```
 
 منوی تننت: محصولات، سبد، سفارشات من، راهنما. مالک: مدیریت فروشگاه.
@@ -128,16 +180,18 @@ src/keyboards/menus.js            همه دکمه‌ها
 ## قوانین چت بعد
 
 1. مادر (سبد، تسویه، ادمین، عمده) را نشکن.
-2. تننت درخت پت‌لند / همکار / ادمین مادر را نبیند.
+2. تننت درخت پت‌لند / همکار / ادمین مادر را نبیند. بین فروشگاه‌ها داده نشت نکند.
 3. اول `module.exports = function` بعد export کمکی در products.js.
 4. روی شل زنده لیارا `prisma generate` نزن.
-5. کاتالوگ مادر با `motherCatalogWhere`. select صریح.
+5. کاتالوگ مادر با `motherCatalogWhere`. select صریح. کوئری تننت همیشه `tenantId` دارد.
 6. توکن را لاگ نکن.
 7. اسکیما additive. ShopCart را به Prisma برنگردان مگر db:push در دسترس باشد.
 8. `setWebhook` و `getUpdates` روی یک توکن همزمان نه.
 9. سفارش تننت `TS-`؛ مادر `PL-`؛ خدمات `SI-`.
 10. موجودی اعتبار را در فیلد جدا ذخیره نکن؛ از Ledger جمع بزن. ردیف دفتر را UPDATE/DELETE نکن.
 11. از فاکتور خدمات اعتبار نساز.
+12. روی جدول `Order` موقع استارت `ALTER` نزن.
+13. فقط وقتی کاربر خواست commit بساز. در پایان نام پیشنهادی commit را بده.
 
 ---
 
@@ -146,4 +200,4 @@ src/keyboards/menus.js            همه دکمه‌ها
 2. TENANT_RESELL
 3. تیکت داخل ربات تننت
 
-`.ai/CURRENT_STATUS.md` و `ROADMAP.md` مال v22 تکی‌اند و قدیمی‌اند. منبع حقیقت همین فایل است.
+منبع حقیقت همین فایل است.

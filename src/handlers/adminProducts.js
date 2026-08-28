@@ -120,7 +120,7 @@ async function loadMotherProduct(code) {
   const motherId = getMotherTenantId();
   const where = motherId
     ? { code, OR: [{ tenantId: null }, { tenantId: motherId }] }
-    : { code };
+    : { code, tenantId: null };
   return prisma.product.findFirst({
     where,
     include: { category: { select: { id: true, title: true } } },
@@ -141,7 +141,7 @@ async function ensureCategory(title) {
   const motherId = getMotherTenantId();
   const where = motherId
     ? { title, OR: [{ tenantId: null }, { tenantId: motherId }] }
-    : { title };
+    : { title, tenantId: null };
   let category = await prisma.category.findFirst({ where });
   if (!category) {
     category = await prisma.category.create({

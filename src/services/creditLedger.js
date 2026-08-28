@@ -155,6 +155,7 @@ async function findWalletRow({ tenantId, userId }) {
           where: { tenantId },
         });
         if (byTenant) return mapWallet(byTenant);
+        return null;
       }
       if (userId) {
         const byUser = await prisma.creditWallet.findUnique({
@@ -172,6 +173,7 @@ async function findWalletRow({ tenantId, userId }) {
       tenantId
     );
     if (rows?.[0]) return mapWallet(rows[0]);
+    return null;
   }
   if (userId) {
     const rows = await prisma.$queryRawUnsafe(
@@ -223,24 +225,36 @@ async function getOrCreateWallet(input) {
   await ensureCreditLedger();
   let wallet = await findWalletRow({ tenantId, userId });
   if (wallet) {
-    if ((tenantId && !wallet.tenantId) || (userId && !wallet.userId)) {
-      await patchWallet(wallet.id, { tenantId, userId });
-      wallet = {
-        ...wallet,
-        tenantId: tenantId || wallet.tenantId,
-        userId: userId || wallet.userId,
-      };
+    if (tenantId && wallet.tenantId && wallet.tenantId !== tenantId) {
+      wallet = null;
+    } else if (
+      tenantId &&
+      userId &&
+      wallet.tenantId === tenantId &&
+      !wallet.userId
+    ) {
+      try {
+        await patchWallet(wallet.id, { userId });
+        wallet = { ...wallet, userId };
+      } catch (err) {
+        console.error("CREDIT WALLET LINK USER SKIP:", err.message);
+      }
     }
-    return wallet;
+    if (wallet) return wallet;
   }
   if (hasWalletModel()) {
     try {
       const created = await prisma.creditWallet.create({
-        data: {
-          ...(tenantId ? { tenantId } : {}),
-          ...(userId ? { userId } : {}),
-        },
+        data: tenantId ? { tenantId } : { userId },
       });
+      if (tenantId && userId) {
+        try {
+          await patchWallet(created.id, { userId });
+          return mapWallet({ ...created, userId });
+        } catch (err) {
+          console.error("CREDIT WALLET LINK USER SKIP:", err.message);
+        }
+      }
       return mapWallet(created);
     } catch (err) {
       console.error("CREDIT WALLET CREATE PRISMA SKIP:", err.message);
@@ -253,9 +267,14 @@ async function getOrCreateWallet(input) {
        VALUES ($1,$2,$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
       id,
       tenantId,
-      userId
+      tenantId ? null : userId
     );
-    return mapWallet({ id, tenantId, userId, createdAt: new Date() });
+    return mapWallet({
+      id,
+      tenantId,
+      userId: tenantId ? null : userId,
+      createdAt: new Date(),
+    });
   } catch (err) {
     console.error("CREDIT WALLET INSERT SKIP:", err.message);
   }

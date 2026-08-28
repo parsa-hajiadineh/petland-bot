@@ -1,5 +1,7 @@
 # ROADMAP.md — PetLand v22
 
+> **منبع حقیقت multi-tenant:** `.ai/AI_CONTEXT.md`. این فایل مال فروشگاه تکی v22 است.
+
 ## Current Status
 The core bot functionality is complete. Priorities below are based on identified gaps in the source code.
 

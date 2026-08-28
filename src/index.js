@@ -26,12 +26,16 @@ app.post("/webhook/bot/:botId", (req, res) => {
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   try {
+    await ensureMotherCatalog();
+  } catch (err) {
+    console.error("MOTHER CATALOG:", err);
+  }
+  try {
     await engine.start();
     require("./services/scheduler").start();
   } catch (err) {
     console.error("ENGINE START:", err);
   }
-  await ensureMotherCatalog();
   try {
     await ensureServicePackages();
     await ensureServiceInvoices();

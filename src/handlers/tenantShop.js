@@ -258,9 +258,17 @@ async function handleCallbackQuery(cq, user) {
     return;
   }
 
+  if (data.startsWith("siv:")) {
+    if (!(await tenantAdmin.isShopOwner(user, ctx.tenantId))) {
+      await reply(user, chatId, "این بخش فقط برای صاحب فروشگاه است.", await shopMenu(user));
+      return;
+    }
+    await require("./serviceBilling").handleCallback(user, chatId, data);
+    return;
+  }
+
   if (
     data.startsWith("sb") ||
-    data.startsWith("siv:") ||
     data === "svcok"
   ) {
     await require("./serviceBilling").handleCallback(user, chatId, data);
@@ -268,12 +276,20 @@ async function handleCallbackQuery(cq, user) {
   }
 
   if (data.startsWith("tcld:")) {
+    if (!(await tenantAdmin.isShopOwner(user, ctx.tenantId))) {
+      await reply(user, chatId, "این بخش فقط برای صاحب فروشگاه است.", await shopMenu(user));
+      return;
+    }
     const offset = Number(data.slice(5)) || 0;
     await tenantOrder.showShopOrderList(user, chatId, "closed", offset);
     return;
   }
 
   if (data.startsWith("tord:")) {
+    if (!(await tenantAdmin.isShopOwner(user, ctx.tenantId))) {
+      await reply(user, chatId, "این بخش فقط برای صاحب فروشگاه است.", await shopMenu(user));
+      return;
+    }
     await tenantOrder.showShopOrderDetail(user, chatId, data.slice(5));
     return;
   }

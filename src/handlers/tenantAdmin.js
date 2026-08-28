@@ -352,6 +352,7 @@ async function showCategories(user, chatId, tenantId) {
 
 async function findOrCreateCategory(tenantId, title) {
   const name = title.trim();
+  if (!tenantId || !name) return null;
   try {
     const existing = await prisma.category.findFirst({
       where: { title: name, tenantId },
@@ -364,11 +365,9 @@ async function findOrCreateCategory(tenantId, title) {
     console.error("CATEGORY CREATE TENANT:", err.message);
   }
   try {
-    const existing = await prisma.category.findFirst({
-      where: { title: name },
+    return await prisma.category.findFirst({
+      where: { title: name, tenantId },
     });
-    if (existing) return existing;
-    return await prisma.category.create({ data: { title: name } });
   } catch (err) {
     console.error("CATEGORY CREATE FALLBACK:", err.message);
     return null;
@@ -471,6 +470,13 @@ async function loadOwnedProduct(code, tenantId) {
     console.error("OWNED PRODUCT:", err.message);
     return null;
   }
+}
+
+async function patchOwnedProduct(code, tenantId, data) {
+  const owned = await loadOwnedProduct(code, tenantId);
+  if (!owned) return null;
+  await prisma.product.update({ where: { id: owned.id }, data });
+  return owned;
 }
 
 function productAdminText(product) {
@@ -915,13 +921,7 @@ async function handleAdminText(user, chatId, text) {
       const cat = await prisma.category.findUnique({
         where: { id: user.pendingOrderId },
       });
-      const owned =
-        cat &&
-        (cat.tenantId === tenantId ||
-          (!cat.tenantId &&
-            (await prisma.product.count({
-              where: { tenantId, categoryId: cat.id },
-            })) > 0));
+      const owned = cat && cat.tenantId === tenantId;
       if (!owned) {
         await reply(user, chatId, "این دسته پیدا نشد.");
         await showCategories(user, chatId, tenantId);
@@ -1006,9 +1006,8 @@ async function handleAdminText(user, chatId, text) {
   if (user.adminStep === "TS:P_DESC") {
     if (user.lastProductCode && text !== BTN.SKIP) {
       try {
-        await prisma.product.update({
-          where: { code: user.lastProductCode },
-          data: { description: text.trim() },
+        await patchOwnedProduct(user.lastProductCode, tenantId, {
+          description: text.trim(),
         });
       } catch (err) {
         console.error("PRODUCT DESC AFTER CREATE:", err.message);
@@ -1039,9 +1038,9 @@ async function handleAdminText(user, chatId, text) {
       return true;
     }
     try {
-      await prisma.product.update({
-        where: { code: user.lastProductCode },
-        data: { costPrice: amount, profitPercent: 0 },
+      await patchOwnedProduct(user.lastProductCode, tenantId, {
+        costPrice: amount,
+        profitPercent: 0,
       });
       await reply(user, chatId, "✅ قیمت به‌روز شد.");
     } catch (err) {
@@ -1058,9 +1057,8 @@ async function handleAdminText(user, chatId, text) {
       return true;
     }
     try {
-      await prisma.product.update({
-        where: { code: user.lastProductCode },
-        data: { description: text === BTN.SKIP ? null : text.trim() },
+      await patchOwnedProduct(user.lastProductCode, tenantId, {
+        description: text === BTN.SKIP ? null : text.trim(),
       });
       await reply(user, chatId, "✅ توضیحات به‌روز شد.");
     } catch (err) {
@@ -1101,9 +1099,8 @@ async function handleAdminPhoto(user, chatId, photo) {
   if (user.adminStep === "TS:P_PHOTO" || user.adminStep === "TS:P_EDIT_IMG") {
     if (!user.lastProductCode) return false;
     try {
-      await prisma.product.update({
-        where: { code: user.lastProductCode },
-        data: { imageUrl: fileId },
+      await patchOwnedProduct(user.lastProductCode, tenantId, {
+        imageUrl: fileId,
       });
       await reply(user, chatId, "✅ عکس کالا ذخیره شد.");
     } catch (err) {
@@ -1127,11 +1124,7 @@ async function handleAdminCallback(user, chatId, data) {
     const cat = await prisma.category.findUnique({
       where: { id: categoryId },
     });
-    const owned =
-      cat &&
-      (cat.tenantId === tenantId ||
-        (!cat.tenantId &&
-          (await prisma.product.count({ where: { tenantId, categoryId: cat.id } })) > 0));
+    const owned = cat && cat.tenantId === tenantId;
     if (!owned) {
       await reply(user, chatId, "این دسته پیدا نشد.", tenantCategoriesMenu());
       return true;
@@ -1149,6 +1142,13 @@ async function handleAdminCallback(user, chatId, data) {
 
   if (data.startsWith("tcd:")) {
     const categoryId = data.slice(4);
+    const cat = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+    if (!cat || cat.tenantId !== tenantId) {
+      await reply(user, chatId, "این دسته پیدا نشد.", tenantCategoriesMenu());
+      return true;
+    }
     const { sendKeyboard } = require("../bot/bale");
     await sendKeyboard(
       chatId,
@@ -1164,6 +1164,13 @@ async function handleAdminCallback(user, chatId, data) {
 
   if (data.startsWith("tcy:")) {
     const categoryId = data.slice(4);
+    const catCheck = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+    if (!catCheck || catCheck.tenantId !== tenantId) {
+      await reply(user, chatId, "این دسته پیدا نشد.", tenantCategoriesMenu());
+      return true;
+    }
     try {
       const products = await prisma.product.findMany({
         where: { tenantId, categoryId },
@@ -1190,11 +1197,11 @@ async function handleAdminCallback(user, chatId, data) {
       const cat = await prisma.category.findUnique({
         where: { id: categoryId },
       });
-      if (cat && (!cat.tenantId || cat.tenantId === tenantId)) {
+      if (cat && cat.tenantId === tenantId) {
         const leftover = await prisma.product.count({
-          where: { categoryId },
+          where: { categoryId, tenantId },
         });
-        if (!leftover && cat.tenantId === tenantId) {
+        if (!leftover) {
           await prisma.category.delete({ where: { id: categoryId } });
         }
       }
@@ -1266,7 +1273,7 @@ async function handleAdminCallback(user, chatId, data) {
     const next = product.status === "AVAILABLE" ? "UNAVAILABLE" : "AVAILABLE";
     try {
       await prisma.product.update({
-        where: { code },
+        where: { id: product.id },
         data: { status: next },
       });
       await reply(
@@ -1283,16 +1290,19 @@ async function handleAdminCallback(user, chatId, data) {
     return true;
   }
   if (action === "del") {
+    const owned = await loadOwnedProduct(code, tenantId);
+    if (!owned?.id) {
+      await reply(user, chatId, "این کالا پیدا نشد.");
+      await showProducts(user, chatId, tenantId);
+      return true;
+    }
     try {
-      const owned = await loadOwnedProduct(code, tenantId);
-      if (owned?.id) {
-        await require("../services/shopCart").deleteItemsForProducts([owned.id]);
-      }
+      await require("../services/shopCart").deleteItemsForProducts([owned.id]);
     } catch (err) {
       console.error("PRODUCT DELETE SHOP CART:", err.message);
     }
     try {
-      await prisma.product.delete({ where: { code } });
+      await prisma.product.delete({ where: { id: owned.id } });
       await reply(user, chatId, "🗑 کالا حذف شد.");
     } catch (err) {
       console.error("PRODUCT DELETE:", err.message);

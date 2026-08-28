@@ -32,7 +32,7 @@ async function getCartWithItems(userId, tenantId) {
   if (!itemRows?.length) return { id: cart.id, items: [] };
 
   const products = await prisma.product.findMany({
-    where: { id: { in: itemRows.map((row) => row.productId) } },
+    where: { id: { in: itemRows.map((row) => row.productId) }, tenantId },
     select: PRODUCT_SAFE_SELECT,
   });
   const byId = new Map(products.map((product) => [product.id, product]));

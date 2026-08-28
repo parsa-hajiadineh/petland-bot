@@ -1,13 +1,14 @@
 const prisma = require("../database/prisma");
 const { reply, notifyMother } = require("../bot/messenger");
 const bale = require("../bot/bale");
-const { getBotContext } = require("../bot/context");
+const { getBotContext, isMother } = require("../bot/context");
 const { ADMIN_BALE_IDS } = require("../config");
 const { BTN, kb, inlineKb, backMain, mainMenu, tenantAdminMenu, paymentMenu } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const { buildPaymentInfo } = require("../utils/invoice");
 const packages = require("../services/servicePackages");
 const invoices = require("../services/serviceInvoices");
+const { isAdmin } = require("../services/user");
 const creditLedger = require("../services/creditLedger");
 
 const MOTHER_LIST = "SB:I:LIST";
@@ -77,6 +78,24 @@ function isTenantStep(step) {
 
 function isTenantInvoiceStep(step) {
   return Boolean(step && String(step).startsWith("TS:SINV:"));
+}
+
+async function canAccessServiceInvoice(user, invoice) {
+  if (!user || !invoice) return false;
+  const ctx = getBotContext();
+  if (!isMother()) {
+    if (!ctx.tenantId || invoice.tenantId !== ctx.tenantId) return false;
+    return require("./tenantAdmin").isShopOwner(user, ctx.tenantId);
+  }
+  if (isAdmin(user)) return true;
+  if (invoice.userId === user.id) return true;
+  try {
+    const owned = await require("../services/shopProvision").findOwnedTenant(user.id);
+    if (owned?.id && invoice.tenantId === owned.id) return true;
+  } catch (err) {
+    console.error("INVOICE OWNER LOOKUP:", err.message);
+  }
+  return false;
 }
 
 async function shopHasBot(tenantId) {
@@ -577,7 +596,10 @@ async function submitZeroCashInvoice(user, chatId, invoice, source) {
 }
 
 async function startPayment(user, chatId, invoice, source, tenantId) {
+  if (!invoice || !(await canAccessServiceInvoice(user, invoice))) return;
   if (source === "tenant") {
+    const ctx = getBotContext();
+    if (!ctx.tenantId || invoice.tenantId !== ctx.tenantId) return;
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: TENANT_PAY, pendingOrderId: invoice.id },
@@ -620,6 +642,8 @@ async function handleReceiptPhoto(user, chatId, photo) {
   const tenantPay =
     user.adminStep === TENANT_PAY || user.adminStep === TENANT_INV_VIEW;
   if (!motherPay && !tenantPay) return false;
+  if (tenantPay && isMother()) return false;
+  if (motherPay && !isMother()) return false;
   const invoiceId = user.pendingOrderId;
   if (!invoiceId) return false;
   const fileId = photo[photo.length - 1]?.file_id || photo[photo.length - 1]?.fileId;
@@ -628,6 +652,7 @@ async function handleReceiptPhoto(user, chatId, photo) {
   if (!current || current.status === "APPROVED" || current.status === "REJECTED") {
     return false;
   }
+  if (!(await canAccessServiceInvoice(user, current))) return false;
   const invoice = await invoices.markWaitingApproval(invoiceId, fileId);
   if (tenantPay) {
     await prisma.user.update({
@@ -679,7 +704,11 @@ async function handleText(user, chatId, text) {
       user.pendingOrderId
     ) {
       const inv = await invoices.getInvoice(user.pendingOrderId);
-      if (inv && inv.status === "WAITING_PAYMENT") {
+      if (
+        inv &&
+        inv.status === "WAITING_PAYMENT" &&
+        (await canAccessServiceInvoice(user, inv))
+      ) {
         await startPayment(
           user,
           chatId,
@@ -804,9 +833,15 @@ async function showInvoiceList(user, chatId, tenantId) {
 
 async function showInvoiceDetail(user, chatId, invoiceId) {
   const invoice = await invoices.getInvoice(invoiceId);
-  if (!invoice) {
+  if (!invoice || !(await canAccessServiceInvoice(user, invoice))) {
     await reply(user, chatId, "این فاکتور پیدا نشد.", invoiceListMenu());
-    await showInvoiceList(user, chatId, getBotContext().tenantId);
+    if (!isMother()) {
+      await showInvoiceList(user, chatId, getBotContext().tenantId);
+    }
+    return true;
+  }
+  if (isMother()) {
+    await reply(user, chatId, invoices.formatInvoiceText(invoice), backMain());
     return true;
   }
   await prisma.user.update({

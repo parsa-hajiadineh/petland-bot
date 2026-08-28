@@ -117,24 +117,26 @@ async function notifyCustomer(order, message) {
 
 function tsOrderQueries(whereExtra) {
   const ctx = getBotContext();
-  const base = {
-    trackingCode: { startsWith: "TS-" },
-    ...whereExtra,
-  };
   const queries = [];
-  if (ctx.tenantId) {
-    queries.push({ ...base, tenantId: ctx.tenantId });
-    queries.push({
-      ...base,
-      items: { some: { product: { tenantId: ctx.tenantId } } },
-    });
-  }
-  queries.push(base);
+  if (!ctx.tenantId) return { queries, tenantId: null };
+  const extra = whereExtra || {};
+  queries.push({
+    trackingCode: { startsWith: "TS-" },
+    tenantId: ctx.tenantId,
+    ...extra,
+  });
+  queries.push({
+    trackingCode: { startsWith: "TS-" },
+    tenantId: null,
+    items: { some: { product: { tenantId: ctx.tenantId } } },
+    ...extra,
+  });
   return { queries, tenantId: ctx.tenantId };
 }
 
 async function findTsOrders(whereExtra, select, take = 20, skip = 0) {
   const { queries, tenantId } = tsOrderQueries(whereExtra);
+  if (!queries.length) return [];
   let lastErr;
   let scopedOk = false;
   for (let i = 0; i < queries.length; i++) {
@@ -161,6 +163,7 @@ async function findTsOrders(whereExtra, select, take = 20, skip = 0) {
 
 async function findTsOrder(whereExtra, select) {
   const { queries } = tsOrderQueries(whereExtra);
+  if (!queries.length) return null;
   let lastErr;
   let ok = false;
   for (const where of queries) {
@@ -183,6 +186,9 @@ async function findTsOrder(whereExtra, select) {
 
 async function createTenantOrder(user, data, retries = 4) {
   const ctx = getBotContext();
+  if (!ctx.tenantId) {
+    throw new Error("TENANT_ORDER_NO_CONTEXT");
+  }
   let lastErr;
   for (let i = 0; i < retries; i++) {
     const trackingCode = generateTenantTrackingCode();
@@ -199,18 +205,6 @@ async function createTenantOrder(user, data, retries = 4) {
       });
     } catch (err) {
       lastErr = err;
-      const msg = String(err.message || "");
-      if (/column|does not exist|Unknown arg/i.test(msg)) {
-        try {
-          const { tenantId, botId, ...withoutTenant } = payload;
-          return await prisma.order.create({
-            data: withoutTenant,
-            select: ORDER_WITH_ITEMS_SELECT,
-          });
-        } catch (err2) {
-          lastErr = err2;
-        }
-      }
     }
   }
   throw lastErr;
@@ -655,12 +649,16 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
     photo[photo.length - 1]?.file_id || photo[photo.length - 1]?.fileId;
   if (!fileId) return false;
 
-  const waitingReceipt =
-    user.orderStep === RECEIPT_STEP || user.orderStep === "UPLOAD_RECEIPT";
-  if (!waitingReceipt) return false;
+  if (user.orderStep !== RECEIPT_STEP) return false;
 
   let pendingId = user.pendingOrderId;
-  if (!pendingId) {
+  if (pendingId) {
+    const existing = await findTsOrder(
+      { id: pendingId, userId: user.id },
+      { id: true }
+    );
+    if (!existing) return false;
+  } else {
     const pending = await findTsOrder(
       { userId: user.id, status: "WAITING_PAYMENT" },
       { id: true }
@@ -763,13 +761,14 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   code
 ) {
   const ctx = getBotContext();
-  const order = await prisma.order.findFirst({
-    where: {
+  if (!ctx.tenantId) return false;
+  const order = await findTsOrder(
+    {
       trackingCode: String(code || "").trim(),
       userId: user.id,
     },
-    select: ORDER_WITH_ITEMS_SELECT,
-  });
+    ORDER_WITH_ITEMS_SELECT
+  );
   if (!order || !String(order.trackingCode).startsWith("TS-")) return false;
 
   const { shop, bank } = await paymentBank(ctx.tenantId);
@@ -809,7 +808,14 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   return true;
 };
 
+function orderBelongsToShop(order, tenantId) {
+  if (!order || !tenantId) return false;
+  if (order.tenantId) return order.tenantId === tenantId;
+  return (order.items || []).some((item) => item.product?.tenantId === tenantId);
+}
+
 async function loadShopOrder(orderId, tenantId) {
+  if (!orderId || !tenantId) return null;
   try {
     const order = await findTsOrder(
       { id: orderId },
@@ -818,13 +824,22 @@ async function loadShopOrder(orderId, tenantId) {
         user: { select: { fullName: true, baleId: true } },
       }
     );
-    if (!order) return null;
-    if (order.tenantId && tenantId && order.tenantId !== tenantId) return null;
+    if (!orderBelongsToShop(order, tenantId)) return null;
     return order;
   } catch (err) {
     console.error("LOAD SHOP ORDER:", err.message);
     return null;
   }
+}
+
+async function mutateOwnedPendingOrder(user, tenantId, data) {
+  const owned = await loadShopOrder(user.pendingOrderId, tenantId);
+  if (!owned) return null;
+  return prisma.order.update({
+    where: { id: owned.id },
+    data,
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
 }
 
 const CLOSED_SHOP_STATUSES = ["REJECTED", "SHIPPED"];
@@ -843,7 +858,20 @@ function isClosedShopOrder(order) {
   return CLOSED_SHOP_STATUSES.includes(order.status);
 }
 
+async function requireShopOwner(user, chatId) {
+  const ctx = getBotContext();
+  if (await tenantAdmin.isShopOwner(user, ctx.tenantId)) return true;
+  await reply(
+    user,
+    chatId,
+    "این بخش فقط برای صاحب فروشگاه است.",
+    await shopMenu(user)
+  );
+  return false;
+}
+
 module.exports.showShopOrders = async function showShopOrders(user, chatId) {
+  if (!(await requireShopOwner(user, chatId))) return;
   await prisma.user.update({
     where: { id: user.id },
     data: { adminStep: "TS:ORDERS", pendingOrderId: null },
@@ -864,6 +892,7 @@ module.exports.showShopOrderList = async function showShopOrderList(
   kind,
   offset = 0
 ) {
+  if (!(await requireShopOwner(user, chatId))) return;
   const closed = kind === "closed";
   const adminStep = closed ? CLOSED_LIST_STEP : OPEN_LIST_STEP;
   await prisma.user.update({
@@ -955,6 +984,7 @@ module.exports.showShopOrderDetail = async function showShopOrderDetail(
   chatId,
   orderId
 ) {
+  if (!(await requireShopOwner(user, chatId))) return;
   const ctx = getBotContext();
   const order = await loadShopOrder(orderId, ctx.tenantId);
   if (!order) {
@@ -999,11 +1029,14 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
   if (user.adminStep === "TS:O_REJECT" && user.pendingOrderId) {
     if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
     try {
-      const order = await prisma.order.update({
-        where: { id: user.pendingOrderId },
-        data: { status: "REJECTED", rejectReason: text },
-        select: ORDER_WITH_ITEMS_SELECT,
+      const order = await mutateOwnedPendingOrder(user, ctx.tenantId, {
+        status: "REJECTED",
+        rejectReason: text,
       });
+      if (!order) {
+        await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", shopOrdersMenu());
+        return true;
+      }
       await notifyCustomer(order, `❌ فاکتور شما رد شد.\n\nدلیل: ${text}`);
       await reply(user, chatId, "فاکتور رد شد.", shopOrdersMenu());
       await module.exports.showShopOrderList(user, chatId, "closed");
@@ -1017,11 +1050,14 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
   if (user.adminStep === "TS:O_SHIP" && user.pendingOrderId) {
     if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
     try {
-      const order = await prisma.order.update({
-        where: { id: user.pendingOrderId },
-        data: { status: "SHIPPED", shipmentInfo: text },
-        select: ORDER_WITH_ITEMS_SELECT,
+      const order = await mutateOwnedPendingOrder(user, ctx.tenantId, {
+        status: "SHIPPED",
+        shipmentInfo: text,
       });
+      if (!order) {
+        await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", shopOrdersMenu());
+        return true;
+      }
       await notifyCustomer(order, `🚚 سفارش ارسال شد.\n${text}`);
       await reply(user, chatId, "✅ ارسال ثبت شد.", shopOrdersMenu());
       await module.exports.showShopOrderList(user, chatId, "closed");
@@ -1041,11 +1077,13 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
 
   if (text === BTN.APPROVE) {
     try {
-      const order = await prisma.order.update({
-        where: { id: user.pendingOrderId },
-        data: { status: "APPROVED" },
-        select: ORDER_WITH_ITEMS_SELECT,
+      const order = await mutateOwnedPendingOrder(user, ctx.tenantId, {
+        status: "APPROVED",
       });
+      if (!order) {
+        await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", tenantAdminMenu());
+        return true;
+      }
       await notifyCustomer(order, "✅ فاکتور شما تایید شد.");
       await reply(user, chatId, "فاکتور تایید شد.", adminApprovedActions());
     } catch (err) {
@@ -1072,11 +1110,13 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
 
   if (text === BTN.PACK) {
     try {
-      const order = await prisma.order.update({
-        where: { id: user.pendingOrderId },
-        data: { status: "PACKAGING" },
-        select: ORDER_WITH_ITEMS_SELECT,
+      const order = await mutateOwnedPendingOrder(user, ctx.tenantId, {
+        status: "PACKAGING",
       });
+      if (!order) {
+        await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", adminApprovedActions());
+        return true;
+      }
       await notifyCustomer(order, "📦 سفارش در حال بسته‌بندی است.");
       await reply(user, chatId, "وضعیت: بسته‌بندی", adminApprovedActions());
     } catch (err) {

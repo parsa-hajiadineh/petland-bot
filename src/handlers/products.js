@@ -37,11 +37,18 @@ const PRODUCT_DETAIL_SELECT = {
 
 function motherCatalogWhere(extra = {}) {
   const motherId = getMotherTenantId();
-  if (!motherId) return extra;
-  return {
-    ...extra,
-    OR: [{ tenantId: null }, { tenantId: motherId }],
-  };
+  const scope = motherId
+    ? { OR: [{ tenantId: null }, { tenantId: motherId }] }
+    : { tenantId: null };
+  return { ...extra, ...scope };
+}
+
+function motherCategoryWhere(title) {
+  const motherId = getMotherTenantId();
+  if (motherId) {
+    return { title, OR: [{ tenantId: null }, { tenantId: motherId }] };
+  }
+  return { title, tenantId: null };
 }
 
 async function loadProductByCode(code) {
@@ -49,7 +56,7 @@ async function loadProductByCode(code) {
   const motherId = getMotherTenantId();
   const where = motherId
     ? { code, OR: [{ tenantId: null }, { tenantId: motherId }] }
-    : { code };
+    : { code, tenantId: null };
 
   try {
     return await prisma.product.findFirst({
@@ -350,7 +357,7 @@ module.exports.showBrandProducts = async function showBrandProducts(
   let products;
   try {
     category = await prisma.category.findFirst({
-      where: { title: categoryBtn },
+      where: motherCategoryWhere(categoryBtn),
     });
     if (!category) {
       await reply(user, chatId, "دسته‌بندی پیدا نشد.");
@@ -411,7 +418,7 @@ module.exports.showCategory = async function showCategory(
   let products;
   try {
     category = await prisma.category.findFirst({
-      where: { title: categoryTitle },
+      where: motherCategoryWhere(categoryTitle),
     });
     if (!category) {
       await reply(user, chatId, "دسته‌بندی پیدا نشد.");
