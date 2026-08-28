@@ -184,6 +184,7 @@ const BTN = {
   SHOP_CREDIT_WALLET: "📒 کیف پول اعتباری",
   SHOP_CREDIT_LEDGER: "📋 دفتر تراکنش‌ها",
   SHOP_ADMIN: "⚙️ مدیریت فروشگاه",
+  SHOP_SETTINGS: "⚙️ تنظیمات فروشگاه",
   SHOP_PROFILE: "🏪 مشخصات فروشگاه",
   SHOP_LOGO: "🖼 لوگو",
   SHOP_WELCOME: "💬 پیام خوش‌آمد",
@@ -193,7 +194,7 @@ const BTN = {
   SHOP_PRODUCTS: "📦 کالاهای فروشگاه",
   SHOP_ADD_CATEGORY: "➕ دسته جدید",
   SHOP_ADD_PRODUCT: "➕ کالای جدید",
-  SHOP_ORDERS: "🧾 سفارش‌های فروشگاه",
+  SHOP_ORDERS: "🧾 سفارش‌های مشتریان",
   SHOP_ORDERS_OPEN: "📬 سفارشات باز",
   SHOP_ORDERS_CLOSED: "📭 سفارشات بسته",
   APPROVE: "✅ تایید فاکتور",
@@ -257,12 +258,18 @@ function tenantMainMenu(isOwner) {
 
 function tenantAdminMenu() {
   return kb([
-    [{ text: BTN.SHOP_PROFILE }, { text: BTN.SHOP_LOGO }],
-    [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_HELP }],
-    [{ text: BTN.SHOP_BANK }, { text: BTN.SHOP_ORDERS }],
-    [{ text: BTN.SHOP_CATEGORIES }, { text: BTN.SHOP_PRODUCTS }],
+    [{ text: BTN.SHOP_SETTINGS }, { text: BTN.SHOP_ORDERS }],
     [{ text: BTN.SHOP_SUBSCRIBE }, { text: BTN.SHOP_SERVICE_INVOICES }],
     [{ text: BTN.SHOP_CREDIT_WALLET }, { text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function shopSettingsMenu() {
+  return kb([
+    [{ text: BTN.SHOP_PROFILE }, { text: BTN.SHOP_LOGO }],
+    [{ text: BTN.SHOP_WELCOME }, { text: BTN.SHOP_HELP }],
+    [{ text: BTN.SHOP_BANK }, { text: BTN.SHOP_CATEGORIES }],
+    [{ text: BTN.SHOP_PRODUCTS }, { text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -489,6 +496,7 @@ module.exports = {
   mainMenu,
   tenantMainMenu,
   tenantAdminMenu,
+  shopSettingsMenu,
   shopCreditMenu,
   shopOrdersMenu,
   tenantProfileMenu,

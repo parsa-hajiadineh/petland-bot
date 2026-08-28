@@ -8,6 +8,7 @@ const {
   kb,
   inlineKb,
   tenantAdminMenu,
+  shopSettingsMenu,
   shopCreditMenu,
   tenantProfileMenu,
   tenantBankMenu,
@@ -220,13 +221,23 @@ function bankSummary(shop) {
 برای ویرایش یکی از دکمه‌ها را بزنید.`;
 }
 
+async function showShopSettings(user, chatId) {
+  await setStep(user, "TS:SETTINGS");
+  await reply(
+    user,
+    chatId,
+    "⚙️ تنظیمات فروشگاه\n\nظاهر فروشگاه، دسته‌ها و کالاها را از اینجا تنظیم کنید.",
+    shopSettingsMenu()
+  );
+}
+
 async function showAdminHome(user, chatId) {
   await ensureShopRuntimeTables();
   await setStep(user, "TS:MENU");
   await reply(
     user,
     chatId,
-    "⚙️ مدیریت فروشگاه\n\nاز اینجا ظاهر فروشگاه، دسته‌ها و کالاها را تنظیم کنید.",
+    "⚙️ مدیریت فروشگاه\n\nاز منو اشتراک، سفارش مشتریان و تنظیمات فروشگاه را مدیریت کنید.",
     tenantAdminMenu()
   );
 }
@@ -677,18 +688,27 @@ async function handleAdminText(user, chatId, text) {
       await showAdminHome(user, chatId);
       return true;
     }
+    if (user.adminStep === "TS:SETTINGS") {
+      await showAdminHome(user, chatId);
+      return true;
+    }
     if (
       user.adminStep === "TS:MENU" ||
+      user.adminStep === "TS:CREDIT"
+    ) {
+      await showAdminHome(user, chatId);
+      return true;
+    }
+    if (
       user.adminStep === "TS:PROFILE" ||
       user.adminStep === "TS:BANK" ||
       user.adminStep === "TS:CATS" ||
       user.adminStep === "TS:PRODUCTS" ||
       user.adminStep === "TS:WELCOME" ||
       user.adminStep === "TS:HELP" ||
-      user.adminStep === "TS:LOGO" ||
-      user.adminStep === "TS:CREDIT"
+      user.adminStep === "TS:LOGO"
     ) {
-      await showAdminHome(user, chatId);
+      await showShopSettings(user, chatId);
       return true;
     }
     if (String(user.adminStep).startsWith("TS:P_")) {
@@ -703,6 +723,10 @@ async function handleAdminText(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.SHOP_SETTINGS) {
+    await showShopSettings(user, chatId);
+    return true;
+  }
   if (text === BTN.SHOP_PROFILE) {
     await showProfile(user, chatId, tenantId);
     return true;

@@ -264,6 +264,12 @@ async function handleCallbackQuery(cq, user) {
     return;
   }
 
+  if (data.startsWith("tcld:")) {
+    const offset = Number(data.slice(5)) || 0;
+    await tenantOrder.showShopOrderList(user, chatId, "closed", offset);
+    return;
+  }
+
   if (data.startsWith("tord:")) {
     await tenantOrder.showShopOrderDetail(user, chatId, data.slice(5));
     return;

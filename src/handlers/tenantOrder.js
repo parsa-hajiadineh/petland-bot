@@ -133,7 +133,7 @@ function tsOrderQueries(whereExtra) {
   return { queries, tenantId: ctx.tenantId };
 }
 
-async function findTsOrders(whereExtra, select, take = 20) {
+async function findTsOrders(whereExtra, select, take = 20, skip = 0) {
   const { queries, tenantId } = tsOrderQueries(whereExtra);
   let lastErr;
   let scopedOk = false;
@@ -145,6 +145,7 @@ async function findTsOrders(whereExtra, select, take = 20) {
         where: queries[i],
         orderBy: { createdAt: "desc" },
         take,
+        skip,
         select,
       });
       if (!isLast) scopedOk = true;
@@ -846,7 +847,7 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
   await reply(
     user,
     chatId,
-    "🧾 سفارش‌های فروشگاه\n\nسفارشات باز یا بسته را انتخاب کنید.",
+    "🧾 سفارش‌های مشتریان\n\nسفارشات باز یا بسته را انتخاب کنید.",
     shopOrdersMenu()
   );
 };
@@ -854,7 +855,8 @@ module.exports.showShopOrders = async function showShopOrders(user, chatId) {
 module.exports.showShopOrderList = async function showShopOrderList(
   user,
   chatId,
-  kind
+  kind,
+  offset = 0
 ) {
   const closed = kind === "closed";
   const adminStep = closed ? CLOSED_LIST_STEP : OPEN_LIST_STEP;
@@ -869,6 +871,8 @@ module.exports.showShopOrderList = async function showShopOrderList(
     ? { status: { in: CLOSED_SHOP_STATUSES } }
     : { status: { notIn: CLOSED_SHOP_STATUSES } };
   const title = closed ? "📭 سفارشات بسته" : "📬 سفارشات باز";
+  const pageSize = closed ? 10 : 20;
+  const skip = closed ? Math.max(0, Number(offset) || 0) : 0;
 
   let orders = [];
   try {
@@ -881,7 +885,8 @@ module.exports.showShopOrderList = async function showShopOrderList(
         totalAmount: true,
         fullName: true,
       },
-      20
+      closed ? pageSize + 1 : pageSize,
+      skip
     );
     orders = orders.filter((order) =>
       closed ? isClosedShopOrder(order) : !isClosedShopOrder(order)
@@ -897,12 +902,17 @@ module.exports.showShopOrderList = async function showShopOrderList(
       user,
       chatId,
       closed
-        ? "📭 سفارش رد شده یا ارسال‌شده‌ای نیست."
+        ? skip
+          ? "📭 سفارش بسته‌ی قدیمی‌تری نیست."
+          : "📭 سفارش رد شده یا ارسال‌شده‌ای نیست."
         : "📬 سفارش بازی برای این فروشگاه نیست.",
       shopOrdersMenu()
     );
     return;
   }
+
+  const hasMore = closed && orders.length > pageSize;
+  if (hasMore) orders = orders.slice(0, pageSize);
 
   const rows = orders.map((order) => [
     {
@@ -910,6 +920,14 @@ module.exports.showShopOrderList = async function showShopOrderList(
       callback_data: `tord:${order.id}`.slice(0, 64),
     },
   ]);
+  if (hasMore) {
+    rows.push([
+      {
+        text: "ده سفارش قبلی",
+        callback_data: `tcld:${skip + pageSize}`.slice(0, 64),
+      },
+    ]);
+  }
   await reply(
     user,
     chatId,
