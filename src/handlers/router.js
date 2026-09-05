@@ -88,11 +88,11 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.MARKETING || text === BTN.WALLET) {
-    if (user.role === "COLLEAGUE") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
       await reply(
         user,
         chatId,
-        "این بخش در حالت همکار در دسترس نیست.",
+        "این بخش در این حالت در دسترس نیست.",
         mainMenu(user)
       );
       return;
@@ -106,11 +106,11 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.WITHDRAW_NEW) {
-    if (user.role === "COLLEAGUE") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
       await reply(
         user,
         chatId,
-        "این بخش در حالت همکار در دسترس نیست.",
+        "این بخش در این حالت در دسترس نیست.",
         mainMenu(user)
       );
       return;
@@ -120,11 +120,11 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.WITHDRAW_HISTORY) {
-    if (user.role === "COLLEAGUE") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
       await reply(
         user,
         chatId,
-        "این بخش در حالت همکار در دسترس نیست.",
+        "این بخش در این حالت در دسترس نیست.",
         mainMenu(user)
       );
       return;
@@ -304,7 +304,7 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (MARKETING_ACCESS_CODE && text.trim() === MARKETING_ACCESS_CODE) {
-    if (user.role === "COLLEAGUE") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
       await reply(
         user,
         chatId,

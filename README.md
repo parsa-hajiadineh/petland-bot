@@ -77,6 +77,7 @@ Copy [`.env.example`](.env.example) and fill in real values. Do not commit `.env
 | `PUBLIC_BASE_URL` | Public HTTPS origin, used to build partner webhook URLs |
 | `ADMIN_BALE_IDS` | Comma-separated Bale user IDs with admin access |
 | `COLLEAGUE_ACCESS_CODE` | Access code for wholesale (colleague) mode |
+| `MANELI_ACCESS_CODE` | Access code for Maneli marketer wholesale panel |
 | `MARKETING_ACCESS_CODE` | Access code for referral and wallet features |
 | `DEFAULT_PROFIT_PERCENT` | Retail markup over cost price (default: `15`) |
 | `WHOLESALE_MIN_ORDER` | Minimum wholesale order in Toman (default: `0`) |

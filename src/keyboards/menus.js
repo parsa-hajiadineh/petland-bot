@@ -121,6 +121,11 @@ const BTN = {
   SUPPORT: "🎫 پشتیبانی",
   HELP: "📖 راهنما",
   COLLEAGUE: "🤝 خرید همکار",
+  ENTER_COLLEAGUE: "🤝 ورود به حالت همکار",
+  ENTER_MANELI: "🧾 ورود به پنل بازاریابان مانلی",
+  INV_RETAIL: "🛒 خرید عادی",
+  INV_COLLEAGUE: "🤝 خرید همکار",
+  INV_MANELI: "🧾 بازاریابان مانلی",
   CREATE_SHOP_BOT: "🤖 ساخت ربات فروشگاهی",
   SHOP_ONLINE: "🌐 آنلاین شاپ",
   SHOP_PHYSICAL: "🏪 فروشگاه حضوری",
@@ -246,7 +251,7 @@ function mainMenu(user) {
     [{ text: BTN.SUPPORT }, { text: BTN.HELP }],
   ];
 
-  if (user.marketingEnabled && user.role !== "COLLEAGUE") {
+  if (user.marketingEnabled && user.role !== "COLLEAGUE" && user.role !== "MANELI") {
     rows.push([{ text: BTN.MARKETING }, { text: BTN.WALLET }]);
   }
 
@@ -257,7 +262,7 @@ function mainMenu(user) {
   if (user.role === "ADMIN") {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
-  } else if (user.role !== "COLLEAGUE") {
+  } else if (user.role !== "COLLEAGUE" && user.role !== "MANELI") {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }
 
@@ -447,11 +452,27 @@ function adminServiceInvoicesMenu() {
   ]);
 }
 
+function adminInvoiceKindMenu() {
+  return kb([
+    [{ text: BTN.INV_RETAIL }, { text: BTN.INV_COLLEAGUE }],
+    [{ text: BTN.INV_MANELI }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
 function adminInvoicesMenu() {
   return kb([
     [{ text: BTN.ADMIN_PENDING }, { text: BTN.ADMIN_APPROVED }],
     [{ text: BTN.ADMIN_REJECTED }, { text: BTN.ADMIN_SHIPPED }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function colleagueGateMenu() {
+  return kb([
+    [{ text: BTN.ENTER_COLLEAGUE }],
+    [{ text: BTN.ENTER_MANELI }],
+    [{ text: BTN.BACK_MAIN }],
   ]);
 }
 
@@ -573,7 +594,9 @@ module.exports = {
   adminServiceDetailMenu,
   adminServiceInvoiceActions,
   adminServiceInvoicesMenu,
+  adminInvoiceKindMenu,
   adminInvoicesMenu,
+  colleagueGateMenu,
   adminManageMenu,
   adminColleagueActions,
   adminCreditSettingsMenu,

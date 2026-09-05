@@ -8,6 +8,7 @@ const { formatPrice } = require("../utils/price");
 const {
   BTN,
   adminMenu,
+  adminInvoiceKindMenu,
   adminInvoicesMenu,
   adminBackMenu,
   adminOrderActions,
@@ -25,6 +26,43 @@ const adminManage = require("./adminManage");
 const adminBroadcast = require("./adminBroadcast");
 const adminProducts = require("./adminProducts");
 const salesStats = require("../services/salesStats");
+
+const INV_KIND_PREFIX = "INVKIND:";
+
+function readInvKind(user) {
+  const raw = String(user.tempDescription || "");
+  if (raw.startsWith(INV_KIND_PREFIX)) return raw.slice(INV_KIND_PREFIX.length);
+  return null;
+}
+
+function invKindWhere(kind) {
+  if (kind === "maneli") return { user: { role: "MANELI" } };
+  if (kind === "colleague") {
+    return { isWholesale: true, user: { role: { not: "MANELI" } } };
+  }
+  return { isWholesale: false, user: { role: { not: "MANELI" } } };
+}
+
+function invKindTitle(kind) {
+  if (kind === "maneli") return "بازاریابان مانلی";
+  if (kind === "colleague") return "خرید همکار";
+  return "خرید عادی";
+}
+
+async function setInvKind(user, kind) {
+  const value = `${INV_KIND_PREFIX}${kind}`;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      adminStep: "ADMIN_INVOICES",
+      pendingOrderId: null,
+      tempDescription: value,
+    },
+  });
+  user.adminStep = "ADMIN_INVOICES";
+  user.pendingOrderId = null;
+  user.tempDescription = value;
+}
 
 async function showSalesStats(user, chatId) {
   try {
@@ -82,14 +120,48 @@ module.exports.showMonthStats = async function showMonthStats(user, chatId, year
   }
 };
 
-async function showInvoicesMenu(user, chatId) {
+async function showInvoiceKindMenu(user, chatId) {
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: "ADMIN_INVOICES", pendingOrderId: null },
+    data: {
+      adminStep: "ADMIN_INV_KIND",
+      pendingOrderId: null,
+      tempDescription: null,
+    },
+  });
+  user.adminStep = "ADMIN_INV_KIND";
+  user.pendingOrderId = null;
+  user.tempDescription = null;
+  await reply(
+    user,
+    chatId,
+    "🧾 سفارش‌های مشتریان\n\nنوع فاکتور را انتخاب کنید:",
+    adminInvoiceKindMenu()
+  );
+}
+
+async function showInvoicesMenu(user, chatId) {
+  const kind = readInvKind(user);
+  if (!kind) {
+    await showInvoiceKindMenu(user, chatId);
+    return;
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      adminStep: "ADMIN_INVOICES",
+      pendingOrderId: null,
+      tempDescription: `${INV_KIND_PREFIX}${kind}`,
+    },
   });
   user.adminStep = "ADMIN_INVOICES";
   user.pendingOrderId = null;
-  await reply(user, chatId, "🧾 سفارش‌های مشتریان", adminInvoicesMenu());
+  await reply(
+    user,
+    chatId,
+    `🧾 سفارش‌های مشتریان\nنوع: ${invKindTitle(kind)}`,
+    adminInvoicesMenu()
+  );
 }
 
 async function replayInvoiceList(user, chatId, step) {
@@ -170,6 +242,11 @@ async function goAdminBack(user, chatId) {
     return true;
   }
 
+  if (step === "ADMIN_INVOICES") {
+    await showInvoiceKindMenu(user, chatId);
+    return true;
+  }
+
   if (
     step === "ADMIN_TICKET_OPEN" ||
     step === "ADMIN_TICKET_ANSWERED" ||
@@ -198,7 +275,7 @@ async function goAdminBack(user, chatId) {
     step === "ADMIN_SALES" ||
     step === "ADMIN_WITHDRAWALS" ||
     step === "ADMIN_TICKETS" ||
-    step === "ADMIN_INVOICES" ||
+    step === "ADMIN_INV_KIND" ||
     step === "SVC:LIST" ||
     step === "SINV:HUB" ||
     step === "CRSET:LIST" ||
@@ -251,8 +328,14 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 
   let orders;
   try {
+    const kind = readInvKind(user);
+    const kindFilter = kind ? invKindWhere(kind) : {};
     orders = await prisma.order.findMany({
-      where: { ...where, trackingCode: { startsWith: "PL-" } },
+      where: {
+        ...where,
+        ...kindFilter,
+        trackingCode: { startsWith: "PL-" },
+      },
       orderBy: { createdAt: "desc" },
       skip: offset,
       take: paginated ? take + 1 : 50,
@@ -286,8 +369,10 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
     rows.push([{ text: "⬅️ ۱۰ فاکتور قدیمی‌تر", callback_data: `${morePrefix}:${offset + take}` }]);
   }
 
+  const kind = readInvKind(user);
+  const kindNote = kind ? ` — ${invKindTitle(kind)}` : "";
   const pageInfo = paginated && offset > 0 ? ` — صفحه ${Math.floor(offset / take) + 1}` : "";
-  await reply(user, chatId, `${title}${pageInfo}`, adminBackMenu());
+  await reply(user, chatId, `${title}${kindNote}${pageInfo}`, adminBackMenu());
   const result = await bale.sendKeyboard(
     chatId,
     "روی فاکتور کلیک کنید:",
@@ -309,6 +394,22 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (text === BTN.ADMIN_INVOICES) {
+    await showInvoiceKindMenu(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.INV_RETAIL) {
+    await setInvKind(user, "retail");
+    await showInvoicesMenu(user, chatId);
+    return true;
+  }
+  if (text === BTN.INV_COLLEAGUE) {
+    await setInvKind(user, "colleague");
+    await showInvoicesMenu(user, chatId);
+    return true;
+  }
+  if (text === BTN.INV_MANELI) {
+    await setInvKind(user, "maneli");
     await showInvoicesMenu(user, chatId);
     return true;
   }
@@ -654,13 +755,28 @@ async function claimShipOrder(orderId, shipmentInfo) {
   });
 }
 
+async function attachBuyer(order) {
+  if (!order?.userId) return order;
+  if (order.user?.role) return order;
+  try {
+    const buyer = await prisma.user.findUnique({
+      where: { id: order.userId },
+      select: { role: true, fullName: true, baleId: true },
+    });
+    return { ...order, user: buyer };
+  } catch {
+    return order;
+  }
+}
+
 async function showAdminOrderDetail(user, chatId, order) {
   await prisma.user.update({
     where: { id: user.id },
     data: { pendingOrderId: order.id },
   });
 
-  const invoice = buildInvoiceText(order, order.items);
+  const withBuyer = await attachBuyer(order);
+  const invoice = buildInvoiceText(withBuyer, withBuyer.items);
   let keyboard = adminBackMenu();
 
   if (order.status === "WAITING_APPROVAL") {
@@ -712,12 +828,22 @@ async function approveOrder(user, chatId) {
     return;
   }
 
-  const credit = await require("../services/goldenCampaign")
-    .grantPurchaseCredit(order, user.id, { silent: true })
-    .catch((err) => {
-      console.error("GOLDEN CREDIT APPROVE SKIP:", err.message);
-      return null;
-    });
+  const buyer = await prisma.user
+    .findUnique({
+      where: { id: order.userId },
+      select: { id: true, role: true, baleId: true, referrerId: true },
+    })
+    .catch(() => null);
+  const isManeli = buyer?.role === "MANELI";
+
+  const credit = isManeli
+    ? null
+    : await require("../services/goldenCampaign")
+        .grantPurchaseCredit(order, user.id, { silent: true })
+        .catch((err) => {
+          console.error("GOLDEN CREDIT APPROVE SKIP:", err.message);
+          return null;
+        });
   const creditAmount = Number(credit?.totalCredit || 0);
   const statusMsg =
     creditAmount > 0
@@ -739,17 +865,17 @@ async function approveOrder(user, chatId) {
     console.log("PDF ERROR:", err.message);
   }
 
-  const owner = await prisma.user.findUnique({
+  const owner = buyer || (await prisma.user.findUnique({
     where: { id: order.userId },
-  });
+  }));
 
   if (owner) {
     await partnerNotify.notifyOrderBuyer(
-      order,
-      buildInvoiceText(order, order.items)
+      { ...order, user: owner },
+      buildInvoiceText({ ...order, user: owner }, order.items)
     );
 
-    if (owner.referrerId) {
+    if (owner.referrerId && owner.role !== "MANELI") {
       const commission = Math.floor(order.totalAmount * 0.05);
       if (commission > 0) {
         const referrerWallet = await getOrCreateWallet(owner.referrerId);

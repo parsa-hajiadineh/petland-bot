@@ -28,6 +28,7 @@ function parseTicketCode(raw) {
 
 function accountKind(role) {
   if (role === "COLLEAGUE") return "همکار";
+  if (role === "MANELI") return "بازاریاب مانلی";
   if (role === "ADMIN") return "ادمین";
   return "یوزر";
 }

@@ -12,6 +12,7 @@ module.exports = {
   PORT: process.env.PORT || 3000,
   ADMIN_BALE_IDS: parseIds(process.env.ADMIN_BALE_IDS),
   COLLEAGUE_ACCESS_CODE: process.env.COLLEAGUE_ACCESS_CODE || "",
+  MANELI_ACCESS_CODE: process.env.MANELI_ACCESS_CODE || "",
   MARKETING_ACCESS_CODE: process.env.MARKETING_ACCESS_CODE || "",
   DEFAULT_PROFIT_PERCENT: Number(process.env.DEFAULT_PROFIT_PERCENT || 15),
   WHOLESALE_MIN_ORDER: Number(process.env.WHOLESALE_MIN_ORDER || 0),

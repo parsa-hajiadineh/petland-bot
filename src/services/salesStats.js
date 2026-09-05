@@ -129,7 +129,7 @@ async function calcMonthStats(yearMonth) {
     select: {
       totalAmount: true,
       isWholesale: true,
-      user: { select: { referrerId: true } },
+      user: { select: { referrerId: true, role: true } },
       items: {
         select: {
           quantity: true,
@@ -145,11 +145,16 @@ async function calcMonthStats(yearMonth) {
   let retailProfit = 0;
   let colleagueVolume = 0;
   let colleagueCount = 0;
+  let maneliVolume = 0;
+  let maneliCount = 0;
   let commission = 0;
 
   for (const order of orders) {
     const amount = num(order.totalAmount);
-    if (order.isWholesale) {
+    if (order.user?.role === "MANELI") {
+      maneliVolume += amount;
+      maneliCount += 1;
+    } else if (order.isWholesale) {
       colleagueVolume += amount;
       colleagueCount += 1;
     } else {
@@ -204,6 +209,8 @@ async function calcMonthStats(yearMonth) {
     retailGross: retailProfit - commission,
     colleagueVolume,
     colleagueCount,
+    maneliVolume,
+    maneliCount,
     serviceCash: service.serviceCash,
     serviceCredit: service.serviceCredit,
     serviceCount: service.serviceCount,
@@ -238,6 +245,11 @@ function formatMonthReport(yearMonth, stats, isCurrent) {
     `۲. فاکتور خدمات نقدی: ${formatPrice(stats.serviceCash)}`,
     `۳. فاکتور خدمات اعتباری: ${formatPrice(stats.serviceCredit)}`,
     `   تعداد فاکتور تاییدشده: ${Number(stats.serviceCount).toLocaleString("fa-IR")}`,
+    "━━━━━━━━━━━━━━━━━━",
+    "بخش بازاریابان مانلی",
+    `۱. حجم فروش: ${formatPrice(stats.maneliVolume || 0)}`,
+    `   تعداد سفارش: ${Number(stats.maneliCount || 0).toLocaleString("fa-IR")}`,
+    "   سود این بخش صفر است",
     "━━━━━━━━━━━━━━━━━━",
     "وضعیت فعلی پلتفرم",
     `۱. تعداد کل یوزرهای ربات مادر: ${Number(stats.usersMotherNow).toLocaleString("fa-IR")}`,

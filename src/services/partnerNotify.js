@@ -37,6 +37,7 @@ async function notifyColleague(userId, text) {
 async function notifyOrderBuyer(order, text) {
   const user = await loadUser(order?.userId);
   if (!user?.baleId || !text) return { ok: false };
+  if (user.role === "MANELI") return notifyMother(user.baleId, text);
   const colleague =
     isColleagueBuyer(user) || Boolean(order?.isWholesale);
   if (colleague) return notifyColleague(user.id, text);

@@ -23,9 +23,13 @@ function setAdminRetailView(userId, enabled) {
 }
 
 function isWholesaleUser(user) {
-  if (user.role === "COLLEAGUE") return true;
+  if (user.role === "COLLEAGUE" || user.role === "MANELI") return true;
   if (user.role === "ADMIN") return !adminRetailView.has(user.id);
   return false;
+}
+
+function isManeliUser(user) {
+  return user?.role === "MANELI";
 }
 
 function getMinOrderAmount() {
@@ -37,6 +41,7 @@ module.exports = {
   getUnitPrice,
   formatPrice,
   isWholesaleUser,
+  isManeliUser,
   getMinOrderAmount,
   setAdminRetailView,
 };

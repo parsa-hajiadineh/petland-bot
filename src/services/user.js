@@ -47,8 +47,19 @@ function isAdmin(user) {
   return user.role === "ADMIN";
 }
 
+async function ensureManeliRole() {
+  try {
+    await prisma.$executeRawUnsafe(
+      `ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'MANELI'`
+    );
+  } catch (err) {
+    console.error("MANELI ROLE SKIP:", err.message);
+  }
+}
+
 module.exports = {
   getOrCreateUser,
   reloadUser,
   isAdmin,
+  ensureManeliRole,
 };

@@ -5,6 +5,12 @@ const { formatPrice } = require("./price");
 const { statusLabel } = require("./order");
 const { SHOP_NAME, BANK_CARD, BANK_IBAN, BANK_HOLDER, BANK_NAME } = require("../config");
 
+function orderKindLabel(order) {
+  if (order?.user?.role === "MANELI" || order?.isManeli) return "🏷 نوع: بازاریابان مانلی";
+  if (order?.isWholesale) return "🏷 نوع: خرید همکار";
+  return "🏷 نوع: خرید عادی";
+}
+
 function buildInvoiceText(order, items, shopName = SHOP_NAME) {
   const lines = [
     `🧾 فاکتور ${shopName}`,
@@ -40,7 +46,7 @@ function buildInvoiceText(order, items, shopName = SHOP_NAME) {
   lines.push(
     "━━━━━━━━━━━━━━━━━━",
     `💰 جمع کل: ${formatPrice(order.totalAmount)}`,
-    order.isWholesale ? "🏷 نوع: خرید همکار" : "🏷 نوع: خرید عادی"
+    orderKindLabel(order)
   );
 
   return lines.join("\n");
@@ -134,6 +140,7 @@ async function generateInvoicePdf(order, items) {
 
 module.exports = {
   buildInvoiceText,
+  orderKindLabel,
   buildPaymentInfo,
   buildShippingInfo,
   buildTenantShippingInfo,

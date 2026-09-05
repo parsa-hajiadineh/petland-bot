@@ -1,7 +1,7 @@
 const prisma = require("../database/prisma");
-const { COLLEAGUE_ACCESS_CODE } = require("../config");
+const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
-const { BTN, mainMenu, backMain, kb } = require("../keyboards/menus");
+const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView } = require("../utils/price");
 const {
   provisionShop,
@@ -421,24 +421,56 @@ function afterPage(user) {
 
 module.exports = async function colleagueHandler(user, chatId, text) {
   if (text === BTN.COLLEAGUE) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: "COLLEAGUE_GATE" },
+    });
+    user.orderStep = "COLLEAGUE_GATE";
     await reply(
       user,
       chatId,
-      `✨ ورود به بخش همکاران
+      "ورود به کدام بخش را می‌خواهید؟",
+      colleagueGateMenu()
+    );
+    return true;
+  }
 
-این بخش برای همکاران و مشتریان ویژه فروشگاه طراحی شده است.
+  if (text === BTN.ENTER_COLLEAGUE) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: "COLLEAGUE_CODE" },
+    });
+    user.orderStep = "COLLEAGUE_CODE";
+    await reply(
+      user,
+      chatId,
+      `✨ ورود به حالت همکار
 
 با داشتن کد دسترسی همکاری، می‌توانید ربات را به پنل اختصاصی خود تغییر دهید و به امکانات و شرایط ویژه همکاران ما دسترسی پیدا کنید.
 
 🔐 لطفا کد دسترسی خود را وارد نمایید:`,
       backMain()
     );
+    return true;
+  }
 
+  if (text === BTN.ENTER_MANELI) {
     await prisma.user.update({
       where: { id: user.id },
-      data: { orderStep: "COLLEAGUE_CODE" },
+      data: { orderStep: "MANELI_CODE" },
     });
+    user.orderStep = "MANELI_CODE";
+    await reply(
+      user,
+      chatId,
+      `✨ ورود به پنل بازاریابان مانلی
 
+این بخش برای بازاریابان مجموعه همکار است.
+خرید با قیمت همکاری ثبت می‌شود و فاکتورها در پنل ادمین مادر جمع می‌شوند.
+
+🔐 لطفا کد دسترسی بازاریابان مانلی را وارد نمایید:`,
+      backMain()
+    );
     return true;
   }
 
@@ -481,6 +513,58 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
   if (text === BTN.BACK_QUESTION && PROFILE_STEPS.includes(user.orderStep)) {
     await goProfileBack(user, chatId);
+    return true;
+  }
+
+  if (user.orderStep === "MANELI_CODE") {
+    if (!MANELI_ACCESS_CODE || text.trim() !== MANELI_ACCESS_CODE) {
+      await reply(
+        user,
+        chatId,
+        "❌ کد دسترسی اشتباه است. دوباره تلاش کنید یا به منوی اصلی برگردید.",
+        backMain()
+      );
+      return true;
+    }
+
+    const roleData =
+      user.role === "ADMIN"
+        ? { orderStep: null }
+        : { role: "MANELI", orderStep: null };
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: roleData,
+      });
+    } catch (err) {
+      console.error("MANELI ROLE SET SKIP:", err.message);
+      if (user.role !== "ADMIN") {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "User" SET role = 'MANELI', "orderStep" = NULL WHERE id = $1`,
+          user.id
+        );
+      } else {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { orderStep: null },
+        });
+      }
+    }
+    if (user.role === "ADMIN") setAdminRetailView(user.id, false);
+    else user.role = "MANELI";
+    user.orderStep = null;
+
+    await reply(
+      user,
+      chatId,
+      `✅ پنل بازاریابان مانلی فعال شد.
+
+در این حالت محصولات را با قیمت همکاری می‌بینید و سفارش ثبت می‌کنید.
+فاکتورهای شما در پنل ادمین مادر، بخش بازاریابان مانلی مدیریت می‌شود.
+
+ساخت ربات فروشگاهی، اعتبار، دوره طلایی و پکیج‌ها در این پنل فعال نیست.`,
+      mainMenu(user)
+    );
     return true;
   }
 

@@ -417,7 +417,7 @@ ${summary}
 🔖 ${order.trackingCode}`
   );
 
-  if (partnerNotify.isColleagueBuyer(user) || order.isWholesale) {
+  if (user.role !== "MANELI" && (partnerNotify.isColleagueBuyer(user) || order.isWholesale)) {
     await partnerNotify
       .notifyColleague(
         user.id,

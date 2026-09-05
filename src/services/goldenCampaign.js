@@ -360,6 +360,7 @@ async function grantPurchaseCredit(order, actorUserId, options = {}) {
       select: { id: true, role: true, baleId: true },
     });
     if (!owner) return null;
+    if (owner.role === "MANELI") return null;
     if (!order.isWholesale && !isColleagueBuyer(owner)) return null;
 
     const settings = await getSettings();
