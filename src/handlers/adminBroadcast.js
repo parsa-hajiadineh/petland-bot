@@ -1,6 +1,7 @@
 const prisma = require("../database/prisma");
 const { ADMIN_BALE_IDS } = require("../config");
 const { reply, notify, notifyShop, notifyMother } = require("../bot/messenger");
+const { notifyColleague } = require("../services/partnerNotify");
 const bale = require("../bot/bale");
 const {
   BTN,
@@ -95,14 +96,39 @@ function dash(value) {
   return String(value || "").trim() || "نامشخص";
 }
 
-function uniqueUsers(list) {
+function uniqueUsers(list, options = {}) {
+  const keepAdmins = Boolean(options.keepAdmins);
   const map = new Map();
   for (const item of list || []) {
     if (!item?.id || !item?.baleId) continue;
-    if (ADMIN_BALE_IDS.includes(String(item.baleId))) continue;
+    if (!keepAdmins && ADMIN_BALE_IDS.includes(String(item.baleId))) continue;
     map.set(item.id, item);
   }
   return [...map.values()];
+}
+
+async function listColleagueTargets() {
+  const byRole = await prisma.user.findMany({
+    where: { role: "COLLEAGUE" },
+    select: { id: true, baleId: true, fullName: true },
+  });
+  let owners = [];
+  try {
+    const motherId = prisma.getMotherTenantId();
+    const tenants = await prisma.tenant.findMany({
+      where: {
+        ownerUserId: { not: null },
+        ...(motherId ? { id: { not: motherId } } : {}),
+      },
+      select: {
+        ownerUser: { select: { id: true, baleId: true, fullName: true } },
+      },
+    });
+    owners = tenants.map((t) => t.ownerUser).filter(Boolean);
+  } catch (err) {
+    console.error("BC COLLEAGUE OWNER SKIP:", err.message);
+  }
+  return uniqueUsers([...byRole, ...owners], { keepAdmins: true });
 }
 
 async function shopCustomerIds(tenantId) {
@@ -164,11 +190,7 @@ async function resolveTargets(state) {
     return uniqueUsers(users).map((u) => ({ ...u, via: "mother" }));
   }
   if (audience === "colleagues") {
-    const users = await prisma.user.findMany({
-      where: { role: "COLLEAGUE" },
-      select: { id: true, baleId: true, fullName: true },
-    });
-    return uniqueUsers(users).map((u) => ({ ...u, via: "mother" }));
+    return (await listColleagueTargets()).map((u) => ({ ...u, via: "colleague" }));
   }
   if (audience === "shop") {
     if (!state.tenantId) return [];
@@ -204,12 +226,10 @@ async function resolveTargets(state) {
   }
   if (audience === "all_users") {
     const base = await resolveTargets({ audience: "all_cust" });
-    const colleagues = uniqueUsers(
-      await prisma.user.findMany({
-        where: { role: "COLLEAGUE" },
-        select: { id: true, baleId: true, fullName: true },
-      })
-    ).map((u) => ({ ...u, via: "mother" }));
+    const colleagues = (await listColleagueTargets()).map((u) => ({
+      ...u,
+      via: "colleague",
+    }));
     return [...base, ...colleagues];
   }
   if (audience === "manual") {
@@ -221,12 +241,18 @@ async function resolveTargets(state) {
     });
     return users
       .filter((u) => u.baleId)
-      .map((u) => ({ ...u, via: u.role === "COLLEAGUE" ? "mother" : "mother" }));
+      .map((u) => ({
+        ...u,
+        via: u.role === "COLLEAGUE" || u.role === "ADMIN" ? "colleague" : "mother",
+      }));
   }
   return [];
 }
 
 async function deliver(target, text) {
+  if (target.via === "colleague") {
+    return notifyColleague(target.id, text);
+  }
   if (target.via === "shop" && target.tenantId) {
     return notifyShop(target.baleId, text, target.tenantId);
   }
