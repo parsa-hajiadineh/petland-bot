@@ -178,20 +178,36 @@ module.exports.adminListTickets = async function adminListTickets(user, chatId) 
   await reply(user, chatId, "🎫 مدیریت تیکت‌ها", adminTicketsMenu());
 };
 
-module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) {
-  const tickets = await listMotherTickets({ status: "OPEN", take: 50 });
+module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId, offset = 0) {
+  const take = 10;
+  const tickets = await listMotherTickets({
+    status: "OPEN",
+    skip: offset,
+    take: take + 1,
+  });
 
   if (!tickets.length) {
-    await reply(user, chatId, "✅ تیکت بی‌پاسخی وجود ندارد.", adminTicketsMenu());
+    await reply(
+      user,
+      chatId,
+      offset > 0 ? "تیکت بی‌پاسخ دیگری وجود ندارد." : "✅ تیکت بی‌پاسخی وجود ندارد.",
+      adminTicketsMenu()
+    );
     return;
   }
 
-  const rows = tickets.map((t) => [ticketListButton(t)]);
+  const hasMore = tickets.length > take;
+  const shown = tickets.slice(0, take);
+  const rows = shown.map((t) => [ticketListButton(t)]);
+  if (hasMore) {
+    rows.push([{ text: "ده تیکت بعدی", callback_data: `tkt:more:o:${offset + take}` }]);
+  }
 
+  const pageInfo = offset > 0 ? ` — صفحه ${Math.floor(offset / take) + 1}` : "";
   await reply(
     user,
     chatId,
-    `📭 تیکت‌های بی‌پاسخ (${tickets.length})`,
+    `📭 تیکت‌های بی‌پاسخ${pageInfo}`,
     adminBackMenu()
   );
   await bale.sendKeyboard(chatId, "روی تیکت کلیک کنید:", inlineKb(rows));
@@ -216,7 +232,7 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
   const rows = shown.map((t) => [ticketListButton(t)]);
 
   if (hasMore) {
-    rows.push([{ text: "⬅️ ۱۰ تیکت قدیمی‌تر", callback_data: `tkt:more:${offset + take}` }]);
+    rows.push([{ text: "ده تیکت بعدی", callback_data: `tkt:more:a:${offset + take}` }]);
   }
 
   await reply(

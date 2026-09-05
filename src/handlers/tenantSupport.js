@@ -364,7 +364,7 @@ async function showOwnerList(user, chatId, status, offset = 0) {
   if (hasMore) {
     rows.push([
       {
-        text: "⬅️ ۱۰ تیکت قدیمی‌تر",
+        text: "ده تیکت بعدی",
         callback_data: `ttk:more:${status === "ANSWERED" ? "a" : "o"}:${offset + take}`,
       },
     ]);

@@ -473,9 +473,16 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
   }
 
   if (data.startsWith("tkt:more:") && isAdmin(user)) {
-    const offset = parseInt(data.replace("tkt:more:", ""), 10) || 0;
+    const rest = data.slice("tkt:more:".length);
     const support = require("./support");
-    await support.adminAnsweredTickets(user, chatId, offset);
+    const parts = rest.split(":");
+    if (parts[0] === "o") {
+      await support.adminOpenTickets(user, chatId, Number(parts[1]) || 0);
+    } else if (parts[0] === "a") {
+      await support.adminAnsweredTickets(user, chatId, Number(parts[1]) || 0);
+    } else {
+      await support.adminAnsweredTickets(user, chatId, parseInt(rest, 10) || 0);
+    }
     return;
   }
 
