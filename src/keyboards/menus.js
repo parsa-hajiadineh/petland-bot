@@ -215,6 +215,7 @@ const BTN = {
   SHOP_ORDERS: "🧾 سفارش‌های مشتریان",
   SHOP_ORDERS_OPEN: "📬 سفارشات باز",
   SHOP_ORDERS_CLOSED: "📭 سفارشات بسته",
+  SHOP_TICKETS: "🎫 مدیریت تیکت‌ها",
   APPROVE: "✅ تایید فاکتور",
   REJECT: "❌ رد فاکتور",
   PACK: "📦 بسته‌بندی شد",
@@ -266,9 +267,10 @@ function mainMenu(user) {
 function tenantMainMenu(isOwner) {
   const rows = [
     [{ text: BTN.PRODUCTS }, { text: BTN.CART }],
-    [{ text: BTN.ORDERS }, { text: BTN.HELP }],
+    [{ text: BTN.ORDERS }, { text: BTN.SUPPORT }],
   ];
-  if (isOwner) rows.push([{ text: BTN.SHOP_ADMIN }]);
+  if (isOwner) rows.push([{ text: BTN.HELP }, { text: BTN.SHOP_ADMIN }]);
+  else rows.push([{ text: BTN.HELP }]);
   return kb(rows);
 }
 
@@ -276,7 +278,15 @@ function tenantAdminMenu() {
   return kb([
     [{ text: BTN.SHOP_SETTINGS }, { text: BTN.SHOP_ORDERS }],
     [{ text: BTN.SHOP_SUBSCRIBE }, { text: BTN.SHOP_SERVICE_INVOICES }],
-    [{ text: BTN.SHOP_CREDIT_WALLET }, { text: BTN.BACK_MAIN }],
+    [{ text: BTN.SHOP_CREDIT_WALLET }, { text: BTN.SHOP_TICKETS }],
+    [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function tenantTicketsMenu() {
+  return kb([
+    [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
 
@@ -542,6 +552,7 @@ module.exports = {
   mainMenu,
   tenantMainMenu,
   tenantAdminMenu,
+  tenantTicketsMenu,
   shopSettingsMenu,
   shopCreditMenu,
   shopOrdersMenu,

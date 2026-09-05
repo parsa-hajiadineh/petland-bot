@@ -16,6 +16,7 @@ const {
   tenantCategoriesMenu,
   backMain,
 } = require("../keyboards/menus");
+const tenantSupport = require("./tenantSupport");
 
 const STEP_PREFIX = "TS:";
 
@@ -635,6 +636,9 @@ async function handleAdminText(user, chatId, text) {
   if (await require("./serviceBilling").handleText(user, chatId, text)) {
     return true;
   }
+  if (await tenantSupport.handleOwnerText(user, chatId, text)) {
+    return true;
+  }
 
   if (text === BTN.SHOP_SUBSCRIBE) {
     await require("./serviceBilling").startTenantSubscribe(user, chatId, tenantId);
@@ -654,6 +658,7 @@ async function handleAdminText(user, chatId, text) {
   }
 
   if (text === BTN.BACK_PRODUCT_LIST && isTenantAdminStep(user.adminStep)) {
+    if (await tenantSupport.goOwnerBack(user, chatId)) return true;
     if (String(user.adminStep).startsWith("TS:SUB:")) {
       await require("./serviceBilling").goBack(user, chatId);
       return true;
@@ -1318,7 +1323,11 @@ async function handleAdminCallback(user, chatId, data) {
 async function clearTenantAdminState(user) {
   const data = {};
   if (isTenantAdminStep(user.adminStep)) data.adminStep = null;
-  if (user.orderStep && String(user.orderStep).startsWith("TSC:")) {
+  if (
+    user.orderStep &&
+    (String(user.orderStep).startsWith("TSC:") ||
+      String(user.orderStep).startsWith("TST:"))
+  ) {
     data.orderStep = null;
   }
   if (!Object.keys(data).length) return;

@@ -3,6 +3,7 @@ const { ADMIN_BALE_IDS } = require("../config");
 const { reply, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { BTN, supportMenu, backMain, activeTicketMenu, adminTicketsMenu, adminBackMenu, inlineKb } = require("../keyboards/menus");
+const { listMotherTickets, loadMotherTicket } = require("./tenantSupport");
 
 const TICKET_INCLUDE = {
   user: true,
@@ -88,12 +89,7 @@ module.exports.handleSupport = async function handleSupport(
   }
 
   if (text === BTN.MY_TICKETS) {
-    const tickets = await prisma.ticket.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-      include: { messages: { orderBy: { createdAt: "asc" }, take: 1 } },
-    });
+    const tickets = await listMotherTickets({ userId: user.id, take: 10 });
 
     if (!tickets.length) {
       await reply(user, chatId, "تیکتی ثبت نشده است.");
@@ -112,7 +108,10 @@ module.exports.handleSupport = async function handleSupport(
 
 
   if (user.orderStep === "TICKET_MESSAGE") {
-    if (!user.activeTicketId) {
+    const motherActive = user.activeTicketId
+      ? await loadMotherTicket(user.activeTicketId)
+      : null;
+    if (!motherActive) {
       const autoTitle = text.slice(0, 40);
       const ticket = await prisma.ticket.create({
         data: {
@@ -149,14 +148,14 @@ module.exports.handleSupport = async function handleSupport(
 
     await prisma.ticketMessage.create({
       data: {
-        ticketId: user.activeTicketId,
+        ticketId: motherActive.id,
         senderType: "USER",
         message: text,
       },
     });
 
     await prisma.ticket.update({
-      where: { id: user.activeTicketId },
+      where: { id: motherActive.id },
       data: { status: "OPEN" },
     });
 
@@ -165,7 +164,7 @@ module.exports.handleSupport = async function handleSupport(
     for (const adminId of ADMIN_BALE_IDS) {
       await notify(
         adminId,
-        `💬 پیام تیکت #${String(user.activeTicketId).slice(-6)}\n${senderLine(user)}\n\n${text}`
+        `💬 پیام تیکت #${ticketCode(motherActive)}\n${senderLine(user)}\n\n${text}`
       );
     }
 
@@ -180,14 +179,7 @@ module.exports.adminListTickets = async function adminListTickets(user, chatId) 
 };
 
 module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) {
-  const tickets = await prisma.ticket.findMany({
-    where: { status: "OPEN" },
-    orderBy: { createdAt: "desc" },
-    include: {
-      user: true,
-      messages: { orderBy: { createdAt: "asc" }, take: 1 },
-    },
-  });
+  const tickets = await listMotherTickets({ status: "OPEN", take: 50 });
 
   if (!tickets.length) {
     await reply(user, chatId, "✅ تیکت بی‌پاسخی وجود ندارد.", adminTicketsMenu());
@@ -207,15 +199,10 @@ module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId) 
 
 module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, chatId, offset = 0) {
   const take = 10;
-  const tickets = await prisma.ticket.findMany({
-    where: { status: "ANSWERED" },
-    orderBy: { createdAt: "desc" },
+  const tickets = await listMotherTickets({
+    status: "ANSWERED",
     skip: offset,
     take: take + 1,
-    include: {
-      user: true,
-      messages: { orderBy: { createdAt: "asc" }, take: 1 },
-    },
   });
 
   if (!tickets.length) {
@@ -242,10 +229,7 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
 };
 
 module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ticketId) {
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: ticketId },
-    include: TICKET_INCLUDE,
-  });
+  const ticket = await loadMotherTicket(ticketId);
 
   if (!ticket) {
     await reply(user, chatId, "تیکت پیدا نشد.");
@@ -289,22 +273,32 @@ module.exports.adminSearchTicket = async function adminSearchTicket(user, chatId
 
   let matches = [];
   if (code.length >= 20) {
-    const exact = await prisma.ticket.findUnique({
-      where: { id: code },
-      include: TICKET_INCLUDE,
-    });
+    const exact = await loadMotherTicket(code);
     if (exact) matches = [exact];
   }
 
   if (!matches.length) {
-    matches = await prisma.ticket.findMany({
-      where: { id: { endsWith: code } },
-      include: {
-        user: true,
-        messages: { orderBy: { createdAt: "asc" }, take: 1 },
-      },
-      take: 8,
-    });
+    try {
+      matches = await prisma.ticket.findMany({
+        where: { id: { endsWith: code }, tenantId: null },
+        include: {
+          user: true,
+          messages: { orderBy: { createdAt: "asc" }, take: 1 },
+        },
+        take: 8,
+      });
+    } catch (err) {
+      console.error("MOTHER TICKET SEARCH SKIP:", err.message);
+      const raw = await prisma.ticket.findMany({
+        where: { id: { endsWith: code } },
+        include: {
+          user: true,
+          messages: { orderBy: { createdAt: "asc" }, take: 1 },
+        },
+        take: 8,
+      });
+      matches = raw.filter((t) => !t.tenantId);
+    }
   }
 
   if (!matches.length) {
@@ -328,6 +322,11 @@ module.exports.adminSearchTicket = async function adminSearchTicket(user, chatId
 };
 
 module.exports.adminReplyTicketDirect = async function adminReplyTicketDirect(user, chatId, ticketId, message) {
+  const scoped = await loadMotherTicket(ticketId);
+  if (!scoped) {
+    await reply(user, chatId, "تیکت پیدا نشد.", adminTicketsMenu());
+    return;
+  }
   await prisma.ticketMessage.create({
     data: { ticketId, senderType: "ADMIN", message },
   });
@@ -353,10 +352,20 @@ module.exports.adminReplyTicket = async function adminReplyTicket(
   ticketSuffix,
   message
 ) {
-  const ticket = await prisma.ticket.findFirst({
-    where: { id: { endsWith: ticketSuffix } },
-    include: { user: true },
-  });
+  let ticket = null;
+  try {
+    ticket = await prisma.ticket.findFirst({
+      where: { id: { endsWith: ticketSuffix }, tenantId: null },
+      include: { user: true },
+    });
+  } catch (err) {
+    console.error("MOTHER TICKET REPLY SKIP:", err.message);
+    const found = await prisma.ticket.findFirst({
+      where: { id: { endsWith: ticketSuffix } },
+      include: { user: true },
+    });
+    ticket = found && !found.tenantId ? found : null;
+  }
 
   if (!ticket) {
     await reply(user, chatId, "تیکت پیدا نشد.");

@@ -112,6 +112,12 @@ Node CommonJS، Express 5 (health)، Prisma 6، PostgreSQL لیارا، long pol
 - تننت: `loadTenantProductByCode(code, tenantId)` / `loadOwnedProduct`. آپدیت/حذف کالا با `id` کالای owned نه فقط `where: { code }`.
 - ساخت/تغییر نام/حذف دسته فقط `Category.tenantId === این فروشگاه`. fallback به دسته مادر/فروشگاه دیگر ممنوع.
 
+### تیکت
+- تیکت فروشگاه فقط با `Ticket.tenantId === این فروشگاه`. بدون tenantId = هیچ ردیف فروشگاه.
+- تیکت مادر (`tenantId=null`) در ربات تننت دیده و نوشته نمی‌شود. لیست/جستجو/پاسخ ادمین مادر فقط تیکت مادر است.
+- `activeTicketId` سراسری است؛ روی تننت فقط اگر همان `tenantId` باشد پیام به تیکت می‌چسبد. روی مادر فقط تیکت بدون tenantId.
+- نوتیف تیکت فروشگاه به مالک همان ربات است نه `ADMIN_BALE_IDS`.
+
 ### سبد و اعتبار
 - `ShopCart` با `(userId, tenantId)`. هیدرات کالا فقط همان `tenantId`.
 - `CreditWallet` وقتی `tenantId` داده شده فقط همان tenant جستجو می‌شود؛ کیف کاربر/فروشگاه دیگر به این فروشگاه وصله نمی‌شود. `userId` روی CreditWallet globally unique است؛ اگر لینک کاربر به کیف دوم بخورد، کیف دوم بدون userId می‌ماند ولی با tenantId کار می‌کند.
@@ -137,6 +143,7 @@ src/bot/engine.js                 poll + processUpdate(update, ctx)
 src/bot/context.js                ALS؛ fallback مادر اگر store خالی باشد
 src/handlers/router.js            مادر vs تننت
 src/handlers/tenantShop.js        منوی فروشگاه همکار؛ گیت tord/tcld/siv
+src/handlers/tenantSupport.js     تیکت مشتری/مالک فروشگاه (`TST:` / `ttk:` / `Ticket.tenantId`)
 src/handlers/tenantOrder.js       سبد/تسویه/رسید/پیگیری مالک (همه scoped)
 src/handlers/tenantAdmin.js       پنل مالک + کیف اعتبار + دفتر؛ کالا/دسته owned
 src/handlers/products.js          کاتالوگ مادر + لیست تننت
@@ -166,11 +173,11 @@ src/keyboards/menus.js            همه دکمه‌ها
 src/database/selects.js           select صریح؛ Order.tenantId / Product.tenantId
 ```
 
-منوی تننت: محصولات، سبد، سفارشات من، راهنما. مالک: مدیریت فروشگاه.
+منوی تننت: محصولات، سبد، سفارشات من، پشتیبانی، راهنما. مالک: مدیریت فروشگاه + مدیریت تیکت‌های همان فروشگاه.
 سفارش‌های مشتریان: «سفارشات باز» / «سفارشات بسته». باز = همه جز `REJECTED` و `SHIPPED`. بسته = ۱۰تایی اینلاین + `tcld:` ده سفارش قبلی.
 محصولات تننت: **همیشه اول دسته‌ها**، بعد اینلاین ۱۰تایی.
 
-قدم‌های تننت: `TSC:` دسته، `TCK:` تسویه/رسید، `TS:` پنل مالک، `TS:SETTINGS` تنظیمات فروشگاه، `TS:CREDIT` / `TS:CREDIT_LEDGER`، `TS:SUB:` خرید اشتراک، `TS:SINV:` لیست/جزئیات فاکتور خدمات.
+قدم‌های تننت: `TSC:` دسته، `TCK:` تسویه/رسید، `TST:MSG` تیکت مشتری، `TS:` پنل مالک، `TS:TICKETS` تیکت مالک، `TS:SETTINGS` تنظیمات فروشگاه، `TS:CREDIT` / `TS:CREDIT_LEDGER`، `TS:SUB:` خرید اشتراک، `TS:SINV:` لیست/جزئیات فاکتور خدمات. تیکت فروشگاه `Ticket.tenantId` دارد؛ تیکت مادر `tenantId=null`. نوتیف تیکت فروشگاه به مالک همان ربات می‌رود نه ادمین مادر. لیست تیکت مادر تیکت فروشگاه را نشان نمی‌دهد.
 
 گیت ساخت ربات: `gateShopBotCreate` + `provisionShop` (`NEED_SETUP_INVOICE` / `NEED_APPROVED_SETUP` / `ALREADY_HAS_BOT`).
 تایید فاکتور خدمات مادر: «فاکتور خدمات همکاران» (`sinv:` تایید/رد). با `approveOrder` قاطی نشود. رسید خدمات با توکن مادر به ادمین مادر می‌رسد نه ربات تننت.
@@ -204,8 +211,7 @@ Motivation Engine: نوتیف همکار از قوانین زنده است (`src
 ---
 
 ## کار بعدی
-1. TenantMessage از پنل ادمین مادر
-2. TENANT_RESELL
-3. تیکت داخل ربات تننت
+1. TENANT_RESELL
+2. TenantMessage لازم نیست — همان «ارسال پیام» شش‌مدلی کافی است
 
 منبع حقیقت همین فایل است.

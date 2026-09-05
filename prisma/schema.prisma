@@ -266,10 +266,14 @@ model Ticket {
   userId       String
   user         User @relation(fields: [userId], references: [id])
 
+  tenantId     String?
+  tenant       Tenant? @relation(fields: [tenantId], references: [id])
+
   messages     TicketMessage[]
 
   @@index([userId])
   @@index([status])
+  @@index([tenantId])
 }
 
 model TicketMessage {
@@ -377,6 +381,7 @@ model Tenant {
   bot             Bot?
   subscriptions   TenantSubscription[]
   messages        TenantMessage[]
+  tickets         Ticket[]
   serviceInvoices ServiceInvoice[]
   creditWallet    CreditWallet?
 

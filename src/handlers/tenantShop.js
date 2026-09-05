@@ -9,12 +9,16 @@ const {
 const productsHandler = require("./products");
 const tenantAdmin = require("./tenantAdmin");
 const tenantOrder = require("./tenantOrder");
+const tenantSupport = require("./tenantSupport");
 
 const NAV_BUTTONS = new Set([
   BTN.PRODUCTS,
   BTN.CART,
   BTN.ORDERS,
   BTN.HELP,
+  BTN.SUPPORT,
+  BTN.NEW_TICKET,
+  BTN.MY_TICKETS,
   BTN.ADD_CART,
   BTN.CHECKOUT,
   BTN.CLEAR_CART,
@@ -138,6 +142,10 @@ async function handleMessageInner(message, user) {
     return;
   }
 
+  if (await tenantSupport.handleCustomer(user, chatId, text)) {
+    return;
+  }
+
   if (text === BTN.PRODUCTS || text === BTN.BACK_PRODUCTS) {
     await tenantAdmin.clearTenantAdminState(user);
     await productsHandler.showTenantProducts(user, chatId, getBotContext().tenantId);
@@ -253,6 +261,10 @@ async function handleCallbackQuery(cq, user) {
   const chatId = cq.message.chat.id;
   const ctx = getBotContext();
   user = (await reloadUser(user.id)) || user;
+
+  if (data.startsWith("ttk:") && (await tenantAdmin.isShopOwner(user, ctx.tenantId))) {
+    if (await tenantSupport.handleOwnerCallback(user, chatId, data)) return;
+  }
 
   if (await tenantAdmin.handleAdminCallback(user, chatId, data)) {
     return;
