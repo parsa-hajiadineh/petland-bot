@@ -403,7 +403,10 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     await showInvoicesMenu(user, chatId);
     return true;
   }
-  if (text === BTN.INV_COLLEAGUE) {
+  if (
+    text === BTN.INV_COLLEAGUE ||
+    (user.adminStep === "ADMIN_INV_KIND" && text === BTN.COLLEAGUE)
+  ) {
     await setInvKind(user, "colleague");
     await showInvoicesMenu(user, chatId);
     return true;

@@ -124,8 +124,8 @@ const BTN = {
   ENTER_COLLEAGUE: "🤝 ورود به حالت همکار",
   ENTER_MANELI: "🧾 ورود به پنل بازاریابان مانلی",
   INV_RETAIL: "🛒 خرید عادی",
-  INV_COLLEAGUE: "🤝 خرید همکار",
-  INV_MANELI: "🧾 بازاریابان مانلی",
+  INV_COLLEAGUE: "🤝 فاکتورهای همکار",
+  INV_MANELI: "🧾 فاکتورهای مانلی",
   CREATE_SHOP_BOT: "🤖 ساخت ربات فروشگاهی",
   SHOP_ONLINE: "🌐 آنلاین شاپ",
   SHOP_PHYSICAL: "🏪 فروشگاه حضوری",
@@ -262,7 +262,7 @@ function mainMenu(user) {
   if (user.role === "ADMIN") {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
-  } else if (user.role !== "COLLEAGUE" && user.role !== "MANELI") {
+  } else {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }
 

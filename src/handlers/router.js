@@ -348,6 +348,11 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
 
   user = await reloadUser(user.id);
 
+  if (data === "cg:col" || data === "cg:man") {
+    await colleagueHandler.handleGateCallback(user, chatId, data);
+    return;
+  }
+
   if (
     data.startsWith("sb") ||
     data.startsWith("siv:") ||

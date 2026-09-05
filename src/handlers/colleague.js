@@ -1,7 +1,7 @@
 const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
-const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
+const { BTN, mainMenu, backMain, kb, inlineKb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView } = require("../utils/price");
 const {
   provisionShop,
@@ -419,58 +419,95 @@ function afterPage(user) {
   return "COLLEAGUE_CONFIRM";
 }
 
-module.exports = async function colleagueHandler(user, chatId, text) {
-  if (text === BTN.COLLEAGUE) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: "COLLEAGUE_GATE" },
-    });
-    user.orderStep = "COLLEAGUE_GATE";
-    await reply(
-      user,
-      chatId,
-      "ورود به کدام بخش را می‌خواهید؟",
-      colleagueGateMenu()
-    );
-    return true;
-  }
+function isColleagueEntryBtn(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t === BTN.COLLEAGUE || t === "خرید همکار" || t.endsWith("خرید همکار");
+}
 
-  if (text === BTN.ENTER_COLLEAGUE) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: "COLLEAGUE_CODE" },
-    });
-    user.orderStep = "COLLEAGUE_CODE";
-    await reply(
-      user,
-      chatId,
-      `✨ ورود به حالت همکار
+function colleagueGateInline() {
+  return inlineKb([
+    [{ text: BTN.ENTER_COLLEAGUE, callback_data: "cg:col" }],
+    [{ text: BTN.ENTER_MANELI, callback_data: "cg:man" }],
+  ]);
+}
+
+async function showColleagueGate(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "COLLEAGUE_GATE" },
+  });
+  user.orderStep = "COLLEAGUE_GATE";
+  await reply(
+    user,
+    chatId,
+    `ورود به کدام بخش را می‌خواهید؟
+
+۱. ورود به حالت همکار
+۲. ورود به پنل بازاریابان مانلی
+
+از دکمه‌های زیر یکی را انتخاب کنید.`,
+    colleagueGateMenu()
+  );
+  await reply(
+    user,
+    chatId,
+    "👇 انتخاب کنید:",
+    colleagueGateInline(),
+    { keepLast: true }
+  );
+}
+
+async function askColleagueCode(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "COLLEAGUE_CODE" },
+  });
+  user.orderStep = "COLLEAGUE_CODE";
+  await reply(
+    user,
+    chatId,
+    `✨ ورود به حالت همکار
 
 با داشتن کد دسترسی همکاری، می‌توانید ربات را به پنل اختصاصی خود تغییر دهید و به امکانات و شرایط ویژه همکاران ما دسترسی پیدا کنید.
 
 🔐 لطفا کد دسترسی خود را وارد نمایید:`,
-      backMain()
-    );
-    return true;
-  }
+    backMain()
+  );
+}
 
-  if (text === BTN.ENTER_MANELI) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orderStep: "MANELI_CODE" },
-    });
-    user.orderStep = "MANELI_CODE";
-    await reply(
-      user,
-      chatId,
-      `✨ ورود به پنل بازاریابان مانلی
+async function askManeliCode(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "MANELI_CODE" },
+  });
+  user.orderStep = "MANELI_CODE";
+  await reply(
+    user,
+    chatId,
+    `✨ ورود به پنل بازاریابان مانلی
 
 این بخش برای بازاریابان مجموعه همکار است.
 خرید با قیمت همکاری ثبت می‌شود و فاکتورها در پنل ادمین مادر جمع می‌شوند.
 
 🔐 لطفا کد دسترسی بازاریابان مانلی را وارد نمایید:`,
-      backMain()
-    );
+    backMain()
+  );
+}
+
+module.exports = async function colleagueHandler(user, chatId, text) {
+  if (isColleagueEntryBtn(text)) {
+    if (user.adminStep === "ADMIN_INV_KIND") return false;
+    await showColleagueGate(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.ENTER_COLLEAGUE) {
+    await askColleagueCode(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.ENTER_MANELI) {
+    await askManeliCode(user, chatId);
     return true;
   }
 
@@ -766,6 +803,22 @@ Paw Ora | More Than Care`
     return true;
   }
 
+  return false;
+};
+
+module.exports.handleGateCallback = async function handleGateCallback(
+  user,
+  chatId,
+  data
+) {
+  if (data === "cg:col") {
+    await askColleagueCode(user, chatId);
+    return true;
+  }
+  if (data === "cg:man") {
+    await askManeliCode(user, chatId);
+    return true;
+  }
   return false;
 };
 
