@@ -6,6 +6,8 @@ const PRODUCT_CATEGORIES = [
       "مونژه (Monge)",
       "جمون (Gemon)",
       "سیمبا (Simba)",
+      "جوسرا (Josera)",
+      "هپی کت (Happy Cat)",
     ],
   },
   {
@@ -38,7 +40,9 @@ const PRODUCT_CATEGORIES = [
       "فلیکسی (Flexi)",
       "لئو (Leo)",
       "وینستون (Winston)",
+      "فنبی (Fanbi)",
     ],
+  },
   },
   {
     btn: "🍖 تشویقی، اسنک و مکمل غذایی",
@@ -69,6 +73,7 @@ const PRODUCT_CATEGORIES = [
     btn: "🧴 شامپو و محصولات بهداشتی",
     subMenus: [
       "Vet Expert",
+      "Dr. Haas",
       "سایر محصولات بهداشتی",
     ],
   },
