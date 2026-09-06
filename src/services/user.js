@@ -38,7 +38,8 @@ function staffNotifyIds() {
 }
 
 async function getOrCreateUser(msg, referrerBaleId = null) {
-  const baleId = String(msg.from.id);
+  const baleId = String(msg?.from?.id || msg?.chat?.id || "");
+  if (!baleId) throw new Error("NO_BALE_ID");
 
   let user = await prisma.user.findUnique({
     where: { baleId },

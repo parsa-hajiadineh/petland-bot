@@ -20,6 +20,10 @@ const startHandler = require("./start");
 const marketingHandler = require("./marketing");
 const walletHandler = require("./wallet");
 
+function isStartText(text) {
+  return text === "/start" || text.startsWith("/start ") || text.startsWith("/start@");
+}
+
 module.exports = async function messageHandler(message, user) {
   if (!isMother()) {
     try {
@@ -38,12 +42,16 @@ module.exports = async function messageHandler(message, user) {
   const text = (message.text || "").trim();
   const chatId = message.chat.id;
 
-  user = await reloadUser(user.id);
+  try {
+    const fresh = await reloadUser(user.id);
+    if (fresh) user = fresh;
+  } catch (err) {
+    console.error("RELOAD USER SKIP:", err.message);
+  }
 
   if (
     text === BTN.BACK_MAIN ||
-    text === "/start" ||
-    text.startsWith("/start ") ||
+    isStartText(text) ||
     text === BTN.BACK_PRODUCTS ||
     text === BTN.PRODUCTS ||
     text === BTN.CART ||
@@ -73,16 +81,21 @@ module.exports = async function messageHandler(message, user) {
     }
   }
 
-  if (text === BTN.BACK_MAIN || text === "/start" || text.startsWith("/start ")) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        orderStep: null,
-        adminStep: null,
-        pendingOrderId: null,
-      },
-    });
-    user = await reloadUser(user.id);
+  if (text === BTN.BACK_MAIN || isStartText(text)) {
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          orderStep: null,
+          adminStep: null,
+          pendingOrderId: null,
+        },
+      });
+      const fresh = await reloadUser(user.id);
+      if (fresh) user = fresh;
+    } catch (err) {
+      console.error("START RESET SKIP:", err.message);
+    }
     await startHandler(user, message);
     return;
   }

@@ -121,7 +121,8 @@ async function handleMessageInner(message, user) {
     NAV_BUTTONS.has(text) ||
     text === BTN.BACK_PRODUCT_LIST ||
     text === "/start" ||
-    text.startsWith("/start ")
+    text.startsWith("/start ") ||
+    text.startsWith("/start@")
   ) {
     await productsHandler.clearProductListMessages(user, chatId);
     if (user.orderStep === "TCK:EDIT") {
@@ -145,6 +146,7 @@ async function handleMessageInner(message, user) {
     text === BTN.BACK_MAIN ||
     text === "/start" ||
     text.startsWith("/start ") ||
+    text.startsWith("/start@") ||
     !text
   ) {
     await resetSession(user);

@@ -13,6 +13,32 @@ const messageHandler = require("../handlers/router");
 const pollers = new Map();
 const hooked = new Set();
 let lastLiveCount = -1;
+const motherHealth = {
+  polling: false,
+  lastOkAt: null,
+  lastError: null,
+};
+
+function isStartText(text) {
+  const value = String(text || "").trim();
+  return value === "/start" || value.startsWith("/start ") || value.startsWith("/start@");
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function getStatus() {
+  return {
+    motherPolling: motherHealth.polling,
+    lastOkAt: motherHealth.lastOkAt,
+    lastError: motherHealth.lastError,
+  };
+}
 
 function tenantWebhookUrl(botId) {
   if (!PUBLIC_BASE_URL) return null;
@@ -70,14 +96,19 @@ async function processUpdate(update, runtimeCtx) {
     if (!update.message) return;
 
     const msg = update.message;
-    const chatType = String(msg.chat?.type || "");
-    if (chatType && chatType !== "private") {
+    const chatType = String(msg.chat?.type || "").toLowerCase();
+    const isPrivate =
+      !chatType ||
+      chatType === "private" ||
+      chatType === "pv" ||
+      chatType === "user";
+    if (!isPrivate) {
       if (
         runtimeCtx?.isMother &&
         String(msg.text || "").trim() === "/chatid"
       ) {
         const { ADMIN_BALE_IDS } = require("../config");
-        const fromId = String(msg.from?.id || "");
+        const fromId = String(msg.from?.id || msg.chat?.id || "");
         if (ADMIN_BALE_IDS.includes(fromId)) {
           await bale.sendMessage(
             msg.chat.id,
@@ -88,12 +119,33 @@ async function processUpdate(update, runtimeCtx) {
       return;
     }
 
-    let referrerBaleId = null;
-    if (msg.text && msg.text.startsWith("/start ref_")) {
-      referrerBaleId = msg.text.replace("/start ref_", "").trim();
+    if (!msg.from && msg.chat?.id) {
+      msg.from = { id: msg.chat.id, first_name: "" };
     }
 
-    const user = await getOrCreateUser(msg, referrerBaleId);
+    const text = String(msg.text || "").trim();
+    let referrerBaleId = null;
+    if (text.startsWith("/start ref_")) {
+      referrerBaleId = text.replace("/start ref_", "").trim();
+    }
+
+    let user = null;
+    try {
+      user = await withTimeout(
+        getOrCreateUser(msg, referrerBaleId),
+        8000,
+        "USER_TIMEOUT"
+      );
+    } catch (err) {
+      console.error("GET USER:", err.message);
+      if (isStartText(text)) {
+        await bale.sendMessage(
+          msg.chat.id,
+          "Paw Ora\n\nبرای انتخاب های بهتر.\nخوش آمدید."
+        );
+      }
+      return;
+    }
 
     return withCtx(async () => {
       if (msg.photo?.length) {
@@ -125,12 +177,20 @@ function touchLastSeen(ctx, state) {
 
 async function pollLoop(ctx, state) {
   console.log("POLL START:", ctx.name, ctx.isMother ? "(mother)" : ctx.tenantId);
+  if (ctx.isMother) {
+    motherHealth.polling = true;
+    motherHealth.lastError = null;
+  }
 
   while (!state.stopped) {
     try {
       await runWithContext(ctx, async () => {
         const updates = await bale.getUpdates(state.offset, ctx.token);
         if (updates.ok) {
+          if (ctx.isMother) {
+            motherHealth.lastOkAt = Date.now();
+            motherHealth.lastError = null;
+          }
           touchLastSeen(ctx, state);
           if (updates.result.length > 0) {
             for (const update of updates.result) {
@@ -143,18 +203,20 @@ async function pollLoop(ctx, state) {
             }
           }
         } else {
-          console.error(
-            "GET UPDATES FAIL:",
-            ctx.name,
-            updates?.description || updates?.error_code || "unknown"
-          );
+          const reason =
+            updates?.description || updates?.error_code || "unknown";
+          if (ctx.isMother) motherHealth.lastError = String(reason);
+          console.error("GET UPDATES FAIL:", ctx.name, reason);
         }
       });
     } catch (err) {
+      if (ctx.isMother) motherHealth.lastError = err.message;
       console.error("POLLING ERROR:", ctx.name, err.message);
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
+
+  if (ctx.isMother) motherHealth.polling = false;
 
   console.log("POLL STOP:", ctx.name);
 }
@@ -317,4 +379,5 @@ module.exports = {
   processUpdate,
   handleWebhook,
   tenantWebhookUrl,
+  getStatus,
 };

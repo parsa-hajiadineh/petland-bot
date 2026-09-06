@@ -13,7 +13,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, service: "petland-bot" });
+  res.json({ ok: true, service: "petland-bot", ...engine.getStatus() });
 });
 
 app.post("/webhook/bot/:botId", (req, res) => {
