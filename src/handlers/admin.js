@@ -8,6 +8,7 @@ const { formatPrice } = require("../utils/price");
 const {
   BTN,
   adminMenu,
+  mainMenu,
   adminInvoiceKindMenu,
   adminProformaMenu,
   adminInvoicesMenu,
@@ -19,6 +20,7 @@ const {
 } = require("../keyboards/menus");
 const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
 const { statusLabel, isWholesaleProformaHold, readWholesaleKind, wholesaleKindLabel } = require("../utils/order");
+const { isWarehouseOnly } = require("../services/user");
 const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
@@ -422,6 +424,10 @@ module.exports.showAdminPanel = async function showAdminPanel(user, chatId) {
   });
   user.adminStep = null;
   user.pendingOrderId = null;
+  if (isWarehouseOnly(user)) {
+    await reply(user, chatId, "منوی اصلی", mainMenu(user));
+    return;
+  }
   await reply(user, chatId, "⚙️ پنل ادمین", adminMenu());
 };
 
@@ -505,11 +511,12 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 
 module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (text === BTN.ADMIN_PANEL) {
+    if (isWarehouseOnly(user)) return false;
     await module.exports.showAdminPanel(user, chatId);
     return true;
   }
 
-  if (text === BTN.ADMIN_INVOICES) {
+  if (text === BTN.ADMIN_INVOICES || text === BTN.WAREHOUSE_ORDERS) {
     await showInvoiceKindMenu(user, chatId);
     return true;
   }
@@ -575,11 +582,13 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return handleProformaRejectText(user, chatId, text);
   }
 
-  if (await adminServices.handleText(user, chatId, text)) return true;
-  if (await adminCreditSettings.handleText(user, chatId, text)) return true;
-  if (await adminManage.handleText(user, chatId, text)) return true;
-  if (await adminBroadcast.handleText(user, chatId, text)) return true;
-  if (await adminProducts.handleText(user, chatId, text)) return true;
+  if (!isWarehouseOnly(user)) {
+    if (await adminServices.handleText(user, chatId, text)) return true;
+    if (await adminCreditSettings.handleText(user, chatId, text)) return true;
+    if (await adminManage.handleText(user, chatId, text)) return true;
+    if (await adminBroadcast.handleText(user, chatId, text)) return true;
+    if (await adminProducts.handleText(user, chatId, text)) return true;
+  }
 
   if (text === BTN.BACK_PRODUCT_LIST && (user.adminStep || user.pendingOrderId)) {
     await goAdminBack(user, chatId);
@@ -666,6 +675,14 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
+  if (isWarehouseOnly(user) && (
+    text === BTN.ADMIN_WITHDRAWALS ||
+    text === BTN.ADMIN_SALES ||
+    text === BTN.ADMIN_PRODUCTS
+  )) {
+    return false;
+  }
+
   if (text === BTN.ADMIN_WITHDRAWALS) {
     await prisma.user.update({
       where: { id: user.id },
@@ -686,7 +703,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return true;
   }
 
-  if (text === BTN.ADMIN_TICKETS) {
+  if (text === BTN.ADMIN_TICKETS || text === BTN.WAREHOUSE_TICKETS) {
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: "ADMIN_TICKETS" },

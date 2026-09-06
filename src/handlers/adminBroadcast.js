@@ -625,6 +625,7 @@ async function handleCallback(user, chatId, data) {
 
 async function handleText(user, chatId, text) {
   if (text === BTN.TICKET_BROADCAST) {
+    if (require("../services/user").isWarehouseOnly(user)) return false;
     await showHub(user, chatId);
     return true;
   }

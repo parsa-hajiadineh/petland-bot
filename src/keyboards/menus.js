@@ -151,6 +151,8 @@ const BTN = {
   MY_TICKETS: "📋 تیکت‌های من",
   CLOSE_TICKET: "🔒 بستن تیکت",
   ADMIN_PANEL: "⚙️ پنل ادمین",
+  WAREHOUSE_ORDERS: "📦 مدیریت سفارش‌ها",
+  WAREHOUSE_TICKETS: "🎫 مدیریت تیکت‌ها",
   ADMIN_INVOICES: "🧾 سفارش‌های مشتریان",
   ADMIN_PENDING: "🧾 فاکتورهای در انتظار",
   ADMIN_APPROVED: "✅ فاکتورهای تایید شده",
@@ -249,21 +251,33 @@ function inlineKb(rows) {
 }
 
 function mainMenu(user) {
+  const { isWarehouseOnly, isPrimaryAdmin } = require("../services/user");
+  const warehouseOnly = isWarehouseOnly(user);
+  const primaryAdmin = isPrimaryAdmin(user);
+
   const rows = [
     [{ text: BTN.PRODUCTS }, { text: BTN.SEARCH }],
     [{ text: BTN.CART }, { text: BTN.ORDERS }],
     [{ text: BTN.SUPPORT }, { text: BTN.HELP }],
   ];
 
-  if (user.marketingEnabled && user.role !== "COLLEAGUE" && user.role !== "MANELI") {
+  if (
+    user.marketingEnabled &&
+    user.role !== "COLLEAGUE" &&
+    user.role !== "MANELI" &&
+    !warehouseOnly
+  ) {
     rows.push([{ text: BTN.MARKETING }, { text: BTN.WALLET }]);
   }
 
-  if (user.role === "COLLEAGUE" || user.role === "ADMIN") {
+  if ((user.role === "COLLEAGUE" || primaryAdmin) && !warehouseOnly) {
     rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
   }
 
-  if (user.role === "ADMIN") {
+  if (warehouseOnly) {
+    rows.push([{ text: BTN.WAREHOUSE_ORDERS }, { text: BTN.WAREHOUSE_TICKETS }]);
+    rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
+  } else if (user.role === "ADMIN" || primaryAdmin) {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
   } else {
@@ -537,10 +551,14 @@ function adminProductsMenu() {
   ]);
 }
 
-function adminTicketsMenu() {
+function adminTicketsMenu(user) {
+  const { isWarehouseOnly } = require("../services/user");
+  const searchRow = isWarehouseOnly(user)
+    ? [{ text: BTN.TICKET_SEARCH }]
+    : [{ text: BTN.TICKET_SEARCH }, { text: BTN.TICKET_BROADCAST }];
   return kb([
     [{ text: BTN.TICKET_OPEN }, { text: BTN.TICKET_ANSWERED }],
-    [{ text: BTN.TICKET_SEARCH }, { text: BTN.TICKET_BROADCAST }],
+    searchRow,
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }

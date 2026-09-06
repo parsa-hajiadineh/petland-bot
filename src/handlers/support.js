@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { ADMIN_BALE_IDS } = require("../config");
+const { staffNotifyIds } = require("../services/user");
 const { reply, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { BTN, supportMenu, backMain, activeTicketMenu, adminTicketsMenu, adminBackMenu, inlineKb } = require("../keyboards/menus");
@@ -137,7 +137,7 @@ module.exports.handleSupport = async function handleSupport(
         activeTicketMenu()
       );
 
-      for (const adminId of ADMIN_BALE_IDS) {
+      for (const adminId of staffNotifyIds()) {
         await notify(
           adminId,
           `🎫 تیکت جدید #${ticketCode(ticket)}\n${senderLine(user)}\n\nمتن تیکت:\n${text}`
@@ -162,7 +162,7 @@ module.exports.handleSupport = async function handleSupport(
 
     await reply(user, chatId, "✅ پیام ارسال شد.", activeTicketMenu());
 
-    for (const adminId of ADMIN_BALE_IDS) {
+    for (const adminId of staffNotifyIds()) {
       await notify(
         adminId,
         `💬 پیام تیکت #${ticketCode(motherActive)}\n${senderLine(user)}\n\n${text}`
@@ -176,7 +176,7 @@ module.exports.handleSupport = async function handleSupport(
 };
 
 module.exports.adminListTickets = async function adminListTickets(user, chatId) {
-  await reply(user, chatId, "🎫 مدیریت تیکت‌ها", adminTicketsMenu());
+  await reply(user, chatId, "🎫 مدیریت تیکت‌ها", adminTicketsMenu(user));
 };
 
 module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId, offset = 0) {
@@ -192,7 +192,7 @@ module.exports.adminOpenTickets = async function adminOpenTickets(user, chatId, 
       user,
       chatId,
       offset > 0 ? "تیکت بی‌پاسخ دیگری وجود ندارد." : "✅ تیکت بی‌پاسخی وجود ندارد.",
-      adminTicketsMenu()
+      adminTicketsMenu(user)
     );
     return;
   }
@@ -223,7 +223,7 @@ module.exports.adminAnsweredTickets = async function adminAnsweredTickets(user, 
   });
 
   if (!tickets.length) {
-    await reply(user, chatId, "📭 تیکت پاسخ داده شده‌ای وجود ندارد.", adminTicketsMenu());
+    await reply(user, chatId, "📭 تیکت پاسخ داده شده‌ای وجود ندارد.", adminTicketsMenu(user));
     return;
   }
 
@@ -272,7 +272,7 @@ module.exports.adminShowTicket = async function adminShowTicket(user, chatId, ti
     text += `━━━━━━━━━━━━━━━━━━\n✏️ پاسخ خود را تایپ و ارسال کنید:`;
     await reply(user, chatId, text, adminBackMenu());
   } else {
-    await reply(user, chatId, text, adminTicketsMenu());
+    await reply(user, chatId, text, adminTicketsMenu(user));
   }
 };
 
@@ -341,7 +341,7 @@ module.exports.adminSearchTicket = async function adminSearchTicket(user, chatId
 module.exports.adminReplyTicketDirect = async function adminReplyTicketDirect(user, chatId, ticketId, message) {
   const scoped = await loadMotherTicket(ticketId);
   if (!scoped) {
-    await reply(user, chatId, "تیکت پیدا نشد.", adminTicketsMenu());
+    await reply(user, chatId, "تیکت پیدا نشد.", adminTicketsMenu(user));
     return;
   }
   await prisma.ticketMessage.create({
@@ -360,7 +360,7 @@ module.exports.adminReplyTicketDirect = async function adminReplyTicketDirect(us
   });
 
   await notify(ticket.user.baleId, `🎫 پاسخ پشتیبانی\n\n${message}`);
-  await reply(user, chatId, "✅ پاسخ ارسال شد.", adminTicketsMenu());
+  await reply(user, chatId, "✅ پاسخ ارسال شد.", adminTicketsMenu(user));
 };
 
 module.exports.adminReplyTicket = async function adminReplyTicket(

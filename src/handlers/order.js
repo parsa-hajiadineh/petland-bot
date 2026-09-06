@@ -1,6 +1,6 @@
 const prisma = require("../database/prisma");
 const { ORDER_WITH_ITEMS_SELECT, CART_ITEMS_SELECT } = require("../database/selects");
-const { ADMIN_BALE_IDS } = require("../config");
+const { staffNotifyIds } = require("../services/user");
 const { reply, notify, notifyMother } = require("../bot/messenger");
 const partnerNotify = require("../services/partnerNotify");
 const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu, adminBackMenu } = require("../keyboards/menus");
@@ -28,7 +28,7 @@ const {
 } = require("../utils/invoice");
 
 async function notifyAdmins(text) {
-  for (const adminId of ADMIN_BALE_IDS) {
+  for (const adminId of staffNotifyIds()) {
     try {
       await notify(adminId, text);
     } catch (err) {
@@ -344,7 +344,7 @@ ${invoice}
     [{ text: "✅ تایید پیش‌فاکتور", callback_data: `pf:ok:${order.id}` }],
     [{ text: "❌ رد پیش‌فاکتور", callback_data: `pf:no:${order.id}` }],
   ]);
-  for (const adminId of ADMIN_BALE_IDS) {
+  for (const adminId of staffNotifyIds()) {
     try {
       await bale.sendKeyboard(adminId, text, keyboard);
     } catch (err) {

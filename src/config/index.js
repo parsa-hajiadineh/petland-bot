@@ -11,6 +11,7 @@ module.exports = {
   BOT_TOKEN_ENCRYPTION_KEY: process.env.BOT_TOKEN_ENCRYPTION_KEY || "",
   PORT: process.env.PORT || 3000,
   ADMIN_BALE_IDS: parseIds(process.env.ADMIN_BALE_IDS),
+  WAREHOUSE_ADMIN_BALE_IDS: parseIds(process.env.WAREHOUSE_ADMIN_BALE_IDS),
   COLLEAGUE_ACCESS_CODE: process.env.COLLEAGUE_ACCESS_CODE || "",
   MANELI_ACCESS_CODE: process.env.MANELI_ACCESS_CODE || "",
   MARKETING_ACCESS_CODE: process.env.MARKETING_ACCESS_CODE || "",

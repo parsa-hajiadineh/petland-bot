@@ -3,6 +3,7 @@ const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
+const { isWarehouseOnly } = require("../services/user");
 const {
   provisionShop,
   findOwnedTenant,
@@ -522,13 +523,16 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (text === BTN.CREATE_SHOP_BOT) {
+    if (isWarehouseOnly(user)) return false;
     if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
     const tenant = await findOwnedTenant(user.id);
     await gateShopBotCreate(user, chatId, tenant);
     return true;
   }
 
-  if (await serviceBilling.handleText(user, chatId, text)) return true;
+  if (!isWarehouseOnly(user) && (await serviceBilling.handleText(user, chatId, text))) {
+    return true;
+  }
 
   if (text === BTN.BACK_QUESTION && PROFILE_STEPS.includes(user.orderStep)) {
     await goProfileBack(user, chatId);
@@ -782,6 +786,7 @@ Paw Ora | More Than Care`
   }
 
   if (
+    !isWarehouseOnly(user) &&
     (user.role === "COLLEAGUE" || user.role === "ADMIN") &&
     /\d{5,}:[A-Za-z0-9_-]{20,}/.test(text)
   ) {

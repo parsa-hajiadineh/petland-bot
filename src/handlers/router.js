@@ -1,6 +1,6 @@
 const prisma = require("../database/prisma");
 const { reloadUser } = require("../services/user");
-const { isAdmin } = require("../services/user");
+const { isAdmin, isWarehouseOnly } = require("../services/user");
 const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES, adminBackMenu } = require("../keyboards/menus");
 const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
@@ -99,7 +99,7 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.MARKETING || text === BTN.WALLET) {
-    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI" || isWarehouseOnly(user)) {
       await reply(
         user,
         chatId,
@@ -117,7 +117,7 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.WITHDRAW_NEW) {
-    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI" || isWarehouseOnly(user)) {
       await reply(
         user,
         chatId,
@@ -131,7 +131,7 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (text === BTN.WITHDRAW_HISTORY) {
-    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI" || isWarehouseOnly(user)) {
       await reply(
         user,
         chatId,
@@ -364,7 +364,7 @@ module.exports = async function messageHandler(message, user) {
   }
 
   if (MARKETING_ACCESS_CODE && text.trim() === MARKETING_ACCESS_CODE) {
-    if (user.role === "COLLEAGUE" || user.role === "MANELI") {
+    if (user.role === "COLLEAGUE" || user.role === "MANELI" || isWarehouseOnly(user)) {
       await reply(
         user,
         chatId,

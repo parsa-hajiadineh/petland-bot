@@ -1,5 +1,32 @@
 const prisma = require("../database/prisma");
-const { ADMIN_BALE_IDS } = require("../config");
+const { ADMIN_BALE_IDS, WAREHOUSE_ADMIN_BALE_IDS } = require("../config");
+
+function baleIdOf(userOrId) {
+  if (userOrId && typeof userOrId === "object") return String(userOrId.baleId || "");
+  return String(userOrId || "");
+}
+
+function isPrimaryAdmin(user) {
+  return ADMIN_BALE_IDS.includes(baleIdOf(user));
+}
+
+function isWarehouseAdmin(user) {
+  return WAREHOUSE_ADMIN_BALE_IDS.includes(baleIdOf(user));
+}
+
+function isWarehouseOnly(user) {
+  return isWarehouseAdmin(user) && !isPrimaryAdmin(user);
+}
+
+function isStaffBaleId(baleId) {
+  const id = String(baleId || "");
+  return ADMIN_BALE_IDS.includes(id) || WAREHOUSE_ADMIN_BALE_IDS.includes(id);
+}
+
+function staffNotifyIds() {
+  if (WAREHOUSE_ADMIN_BALE_IDS.length) return WAREHOUSE_ADMIN_BALE_IDS;
+  return ADMIN_BALE_IDS;
+}
 
 async function getOrCreateUser(msg, referrerBaleId = null) {
   const baleId = String(msg.from.id);
@@ -22,12 +49,12 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
       data: {
         baleId,
         fullName: msg.from.first_name || "",
-        role: ADMIN_BALE_IDS.includes(baleId) ? "ADMIN" : "CUSTOMER",
+        role: isStaffBaleId(baleId) ? "ADMIN" : "CUSTOMER",
         ...(referrerId ? { referrerId } : {}),
       },
     });
   } else if (
-    ADMIN_BALE_IDS.includes(baleId) &&
+    isStaffBaleId(baleId) &&
     user.role !== "ADMIN"
   ) {
     user = await prisma.user.update({
@@ -44,7 +71,7 @@ async function reloadUser(userId) {
 }
 
 function isAdmin(user) {
-  return user.role === "ADMIN";
+  return user?.role === "ADMIN" || isWarehouseAdmin(user);
 }
 
 async function ensureManeliRole() {
@@ -61,5 +88,9 @@ module.exports = {
   getOrCreateUser,
   reloadUser,
   isAdmin,
+  isPrimaryAdmin,
+  isWarehouseAdmin,
+  isWarehouseOnly,
+  staffNotifyIds,
   ensureManeliRole,
 };
