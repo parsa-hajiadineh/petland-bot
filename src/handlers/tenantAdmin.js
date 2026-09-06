@@ -628,6 +628,13 @@ async function handleAdminText(user, chatId, text) {
   const tenantId = ctx.tenantId;
   if (!(await isShopOwner(user, tenantId))) return false;
 
+  if (
+    (user.orderStep === "TCK:QTY" || user.orderStep === "TCK:EDIT") &&
+    !Object.values(BTN).includes(text)
+  ) {
+    return false;
+  }
+
   if (text === BTN.SHOP_ADMIN) {
     await showAdminHome(user, chatId);
     return true;

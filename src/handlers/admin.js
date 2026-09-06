@@ -563,9 +563,11 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     shoppingStep === "SEARCH" ||
     shoppingStep === "ADDR_CONFIRM" ||
     shoppingStep === "UPLOAD_RECEIPT" ||
-    shoppingStep.startsWith("CHECKOUT")
+    shoppingStep === "TICKET_MESSAGE" ||
+    shoppingStep.startsWith("CHECKOUT") ||
+    shoppingStep.startsWith("CAT:")
   ) {
-    return false;
+    if (!Object.values(BTN).includes(text)) return false;
   }
 
   if (user.adminStep === "PROFORMA_CARD" && user.pendingOrderId) {
@@ -583,8 +585,9 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     return handleProformaRejectText(user, chatId, text);
   }
 
+  if (await adminServices.handleText(user, chatId, text)) return true;
+
   if (!isWarehouseOnly(user)) {
-    if (await adminServices.handleText(user, chatId, text)) return true;
     if (await adminCreditSettings.handleText(user, chatId, text)) return true;
     if (await adminManage.handleText(user, chatId, text)) return true;
     if (await adminBroadcast.handleText(user, chatId, text)) return true;
@@ -679,7 +682,10 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (isWarehouseOnly(user) && (
     text === BTN.ADMIN_WITHDRAWALS ||
     text === BTN.ADMIN_SALES ||
-    text === BTN.ADMIN_PRODUCTS
+    text === BTN.ADMIN_PRODUCTS ||
+    text === BTN.ADMIN_SERVICES ||
+    text === BTN.ADMIN_MANAGE ||
+    text === BTN.ADMIN_CREDIT_SETTINGS
   )) {
     return false;
   }

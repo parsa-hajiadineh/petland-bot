@@ -2,7 +2,7 @@ const prisma = require("../database/prisma");
 const { reply, notifyMother } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { getBotContext, isMother } = require("../bot/context");
-const { ADMIN_BALE_IDS } = require("../config");
+const { staffNotifyIds } = require("../services/user");
 const { BTN, kb, inlineKb, backMain, mainMenu, tenantAdminMenu, paymentMenu } = require("../keyboards/menus");
 const { formatPrice } = require("../utils/price");
 const { buildPaymentInfo } = require("../utils/invoice");
@@ -139,7 +139,7 @@ const OPEN_INVOICE_MSG = `امکان خرید اشتراک جدید نیست.
 پس از تایید یا رد ادمین می‌توانید دوباره اشتراک بخرید.`;
 
 async function notifyMotherAdmins(text) {
-  for (const adminId of ADMIN_BALE_IDS || []) {
+  for (const adminId of staffNotifyIds()) {
     try {
       await notifyMother(adminId, text);
     } catch (err) {

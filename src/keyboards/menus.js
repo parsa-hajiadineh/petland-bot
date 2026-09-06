@@ -278,6 +278,7 @@ function mainMenu(user) {
 
   if (warehouseOnly) {
     rows.push([{ text: BTN.WAREHOUSE_ORDERS }, { text: BTN.WAREHOUSE_TICKETS }]);
+    rows.push([{ text: BTN.ADMIN_SVC_INVOICES }]);
     rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
   } else if (user.role === "ADMIN" || primaryAdmin) {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);

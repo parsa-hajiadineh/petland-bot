@@ -171,6 +171,7 @@ async function startCreate(user, chatId) {
 }
 
 async function handleCallback(user, chatId, data) {
+  const { isWarehouseOnly } = require("../services/user");
   if (data.startsWith("silp:") || data.startsWith("sila:") || data.startsWith("silr:")) {
     const kind = data.slice(3, 4);
     const offset = Number(data.slice(5)) || 0;
@@ -182,6 +183,7 @@ async function handleCallback(user, chatId, data) {
     return true;
   }
   if (!data.startsWith("asvc:")) return false;
+  if (isWarehouseOnly(user)) return true;
   const id = data.slice(5);
   await showDetail(user, chatId, id);
   return true;
@@ -422,7 +424,11 @@ async function goBack(user, chatId) {
 }
 
 async function handleText(user, chatId, text) {
+  const { isWarehouseOnly } = require("../services/user");
+  const warehouseOnly = isWarehouseOnly(user);
+
   if (text === BTN.ADMIN_SERVICES) {
+    if (warehouseOnly) return false;
     await showList(user, chatId);
     return true;
   }
@@ -461,12 +467,12 @@ async function handleText(user, chatId, text) {
   if (
     user.adminStep === "SINV:REJECT" &&
     user.pendingOrderId &&
-    text !== BTN.BACK_PRODUCT_LIST &&
-    text !== BTN.BACK_MAIN
+    !Object.values(BTN).includes(text)
   ) {
     await rejectServiceInvoice(user, chatId, text);
     return true;
   }
+  if (warehouseOnly) return false;
   if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
   if (text === BTN.SVC_NEW && isServiceAdminStep(user.adminStep)) {
     await startCreate(user, chatId);
