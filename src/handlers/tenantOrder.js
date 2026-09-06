@@ -9,6 +9,7 @@ const {
   BTN,
   kb,
   inlineKb,
+  cartMenu,
   backMain,
   checkoutSkipMenu,
   paymentMenu,
@@ -29,39 +30,11 @@ const {
   buildPaymentInfo,
   buildTenantShippingInfo,
 } = require("../utils/invoice");
+const { parseQty, isDigitsOnly } = require("../utils/digits");
+const { TENANT_STEP, PROMPT, sendEditList } = require("../utils/cartEdit");
 
 const QTY_STEP = "TCK:QTY";
 const RECEIPT_STEP = "TCK:RECEIPT";
-
-function parseQty(text) {
-  const map = {
-    "۰": "0",
-    "۱": "1",
-    "۲": "2",
-    "۳": "3",
-    "۴": "4",
-    "۵": "5",
-    "۶": "6",
-    "۷": "7",
-    "۸": "8",
-    "۹": "9",
-    "٠": "0",
-    "١": "1",
-    "٢": "2",
-    "٣": "3",
-    "٤": "4",
-    "٥": "5",
-    "٦": "6",
-    "٧": "7",
-    "٨": "8",
-    "٩": "9",
-  };
-  const normalized = String(text || "")
-    .replace(/[۰-۹٠-٩]/g, (d) => map[d] || d)
-    .replace(/[^\d]/g, "");
-  const n = Number(normalized);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
-}
 
 async function shopMenu(user) {
   const ctx = getBotContext();
@@ -246,6 +219,10 @@ module.exports.startAddToCart = async function startAddToCart(user, chatId) {
 
 module.exports.handleQty = async function handleQty(user, chatId, text) {
   if (user.orderStep !== QTY_STEP) return false;
+  if (!isDigitsOnly(text)) {
+    await reply(user, chatId, "لطفاً یک عدد معتبر وارد کنید.", kb([[{ text: BTN.BACK_MAIN }]]));
+    return true;
+  }
   const qty = parseQty(text);
   if (!qty) {
     await reply(user, chatId, "لطفاً یک عدد معتبر وارد کنید.", kb([[{ text: BTN.BACK_MAIN }]]));
@@ -290,12 +267,107 @@ module.exports.handleQty = async function handleQty(user, chatId, text) {
   return true;
 };
 
+function editItemId(user) {
+  const raw = String(user.tempDescription || "");
+  return raw.startsWith("CE:") ? raw.slice(3) : "";
+}
+
+async function clearEditStep(user) {
+  if (user.orderStep !== TENANT_STEP) return;
+  const data = { orderStep: null };
+  if (String(user.tempDescription || "").startsWith("CE:")) {
+    data.tempDescription = null;
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data,
+  });
+  user.orderStep = null;
+  if (data.tempDescription !== undefined) user.tempDescription = null;
+}
+
 module.exports.showCart = async function showCart(user, chatId) {
+  await clearEditStep(user);
   await shopCart.showCart(user, chatId, getBotContext().tenantId);
 };
 
 module.exports.clearCart = async function clearCart(user, chatId) {
+  await clearEditStep(user);
   await shopCart.clearCart(user, chatId, getBotContext().tenantId);
+};
+
+module.exports.showEditList = async function showEditList(user, chatId, offset = 0) {
+  await clearEditStep(user);
+  const ctx = getBotContext();
+  let cart;
+  try {
+    cart = await shopCart.getCartWithItems(user.id, ctx.tenantId);
+  } catch (err) {
+    console.error("SHOP EDIT CART LIST:", err);
+    await reply(user, chatId, "خواندن سبد خرید ممکن نشد. لطفاً دوباره تلاش کنید.", backMain());
+    return;
+  }
+  await sendEditList(user, chatId, cart?.items || [], offset);
+};
+
+module.exports.startEditItem = async function startEditItem(user, chatId, itemId) {
+  const ctx = getBotContext();
+  const cart = await shopCart.getCartWithItems(user.id, ctx.tenantId);
+  const item = cart?.items?.find((row) => row.id === itemId);
+  if (!item) {
+    await reply(user, chatId, "این محصول در سبد خرید شما نیست.", cartMenu());
+    return;
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: TENANT_STEP, tempDescription: `CE:${itemId}` },
+  });
+  user.orderStep = TENANT_STEP;
+  user.tempDescription = `CE:${itemId}`;
+  await reply(user, chatId, PROMPT, cartMenu());
+};
+
+module.exports.handleEditQty = async function handleEditQty(user, chatId, text) {
+  if (user.orderStep !== TENANT_STEP) return false;
+  if (!isDigitsOnly(text)) {
+    await reply(
+      user,
+      chatId,
+      "لطفاً یک عدد معتبر (۰ تا ۹۹۹) وارد کنید.",
+      cartMenu()
+    );
+    return true;
+  }
+  const qty = parseQty(text, { allowZero: true });
+  if (qty === null) {
+    await reply(
+      user,
+      chatId,
+      "لطفاً یک عدد معتبر (۰ تا ۹۹۹) وارد کنید.",
+      cartMenu()
+    );
+    return true;
+  }
+  const ctx = getBotContext();
+  const itemId = editItemId(user);
+  try {
+    const result = await shopCart.setItemQuantity(user.id, ctx.tenantId, itemId, qty);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, tempDescription: null },
+    });
+    user.orderStep = null;
+    user.tempDescription = null;
+    if (!result.ok) {
+      await reply(user, chatId, "این محصول در سبد خرید شما نیست.", backMain());
+      return true;
+    }
+    await shopCart.showCart(user, chatId, ctx.tenantId);
+  } catch (err) {
+    console.error("SHOP EDIT CART QTY:", err);
+    await reply(user, chatId, "تغییر تعداد ممکن نشد.", await shopMenu(user));
+  }
+  return true;
 };
 
 module.exports.startCheckout = async function startCheckout(user, chatId) {
@@ -365,7 +437,12 @@ module.exports.handleCheckoutStep = async function handleCheckoutStep(
 ) {
   const step = user.orderStep;
   if (!step || !String(step).startsWith("TCK:")) return false;
-  if (step === QTY_STEP || step === RECEIPT_STEP || step === "TCK:ADDR") {
+  if (
+    step === QTY_STEP ||
+    step === TENANT_STEP ||
+    step === RECEIPT_STEP ||
+    step === "TCK:ADDR"
+  ) {
     return false;
   }
 

@@ -101,6 +101,7 @@ function isBusyForQuick(user) {
   const order = user.orderStep || "";
   if (
     order === "PRODUCT_QTY" ||
+    order === "CART_EDIT_QTY" ||
     order === "TICKET_MESSAGE" ||
     order === "SEARCH" ||
     order === "UPLOAD_RECEIPT" ||

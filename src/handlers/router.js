@@ -6,6 +6,8 @@ const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
 const { isMother } = require("../bot/context");
 const { isWholesaleProformaHold, isProformaPayExpired } = require("../utils/order");
+const { parseQty, isDigitsOnly } = require("../utils/digits");
+const { MOTHER_STEP, isEditCallback, parseEditCallback } = require("../utils/cartEdit");
 
 const productsHandler = require("./products");
 const cartHandler = require("./cart");
@@ -48,9 +50,27 @@ module.exports = async function messageHandler(message, user) {
     text === BTN.SEARCH ||
     text === BTN.HELP ||
     text === BTN.SUPPORT ||
-    text === BTN.ORDERS
+    text === BTN.ORDERS ||
+    text === BTN.EDIT_CART ||
+    text === BTN.CLEAR_CART ||
+    text === BTN.CHECKOUT
   ) {
     await productsHandler.clearProductListMessages(user, chatId);
+    if (user.orderStep === MOTHER_STEP) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          orderStep: null,
+          ...(String(user.tempDescription || "").startsWith("CE:")
+            ? { tempDescription: null }
+            : {}),
+        },
+      });
+      user.orderStep = null;
+      if (String(user.tempDescription || "").startsWith("CE:")) {
+        user.tempDescription = null;
+      }
+    }
   }
 
   if (text === BTN.BACK_MAIN || text === "/start" || text.startsWith("/start ")) {
@@ -67,13 +87,23 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
-  if (user.orderStep === "PRODUCT_QTY" && /^\d+$/.test(text)) {
-    const qty = parseInt(text, 10);
-    if (!qty || qty < 1 || qty > 999) {
+  if (user.orderStep === "PRODUCT_QTY" && isDigitsOnly(text)) {
+    const qty = parseQty(text);
+    if (qty === null) {
       await reply(user, chatId, "لطفاً یک عدد معتبر (1 تا 999) وارد کنید.");
       return;
     }
     await productsHandler.addToCartWithQty(user, chatId, qty);
+    return;
+  }
+
+  if (user.orderStep === MOTHER_STEP && isDigitsOnly(text)) {
+    const qty = parseQty(text, { allowZero: true });
+    if (qty === null) {
+      await reply(user, chatId, "لطفاً یک عدد معتبر (۰ تا ۹۹۹) وارد کنید.");
+      return;
+    }
+    await cartHandler.applyEditQty(user, chatId, qty);
     return;
   }
 
@@ -192,6 +222,11 @@ module.exports = async function messageHandler(message, user) {
 
   if (text === BTN.CLEAR_CART) {
     await cartHandler.clearCart(user, chatId);
+    return;
+  }
+
+  if (text === BTN.EDIT_CART) {
+    await cartHandler.showEditList(user, chatId, 0);
     return;
   }
 
@@ -407,6 +442,16 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
   const chatId = cq.message.chat.id;
 
   user = await reloadUser(user.id);
+
+  if (isEditCallback(data)) {
+    const parsed = parseEditCallback(data);
+    if (parsed?.kind === "item") {
+      await cartHandler.startEditItem(user, chatId, parsed.id);
+    } else if (parsed?.kind === "more") {
+      await cartHandler.showEditList(user, chatId, parsed.offset);
+    }
+    return;
+  }
 
   if ((data.startsWith("pf:ok:") || data.startsWith("pf:no:")) && isAdmin(user)) {
     await orderHandler.handleProformaCallback(user, chatId, data);

@@ -10,6 +10,7 @@ const productsHandler = require("./products");
 const tenantAdmin = require("./tenantAdmin");
 const tenantOrder = require("./tenantOrder");
 const tenantSupport = require("./tenantSupport");
+const { isEditCallback, parseEditCallback } = require("../utils/cartEdit");
 
 const NAV_BUTTONS = new Set([
   BTN.PRODUCTS,
@@ -22,6 +23,7 @@ const NAV_BUTTONS = new Set([
   BTN.ADD_CART,
   BTN.CHECKOUT,
   BTN.CLEAR_CART,
+  BTN.EDIT_CART,
   BTN.UPLOAD_RECEIPT,
   BTN.COMPLETE_PAYMENT,
   BTN.BACK_PRODUCTS,
@@ -122,6 +124,21 @@ async function handleMessageInner(message, user) {
     text.startsWith("/start ")
   ) {
     await productsHandler.clearProductListMessages(user, chatId);
+    if (user.orderStep === "TCK:EDIT") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          orderStep: null,
+          ...(String(user.tempDescription || "").startsWith("CE:")
+            ? { tempDescription: null }
+            : {}),
+        },
+      });
+      user.orderStep = null;
+      if (String(user.tempDescription || "").startsWith("CE:")) {
+        user.tempDescription = null;
+      }
+    }
   }
 
   if (
@@ -160,6 +177,11 @@ async function handleMessageInner(message, user) {
 
   if (text === BTN.CLEAR_CART) {
     await tenantOrder.clearCart(user, chatId);
+    return;
+  }
+
+  if (text === BTN.EDIT_CART) {
+    await tenantOrder.showEditList(user, chatId, 0);
     return;
   }
 
@@ -222,6 +244,8 @@ async function handleMessageInner(message, user) {
     return;
   }
 
+  if (await tenantOrder.handleEditQty(user, chatId, text)) return;
+
   if (await tenantOrder.handleQty(user, chatId, text)) return;
 
   if (await tenantOrder.handleCheckoutStep(user, chatId, text)) return;
@@ -261,6 +285,16 @@ async function handleCallbackQuery(cq, user) {
   const chatId = cq.message.chat.id;
   const ctx = getBotContext();
   user = (await reloadUser(user.id)) || user;
+
+  if (isEditCallback(data)) {
+    const parsed = parseEditCallback(data);
+    if (parsed?.kind === "item") {
+      await tenantOrder.startEditItem(user, chatId, parsed.id);
+    } else if (parsed?.kind === "more") {
+      await tenantOrder.showEditList(user, chatId, parsed.offset);
+    }
+    return;
+  }
 
   if (data.startsWith("ttk:") && (await tenantAdmin.isShopOwner(user, ctx.tenantId))) {
     if (await tenantSupport.handleOwnerCallback(user, chatId, data)) return;

@@ -99,6 +99,26 @@ async function clearItems(cartId) {
   await prisma.$executeRaw`DELETE FROM "ShopCartItem" WHERE "cartId" = ${cartId}`;
 }
 
+async function setItemQuantity(userId, tenantId, itemId, quantity) {
+  const cart = await getCartWithItems(userId, tenantId);
+  const item = cart?.items?.find((row) => row.id === itemId);
+  if (!item) return { ok: false };
+
+  if (quantity === 0) {
+    await prisma.$executeRaw`
+      DELETE FROM "ShopCartItem" WHERE id = ${item.id} AND "cartId" = ${cart.id}
+    `;
+    return { ok: true, removed: true, title: item.product.title };
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "ShopCartItem"
+    SET quantity = ${quantity}
+    WHERE id = ${item.id} AND "cartId" = ${cart.id}
+  `;
+  return { ok: true, removed: false, title: item.product.title, quantity };
+}
+
 async function deleteItemsForProducts(productIds) {
   if (!productIds?.length) return;
   await prisma.$executeRaw`
@@ -188,6 +208,7 @@ module.exports = {
   getCartWithItems,
   getOrCreateCart,
   addItem,
+  setItemQuantity,
   showCart,
   clearCart,
   clearItems,

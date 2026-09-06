@@ -1,13 +1,14 @@
 const prisma = require("../database/prisma");
 const { CART_ITEMS_SELECT } = require("../database/selects");
 const { reply } = require("../bot/messenger");
-const { BTN, cartMenu, backMain } = require("../keyboards/menus");
+const { cartMenu, backMain } = require("../keyboards/menus");
 const {
   getUnitPrice,
   formatPrice,
   isWholesaleUser,
   getMinOrderAmount,
 } = require("../utils/price");
+const { MOTHER_STEP, PROMPT, sendEditList } = require("../utils/cartEdit");
 
 async function getCartWithItems(userId) {
   return prisma.user.findUnique({
@@ -33,7 +34,27 @@ function calcCartTotal(items, wholesale) {
 
 module.exports.getCartTotal = calcCartTotal;
 
+function editItemId(user) {
+  const raw = String(user.tempDescription || "");
+  return raw.startsWith("CE:") ? raw.slice(3) : "";
+}
+
+async function clearEditStep(user) {
+  if (user.orderStep !== MOTHER_STEP) return;
+  const data = { orderStep: null };
+  if (String(user.tempDescription || "").startsWith("CE:")) {
+    data.tempDescription = null;
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data,
+  });
+  user.orderStep = null;
+  if (data.tempDescription !== undefined) user.tempDescription = null;
+}
+
 module.exports.showCart = async function showCart(user, chatId) {
+  await clearEditStep(user);
   let data;
   try {
     data = await getCartWithItems(user.id);
@@ -76,6 +97,7 @@ module.exports.showCart = async function showCart(user, chatId) {
 };
 
 module.exports.clearCart = async function clearCart(user, chatId) {
+  await clearEditStep(user);
   const data = await getCartWithItems(user.id);
 
   if (!data?.cart) {
@@ -88,6 +110,64 @@ module.exports.clearCart = async function clearCart(user, chatId) {
   });
 
   await reply(user, chatId, "✅ سبد خرید خالی شد.");
+};
+
+module.exports.showEditList = async function showEditList(user, chatId, offset = 0) {
+  await clearEditStep(user);
+  let data;
+  try {
+    data = await getCartWithItems(user.id);
+  } catch (err) {
+    console.error("EDIT CART LIST:", err);
+    await reply(user, chatId, "خواندن سبد خرید ممکن نشد. لطفاً دوباره تلاش کنید.", backMain());
+    return;
+  }
+  await sendEditList(user, chatId, data?.cart?.items || [], offset);
+};
+
+module.exports.startEditItem = async function startEditItem(user, chatId, itemId) {
+  const data = await getCartWithItems(user.id);
+  const item = data?.cart?.items?.find((row) => row.id === itemId);
+  if (!item) {
+    await reply(user, chatId, "این محصول در سبد خرید شما نیست.", cartMenu());
+    return;
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: MOTHER_STEP, tempDescription: `CE:${itemId}` },
+  });
+  user.orderStep = MOTHER_STEP;
+  user.tempDescription = `CE:${itemId}`;
+  await reply(user, chatId, PROMPT, cartMenu());
+};
+
+module.exports.applyEditQty = async function applyEditQty(user, chatId, qty) {
+  const itemId = editItemId(user);
+  const data = await getCartWithItems(user.id);
+  const item = data?.cart?.items?.find((row) => row.id === itemId);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: null, tempDescription: null },
+  });
+  user.orderStep = null;
+  user.tempDescription = null;
+
+  if (!item) {
+    await reply(user, chatId, "این محصول در سبد خرید شما نیست.", backMain());
+    return;
+  }
+
+  if (qty === 0) {
+    await prisma.cartItem.delete({ where: { id: item.id } });
+  } else {
+    await prisma.cartItem.update({
+      where: { id: item.id },
+      data: { quantity: qty },
+    });
+  }
+
+  await module.exports.showCart(user, chatId);
 };
 
 module.exports.validateCheckout = async function validateCheckout(user) {

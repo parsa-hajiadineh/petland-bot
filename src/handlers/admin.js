@@ -559,6 +559,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   const shoppingStep = user.orderStep || "";
   if (
     shoppingStep === "PRODUCT_QTY" ||
+    shoppingStep === "CART_EDIT_QTY" ||
     shoppingStep === "SEARCH" ||
     shoppingStep === "ADDR_CONFIRM" ||
     shoppingStep === "UPLOAD_RECEIPT" ||
