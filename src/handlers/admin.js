@@ -8,6 +8,7 @@ const { formatPrice } = require("../utils/price");
 const {
   BTN,
   adminMenu,
+  warehouseAdminMenu,
   mainMenu,
   adminInvoiceKindMenu,
   adminProformaMenu,
@@ -425,7 +426,7 @@ module.exports.showAdminPanel = async function showAdminPanel(user, chatId) {
   user.adminStep = null;
   user.pendingOrderId = null;
   if (isWarehouseOnly(user)) {
-    await reply(user, chatId, "منوی اصلی", mainMenu(user));
+    await reply(user, chatId, "⚙️ پنل ادمین", warehouseAdminMenu());
     return;
   }
   await reply(user, chatId, "⚙️ پنل ادمین", adminMenu());
@@ -511,7 +512,6 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 
 module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (text === BTN.ADMIN_PANEL) {
-    if (isWarehouseOnly(user)) return false;
     await module.exports.showAdminPanel(user, chatId);
     return true;
   }

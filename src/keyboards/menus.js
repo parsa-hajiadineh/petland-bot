@@ -277,9 +277,8 @@ function mainMenu(user) {
   }
 
   if (warehouseOnly) {
-    rows.push([{ text: BTN.WAREHOUSE_ORDERS }, { text: BTN.WAREHOUSE_TICKETS }]);
-    rows.push([{ text: BTN.ADMIN_SVC_INVOICES }]);
-    rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
+    rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
+    rows.push([{ text: BTN.RETAIL_MODE }]);
   } else if (user.role === "ADMIN" || primaryAdmin) {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
@@ -424,6 +423,14 @@ function walletMenu() {
   return kb([
     [{ text: BTN.WITHDRAW_NEW }],
     [{ text: BTN.WITHDRAW_HISTORY }],
+    [{ text: BTN.BACK_MAIN }],
+  ]);
+}
+
+function warehouseAdminMenu() {
+  return kb([
+    [{ text: BTN.WAREHOUSE_ORDERS }, { text: BTN.WAREHOUSE_TICKETS }],
+    [{ text: BTN.ADMIN_SVC_INVOICES }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }
@@ -626,6 +633,7 @@ module.exports = {
   paymentMenu,
   walletMenu,
   adminMenu,
+  warehouseAdminMenu,
   adminServicesMenu,
   adminServiceDetailMenu,
   adminServiceInvoiceActions,

@@ -3,7 +3,7 @@ require("dotenv").config();
 const parseIds = (value) =>
   (value || "")
     .split(",")
-    .map((id) => id.trim())
+    .map((id) => id.trim().replace(/^["']|["']$/g, "").trim())
     .filter(Boolean);
 
 function parseBroadcastGroups(value) {
