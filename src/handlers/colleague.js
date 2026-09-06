@@ -1,7 +1,7 @@
 const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
-const { BTN, mainMenu, backMain, kb, inlineKb, colleagueGateMenu } = require("../keyboards/menus");
+const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
 const {
   provisionShop,
@@ -424,13 +424,6 @@ function isColleagueEntryBtn(text) {
   return t === BTN.COLLEAGUE || t === "خرید همکار" || t.endsWith("خرید همکار");
 }
 
-function colleagueGateInline() {
-  return inlineKb([
-    [{ text: BTN.ENTER_COLLEAGUE, callback_data: "cg:col" }],
-    [{ text: BTN.ENTER_MANELI, callback_data: "cg:man" }],
-  ]);
-}
-
 async function showColleagueGate(user, chatId) {
   await prisma.user.update({
     where: { id: user.id },
@@ -440,20 +433,8 @@ async function showColleagueGate(user, chatId) {
   await reply(
     user,
     chatId,
-    `ورود به کدام بخش را می‌خواهید؟
-
-۱. ورود به حالت همکار
-۲. ورود به پنل بازاریابان مانلی
-
-از دکمه‌های زیر یکی را انتخاب کنید.`,
+    "ورود به کدام بخش را می‌خواهید؟",
     colleagueGateMenu()
-  );
-  await reply(
-    user,
-    chatId,
-    "👇 انتخاب کنید:",
-    colleagueGateInline(),
-    { keepLast: true }
   );
 }
 
@@ -808,22 +789,6 @@ Paw Ora | More Than Care`
     return true;
   }
 
-  return false;
-};
-
-module.exports.handleGateCallback = async function handleGateCallback(
-  user,
-  chatId,
-  data
-) {
-  if (data === "cg:col") {
-    await askColleagueCode(user, chatId);
-    return true;
-  }
-  if (data === "cg:man") {
-    await askManeliCode(user, chatId);
-    return true;
-  }
   return false;
 };
 
