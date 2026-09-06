@@ -15,7 +15,7 @@ The mother bot (Paw Ora) sells from a shared catalog. Wholesale partners can att
 - **Subscriptions and credit** — service packages, monthly subscription invoices (`SI-`), a credit wallet for platform fees, and a configurable golden-period bonus
 - **Support tickets** — open, reply to, and close tickets in the chat
 - **Referral wallet** — deep links and a 5% commission on approved referred orders (unlocked with an access code)
-- **Admin panel** — order lifecycle (approve, reject, pack, ship via Snapp or post), PDF invoices, product management, broadcasts, withdrawal requests, 12-month sales figures, service invoices, shop block/unblock, and credit settings
+- **Admin panel** — order lifecycle (approve, reject, pack, ship via Snapp or post), product management, broadcasts, withdrawal requests, 12-month sales figures, service invoices, shop block/unblock, and credit settings
 
 ## Screenshots
 
@@ -31,7 +31,6 @@ The mother bot (Paw Ora) sells from a shared catalog. Wholesale partners can att
 | HTTP | Express 5 |
 | Database | PostgreSQL + Prisma 6 |
 | Messaging | Bale Bot API (long polling) |
-| PDF | PDFKit |
 
 ## Installation
 
@@ -40,7 +39,6 @@ npm install
 cp .env.example .env
 npm run build
 npm run db:push
-npm run seed
 npm start
 ```
 
@@ -50,7 +48,7 @@ For local development with auto-reload:
 npm run dev
 ```
 
-`npm run build` generates the Prisma client. `npm run db:push` applies `prisma/schema.prisma` to PostgreSQL. `npm run seed` loads the mother catalog from `src/data/products.js`.
+`npm run build` generates the Prisma client. `npm run db:push` applies `prisma/schema.prisma` to PostgreSQL. The live catalog is stored in the database, not in source files.
 
 ## Usage
 
@@ -93,15 +91,13 @@ Copy [`.env.example`](.env.example) and fill in real values. Do not commit `.env
 ```
 src/
 ├── index.js           # HTTP server and process entry
-├── seed.js            # Mother catalog seeder
 ├── config/            # Environment loader
 ├── database/          # Prisma client
 ├── bot/               # Bale API client and polling engine
 ├── handlers/          # Message and callback handlers
 ├── keyboards/         # Reply and inline keyboards
 ├── services/          # Billing, credit, partner shops, scheduled jobs
-├── utils/             # Pricing, tracking codes, invoices
-└── data/products.js   # Mother catalog seed data
+└── utils/             # Pricing, tracking codes, invoices
 prisma/
 └── schema.prisma      # Database schema
 ```

@@ -6,7 +6,6 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "seed": "node src/seed.js",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "build": "prisma generate"
@@ -22,7 +21,6 @@
     "express": "^5.2.1",
     "form-data": "^4.0.2",
     "node-fetch": "^2.7.0",
-    "pdfkit": "^0.16.0",
     "pg": "^8.21.0",
     "prisma": "^6.17.1"
   },

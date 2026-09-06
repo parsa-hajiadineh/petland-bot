@@ -1,4 +1,3 @@
-const fs = require("fs");
 const prisma = require("../database/prisma");
 const { ORDER_WITH_ITEMS_SELECT } = require("../database/selects");
 const bale = require("../bot/bale");
@@ -19,7 +18,7 @@ const {
   inlineKb,
   kb,
 } = require("../keyboards/menus");
-const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
+const { buildInvoiceText } = require("../utils/invoice");
 const { statusLabel, isWholesaleProformaHold, readWholesaleKind, wholesaleKindLabel } = require("../utils/order");
 const { isWarehouseOnly } = require("../services/user");
 const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback } = require("./order");
@@ -1058,18 +1057,6 @@ async function approveOrder(user, chatId) {
         )} اعتبار به کیف پول شما اضافه کرد.`
       : "✅ سفارش شما تایید شد و در حال آماده‌سازی است.";
   await notifyOrderStatus(order, statusMsg);
-
-  try {
-    const pdfPath = await generateInvoicePdf(order, order.items);
-    await bale.sendDocument(
-      chatId,
-      fs.createReadStream(pdfPath),
-      `فاکتور ${order.trackingCode}`
-    );
-    fs.unlinkSync(pdfPath);
-  } catch (err) {
-    console.log("PDF ERROR:", err.message);
-  }
 
   const owner = buyer || (await prisma.user.findUnique({
     where: { id: order.userId },

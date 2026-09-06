@@ -1,6 +1,3 @@
-const fs = require("fs");
-const path = require("path");
-const PDFDocument = require("pdfkit");
 const { formatPrice } = require("./price");
 const { orderStatusLabel, readWholesaleKind, wholesaleKindLabel } = require("./order");
 const { SHOP_NAME, BANK_CARD, BANK_IBAN, BANK_HOLDER, BANK_NAME } = require("../config");
@@ -109,49 +106,10 @@ function buildTenantShippingInfo(shop) {
   return lines.join("\n");
 }
 
-async function generateInvoicePdf(order, items) {
-  const dir = path.join(process.cwd(), "tmp");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  const filePath = path.join(dir, `${order.trackingCode}.pdf`);
-
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
-    const stream = fs.createWriteStream(filePath);
-
-    doc.pipe(stream);
-    doc.fontSize(18).text(`${SHOP_NAME} - Invoice`, { align: "center" });
-    doc.moveDown();
-    doc.fontSize(12).text(`Tracking: ${order.trackingCode}`);
-    doc.text(`Customer: ${order.fullName}`);
-    doc.text(`Phone: ${order.phone}`);
-    doc.text(`Address: ${order.province}, ${order.city}, ${order.address}`);
-    doc.moveDown();
-
-    for (const item of items) {
-      doc.text(
-        `${item.product.title} x${item.quantity} = ${formatPrice(
-          item.unitPrice * item.quantity
-        )}`
-      );
-    }
-
-    doc.moveDown();
-    doc.fontSize(14).text(`Total: ${formatPrice(order.totalAmount)}`);
-    doc.end();
-
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-  });
-
-  return filePath;
-}
-
 module.exports = {
   buildInvoiceText,
   orderKindLabel,
   buildPaymentInfo,
   buildShippingInfo,
   buildTenantShippingInfo,
-  generateInvoicePdf,
 };

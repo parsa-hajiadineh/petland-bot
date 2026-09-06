@@ -17,7 +17,7 @@
 - All schema changes go through `prisma/schema.prisma`
 - Run `npm run db:push` to sync schema
 - Migration files are not created (a deliberate project decision)
-- Seed data is sourced from `src/data/products.js`
+- The live catalog lives in PostgreSQL. Do not add or run a product seed that wipes products.
 
 ### Bale Bot
 - All Bale communication goes through `src/bot/bale.js`
@@ -53,7 +53,7 @@
 
 ### Deployment
 - Use `npm run build` for Liara (with Iran mirror)
-- Execution order: `build` → `db:push` → `seed` → `start`
+- Execution order: `build` → `db:push` → `start`
 - Service must run as a persistent process (long polling)
 
 ### Dependencies
