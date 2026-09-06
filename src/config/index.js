@@ -1,9 +1,18 @@
 require("dotenv").config();
 
+function normalizeBaleId(value) {
+  const fa = "۰۱۲۳۴۵۶۷۸۹";
+  const ar = "٠١٢٣٤٥٦٧٨٩";
+  return String(value || "")
+    .replace(/[۰-۹]/g, (d) => String(fa.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String(ar.indexOf(d)))
+    .replace(/[^\d]/g, "");
+}
+
 const parseIds = (value) =>
   (value || "")
-    .split(",")
-    .map((id) => id.trim().replace(/^["']|["']$/g, "").trim())
+    .split(/[,;\s]+/)
+    .map((id) => normalizeBaleId(id.replace(/^["']+|["']+$/g, "")))
     .filter(Boolean);
 
 function parseBroadcastGroups(value) {
@@ -34,7 +43,10 @@ module.exports = {
   BOT_TOKEN_ENCRYPTION_KEY: process.env.BOT_TOKEN_ENCRYPTION_KEY || "",
   PORT: process.env.PORT || 3000,
   ADMIN_BALE_IDS: parseIds(process.env.ADMIN_BALE_IDS),
-  WAREHOUSE_ADMIN_BALE_IDS: parseIds(process.env.WAREHOUSE_ADMIN_BALE_IDS),
+  WAREHOUSE_ADMIN_BALE_IDS: parseIds(
+    process.env.WAREHOUSE_ADMIN_BALE_IDS || process.env.WAREHOUSE_ADMIN_BALE_ID
+  ),
+  normalizeBaleId,
   BROADCAST_GROUP_CHATS: parseBroadcastGroups(process.env.BROADCAST_GROUP_CHATS),
   COLLEAGUE_ACCESS_CODE: process.env.COLLEAGUE_ACCESS_CODE || "",
   MANELI_ACCESS_CODE: process.env.MANELI_ACCESS_CODE || "",

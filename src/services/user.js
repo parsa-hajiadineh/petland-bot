@@ -1,17 +1,26 @@
 const prisma = require("../database/prisma");
-const { ADMIN_BALE_IDS, WAREHOUSE_ADMIN_BALE_IDS } = require("../config");
+const {
+  ADMIN_BALE_IDS,
+  WAREHOUSE_ADMIN_BALE_IDS,
+  normalizeBaleId,
+} = require("../config");
 
 function baleIdOf(userOrId) {
-  if (userOrId && typeof userOrId === "object") return String(userOrId.baleId || "");
-  return String(userOrId || "");
+  const raw =
+    userOrId && typeof userOrId === "object"
+      ? userOrId.baleId
+      : userOrId;
+  return normalizeBaleId(raw);
 }
 
 function isPrimaryAdmin(user) {
-  return ADMIN_BALE_IDS.includes(baleIdOf(user));
+  const id = baleIdOf(user);
+  return Boolean(id) && ADMIN_BALE_IDS.includes(id);
 }
 
 function isWarehouseAdmin(user) {
-  return WAREHOUSE_ADMIN_BALE_IDS.includes(baleIdOf(user));
+  const id = baleIdOf(user);
+  return Boolean(id) && WAREHOUSE_ADMIN_BALE_IDS.includes(id);
 }
 
 function isWarehouseOnly(user) {
@@ -19,8 +28,8 @@ function isWarehouseOnly(user) {
 }
 
 function isStaffBaleId(baleId) {
-  const id = String(baleId || "");
-  return ADMIN_BALE_IDS.includes(id) || WAREHOUSE_ADMIN_BALE_IDS.includes(id);
+  const id = normalizeBaleId(baleId);
+  return Boolean(id) && (ADMIN_BALE_IDS.includes(id) || WAREHOUSE_ADMIN_BALE_IDS.includes(id));
 }
 
 function staffNotifyIds() {
