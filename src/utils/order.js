@@ -12,6 +12,35 @@ function statusLabel(status) {
   return STATUS_LABELS[status] || status;
 }
 
+const PROFORMA_CARD_MARK = "@@CARD@@";
+
+function hasProformaCard(order) {
+  return String(order?.shipmentInfo || "").startsWith(PROFORMA_CARD_MARK);
+}
+
+function readProformaCard(order) {
+  if (!hasProformaCard(order)) return "";
+  return String(order.shipmentInfo).slice(PROFORMA_CARD_MARK.length);
+}
+
+function encodeProformaCard(cardText) {
+  return `${PROFORMA_CARD_MARK}${String(cardText || "").trim()}`;
+}
+
+function isWholesaleProformaHold(order) {
+  return Boolean(
+    order?.isWholesale &&
+      order.status === "WAITING_PAYMENT" &&
+      !order.receiptImage &&
+      !hasProformaCard(order)
+  );
+}
+
+function orderStatusLabel(order) {
+  if (isWholesaleProformaHold(order)) return "⏳ در انتظار بررسی پیش‌فاکتور";
+  return statusLabel(order?.status);
+}
+
 function dateStamp() {
   const now = new Date();
   return [
@@ -46,6 +75,11 @@ function isTenantTrackingCode(code) {
 
 module.exports = {
   statusLabel,
+  orderStatusLabel,
+  hasProformaCard,
+  readProformaCard,
+  encodeProformaCard,
+  isWholesaleProformaHold,
   generateTrackingCode,
   generateTenantTrackingCode,
   generateServiceInvoiceCode,

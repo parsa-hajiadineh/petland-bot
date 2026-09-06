@@ -5,6 +5,7 @@ const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES, adminBackMenu } = requi
 const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
 const { isMother } = require("../bot/context");
+const { isWholesaleProformaHold } = require("../utils/order");
 
 const productsHandler = require("./products");
 const cartHandler = require("./cart");
@@ -215,13 +216,46 @@ module.exports = async function messageHandler(message, user) {
           trackingCode: { startsWith: "PL-" },
         },
         orderBy: { createdAt: "desc" },
-        select: { id: true },
+        select: {
+          id: true,
+          status: true,
+          isWholesale: true,
+          receiptImage: true,
+          shipmentInfo: true,
+        },
       });
+      if (pending && isWholesaleProformaHold(pending)) {
+        await reply(
+          user,
+          chatId,
+          "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، اطلاعات واریز برایتان ارسال می‌شود."
+        );
+        return;
+      }
       pendingId = pending?.id;
     }
 
     if (!pendingId) {
       await reply(user, chatId, "سفارشی در انتظار پرداخت ندارید.");
+      return;
+    }
+
+    const pendingOrder = await prisma.order.findFirst({
+      where: { id: pendingId, userId: user.id, trackingCode: { startsWith: "PL-" } },
+      select: {
+        id: true,
+        status: true,
+        isWholesale: true,
+        receiptImage: true,
+        shipmentInfo: true,
+      },
+    });
+    if (pendingOrder && isWholesaleProformaHold(pendingOrder)) {
+      await reply(
+        user,
+        chatId,
+        "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، اطلاعات واریز برایتان ارسال می‌شود."
+      );
       return;
     }
 
@@ -347,6 +381,11 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
   const chatId = cq.message.chat.id;
 
   user = await reloadUser(user.id);
+
+  if ((data.startsWith("pf:ok:") || data.startsWith("pf:no:")) && isAdmin(user)) {
+    await orderHandler.handleProformaCallback(user, chatId, data);
+    return;
+  }
 
   if (data === "cg:col" || data === "cg:man") {
     await colleagueHandler.handleGateCallback(user, chatId, data);

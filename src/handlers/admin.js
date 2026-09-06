@@ -18,7 +18,7 @@ const {
 } = require("../keyboards/menus");
 const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
 const { statusLabel } = require("../utils/order");
-const { notifyOrderStatus } = require("./order");
+const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
@@ -186,6 +186,17 @@ async function replayInvoiceList(user, chatId, step) {
 
 async function goAdminBack(user, chatId) {
   const step = user.adminStep || "";
+
+  if (step === "PROFORMA_CARD" || step === "PROFORMA_REJECT") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: null, pendingOrderId: null },
+    });
+    user.adminStep = null;
+    user.pendingOrderId = null;
+    await module.exports.showAdminPanel(user, chatId);
+    return true;
+  }
 
   if (step === "REJECT_REASON" && user.pendingOrderId) {
     const order = await prisma.order.findUnique({
@@ -415,6 +426,21 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     await setInvKind(user, "maneli");
     await showInvoicesMenu(user, chatId);
     return true;
+  }
+
+  if (user.adminStep === "PROFORMA_CARD" && user.pendingOrderId) {
+    if (text === BTN.BACK_PRODUCT_LIST) {
+      await goAdminBack(user, chatId);
+      return true;
+    }
+    return handleProformaCardText(user, chatId, text);
+  }
+  if (user.adminStep === "PROFORMA_REJECT" && user.pendingOrderId) {
+    if (text === BTN.BACK_PRODUCT_LIST) {
+      await goAdminBack(user, chatId);
+      return true;
+    }
+    return handleProformaRejectText(user, chatId, text);
   }
 
   if (await adminServices.handleText(user, chatId, text)) return true;

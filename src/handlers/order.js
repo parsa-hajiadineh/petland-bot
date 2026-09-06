@@ -1,15 +1,20 @@
 const prisma = require("../database/prisma");
 const { ORDER_WITH_ITEMS_SELECT, CART_ITEMS_SELECT } = require("../database/selects");
 const { ADMIN_BALE_IDS } = require("../config");
-const { reply, notify } = require("../bot/messenger");
+const { reply, notify, notifyMother } = require("../bot/messenger");
 const partnerNotify = require("../services/partnerNotify");
-const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu } = require("../keyboards/menus");
+const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu, adminBackMenu } = require("../keyboards/menus");
 const bale = require("../bot/bale");
 const { validateCheckout } = require("./cart");
 const { getUnitPrice } = require("../utils/price");
 const {
   generateTrackingCode,
   statusLabel,
+  orderStatusLabel,
+  hasProformaCard,
+  readProformaCard,
+  encodeProformaCard,
+  isWholesaleProformaHold,
 } = require("../utils/order");
 const {
   buildInvoiceText,
@@ -239,6 +244,33 @@ async function finalizeOrder(user, chatId, description) {
     }
   }
 
+  const withBuyer = { ...order, user: { role: fresh.role } };
+
+  if (wholesale) {
+    await prisma.user.update({
+      where: { id: fresh.id },
+      data: {
+        orderStep: null,
+        pendingOrderId: order.id,
+        tempProvince: null,
+        tempCity: null,
+        tempAddress: null,
+        tempPostalCode: null,
+        tempDescription: null,
+      },
+    });
+
+    const invoice = buildInvoiceText(withBuyer, order.items);
+    await reply(
+      fresh,
+      chatId,
+      `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور برای بررسی موجودی به ادمین ارسال شد.\nپس از تایید، شماره کارت واریز برایتان ارسال می‌شود.\nتا آن زمان رسید پرداخت نفرستید.`,
+      mainMenu(fresh)
+    );
+    await notifyAdminsProforma(withBuyer);
+    return;
+  }
+
   await prisma.user.update({
     where: { id: fresh.id },
     data: {
@@ -252,7 +284,7 @@ async function finalizeOrder(user, chatId, description) {
     },
   });
 
-  const invoice = buildInvoiceText(order, order.items);
+  const invoice = buildInvoiceText(withBuyer, order.items);
 
   await reply(
     fresh,
@@ -260,6 +292,71 @@ async function finalizeOrder(user, chatId, description) {
     `${invoice}\n\n${buildShippingInfo()}\n\n${buildPaymentInfo()}`,
     paymentMenu()
   );
+}
+
+async function notifyAdminsProforma(order) {
+  const invoice = buildInvoiceText(order, order.items);
+  const kind =
+    order.user?.role === "MANELI" ? "بازاریابان مانلی" : "خرید همکار";
+  const text = `🆕 پیش‌فاکتور ${kind} — بررسی موجودی\n\n${invoice}\n\nپس از تطبیق با انبار، تایید یا رد کنید.`;
+  const keyboard = inlineKb([
+    [{ text: "✅ تایید پیش‌فاکتور", callback_data: `pf:ok:${order.id}` }],
+    [{ text: "❌ رد پیش‌فاکتور", callback_data: `pf:no:${order.id}` }],
+  ]);
+  for (const adminId of ADMIN_BALE_IDS) {
+    try {
+      await bale.sendKeyboard(adminId, text, keyboard);
+    } catch (err) {
+      console.log("ADMIN PROFORMA NOTIFY FAIL:", adminId, err.message);
+    }
+  }
+}
+
+async function restoreOrderItemsToCart(order) {
+  let cart = await prisma.cart.findUnique({
+    where: { userId: order.userId },
+  });
+  if (!cart) {
+    cart = await prisma.cart.create({ data: { userId: order.userId } });
+  }
+  for (const item of order.items || []) {
+    if (!item.productId) continue;
+    try {
+      await prisma.cartItem.upsert({
+        where: {
+          cartId_productId: { cartId: cart.id, productId: item.productId },
+        },
+        create: {
+          cartId: cart.id,
+          productId: item.productId,
+          quantity: item.quantity,
+        },
+        update: { quantity: { increment: item.quantity } },
+      });
+    } catch (err) {
+      console.error("RESTORE CART ITEM SKIP:", err.message);
+    }
+  }
+}
+
+function wholesalePayText(order) {
+  return [
+    "💳 اطلاعات واریز",
+    "━━━━━━━━━━━━━━━━━━",
+    readProformaCard(order),
+    "",
+    "پس از واریز، از دکمه «📸 ارسال رسید پرداخت» استفاده کنید",
+    "و اسکرین‌شات رسید را ارسال نمایید.",
+  ].join("\n");
+}
+
+async function notifyWholesaleBuyer(order, text) {
+  const buyer = await prisma.user.findUnique({
+    where: { id: order.userId },
+    select: { baleId: true },
+  });
+  if (!buyer?.baleId || !text) return;
+  await notifyMother(buyer.baleId, text);
 }
 
 module.exports.handleSavedAddressView = async function handleSavedAddressView(
@@ -370,9 +467,23 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
       userId: user.id,
       trackingCode: { startsWith: "PL-" },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      isWholesale: true,
+      receiptImage: true,
+      shipmentInfo: true,
+    },
   });
   if (!pending) return false;
+  if (isWholesaleProformaHold(pending)) {
+    await reply(
+      user,
+      chatId,
+      "پیش‌فاکتور هنوز تایید نشده. بعد از تایید ادمین، اطلاعات واریز برایتان ارسال می‌شود."
+    );
+    return true;
+  }
 
   const order = await prisma.order.update({
     where: { id: pending.id },
@@ -443,6 +554,9 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
         trackingCode: true,
         status: true,
         totalAmount: true,
+        isWholesale: true,
+        receiptImage: true,
+        shipmentInfo: true,
       },
     });
   } catch (err) {
@@ -457,7 +571,7 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
   }
 
   const rows = orders.map((order) => {
-    const label = `🔖 ${order.trackingCode} | ${statusLabel(order.status)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
+    const label = `🔖 ${order.trackingCode} | ${orderStatusLabel(order)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
     return [{ text: label, callback_data: order.trackingCode }];
   });
 
@@ -496,16 +610,35 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   if (!order || !String(order.trackingCode).startsWith("PL-")) return false;
 
   if (order.status === "WAITING_PAYMENT") {
+    const invoice = buildInvoiceText(order, order.items);
+
+    if (isWholesaleProformaHold(order)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { adminStep: null, orderStep: null, pendingOrderId: order.id },
+      });
+      await reply(
+        user,
+        chatId,
+        `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور در انتظار بررسی موجودی ادمین است.\nپس از تایید، شماره کارت واریز برایتان ارسال می‌شود.`,
+        mainMenu(user)
+      );
+      return true;
+    }
+
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: null, orderStep: "UPLOAD_RECEIPT", pendingOrderId: order.id },
     });
 
-    const invoice = buildInvoiceText(order, order.items);
+    const pay =
+      order.isWholesale && hasProformaCard(order)
+        ? wholesalePayText(order)
+        : buildPaymentInfo();
     await reply(
       user,
       chatId,
-      `${invoice}\n\n${buildShippingInfo()}\n\n${buildPaymentInfo()}`,
+      `${invoice}\n\n${buildShippingInfo()}\n\n${pay}`,
       paymentMenu()
     );
     return true;
@@ -517,7 +650,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   });
 
   let detail = `🔖 کد پیگیری: ${order.trackingCode}\n`;
-  detail += `📊 وضعیت: ${statusLabel(order.status)}\n`;
+  detail += `📊 وضعیت: ${orderStatusLabel(order)}\n`;
 
   if (order.status === "REJECTED" && order.rejectReason) {
     detail += `❌ دلیل رد: ${order.rejectReason}\n`;
@@ -539,6 +672,186 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   }
 
   await reply(user, chatId, detail, backMain());
+  return true;
+};
+
+module.exports.handleProformaCallback = async function handleProformaCallback(
+  user,
+  chatId,
+  data
+) {
+  const approve = data.startsWith("pf:ok:");
+  const orderId = data.replace(/^pf:(ok|no):/, "");
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, trackingCode: { startsWith: "PL-" } },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+  if (!order || !isWholesaleProformaHold(order)) {
+    await reply(
+      user,
+      chatId,
+      "این پیش‌فاکتور قابل بررسی نیست یا قبلاً پردازش شده.",
+      adminBackMenu()
+    );
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      adminStep: approve ? "PROFORMA_CARD" : "PROFORMA_REJECT",
+      pendingOrderId: order.id,
+    },
+  });
+
+  if (approve) {
+    await reply(
+      user,
+      chatId,
+      `✅ تایید پیش‌فاکتور ${order.trackingCode}\n\nشماره کارت و مشخصات حساب را برای ارسال به کاربر بنویسید:`,
+      adminBackMenu()
+    );
+    return;
+  }
+
+  await reply(
+    user,
+    chatId,
+    `❌ رد پیش‌فاکتور ${order.trackingCode}\n\nعلت را بنویسید (برای کاربر ارسال می‌شود):`,
+    adminBackMenu()
+  );
+};
+
+module.exports.handleProformaCardText = async function handleProformaCardText(
+  user,
+  chatId,
+  text
+) {
+  const card = String(text || "").trim();
+  if (!card || card === BTN.BACK_PRODUCT_LIST) return false;
+
+  const orderId = user.pendingOrderId;
+  const current = await prisma.order.findFirst({
+    where: { id: orderId, trackingCode: { startsWith: "PL-" } },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+  if (!current || !isWholesaleProformaHold(current)) {
+    await reply(
+      user,
+      chatId,
+      "این پیش‌فاکتور قابل تایید نیست یا قبلاً پردازش شده.",
+      adminBackMenu()
+    );
+    return true;
+  }
+
+  const moved = await prisma.order.updateMany({
+    where: {
+      id: orderId,
+      status: "WAITING_PAYMENT",
+      isWholesale: true,
+      receiptImage: null,
+      shipmentInfo: null,
+    },
+    data: { shipmentInfo: encodeProformaCard(card) },
+  });
+  if (moved.count !== 1) {
+    await reply(
+      user,
+      chatId,
+      "ثبت کارت انجام نشد؛ پیش‌فاکتور قبلاً پردازش شده.",
+      adminBackMenu()
+    );
+    return true;
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+
+  await prisma.user.update({
+    where: { id: order.userId },
+    data: { orderStep: "UPLOAD_RECEIPT", pendingOrderId: order.id },
+  });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: null, pendingOrderId: null },
+  });
+
+  const invoice = buildInvoiceText(order, order.items);
+  const buyer = await prisma.user.findUnique({
+    where: { id: order.userId },
+    select: { baleId: true },
+  });
+  if (buyer?.baleId) {
+    await bale.sendKeyboard(
+      buyer.baleId,
+      `✅ پیش‌فاکتور تایید شد.\n\n${invoice}\n\n${wholesalePayText(order)}`,
+      paymentMenu()
+    );
+  }
+
+  await reply(
+    user,
+    chatId,
+    `✅ اطلاعات واریز برای ${order.trackingCode} ارسال شد.`,
+    adminBackMenu()
+  );
+  return true;
+};
+
+module.exports.handleProformaRejectText = async function handleProformaRejectText(
+  user,
+  chatId,
+  text
+) {
+  const reason = String(text || "").trim();
+  if (!reason || reason === BTN.BACK_PRODUCT_LIST) return false;
+
+  const orderId = user.pendingOrderId;
+  const moved = await prisma.order.updateMany({
+    where: {
+      id: orderId,
+      status: "WAITING_PAYMENT",
+      isWholesale: true,
+      receiptImage: null,
+      shipmentInfo: null,
+    },
+    data: { status: "REJECTED", rejectReason: reason },
+  });
+  if (moved.count !== 1) {
+    await reply(
+      user,
+      chatId,
+      "این پیش‌فاکتور قابل رد نیست یا قبلاً پردازش شده.",
+      adminBackMenu()
+    );
+    return true;
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+
+  await restoreOrderItemsToCart(order);
+
+  await prisma.user.update({
+    where: { id: order.userId },
+    data: { orderStep: null, pendingOrderId: null },
+  });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: null, pendingOrderId: null },
+  });
+
+  await notifyWholesaleBuyer(
+    order,
+    `❌ پیش‌فاکتور رد شد.\n\n🔖 ${order.trackingCode}\nدلیل: ${reason}\n\nاقلام دوباره به سبد خرید برگشت. سبد را اصلاح کنید و دوباره ثبت سفارش بزنید.`
+  );
+
+  await reply(user, chatId, "پیش‌فاکتور رد شد و سبد خرید کاربر بازیابی شد.", adminBackMenu());
   return true;
 };
 
