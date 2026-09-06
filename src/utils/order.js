@@ -13,18 +13,35 @@ function statusLabel(status) {
 }
 
 const PROFORMA_CARD_MARK = "@@CARD@@";
+const PROFORMA_PAY_MS = 30 * 60 * 1000;
+const PROFORMA_REJECT_KEEP_MS = 10 * 24 * 60 * 60 * 1000;
+const MAX_OPEN_PROFORMAS = 3;
 
 function hasProformaCard(order) {
   return String(order?.shipmentInfo || "").startsWith(PROFORMA_CARD_MARK);
 }
 
+function parseProformaCard(order) {
+  const raw = String(order?.shipmentInfo || "");
+  if (!raw.startsWith(PROFORMA_CARD_MARK)) return null;
+  const rest = raw.slice(PROFORMA_CARD_MARK.length);
+  const sep = rest.indexOf("@@");
+  if (sep > 0) {
+    const ts = Number(rest.slice(0, sep));
+    if (Number.isFinite(ts) && ts > 1e12) {
+      return { approvedAt: ts, card: rest.slice(sep + 2) };
+    }
+  }
+  const fallback = order?.updatedAt ? new Date(order.updatedAt).getTime() : Date.now();
+  return { approvedAt: fallback, card: rest };
+}
+
 function readProformaCard(order) {
-  if (!hasProformaCard(order)) return "";
-  return String(order.shipmentInfo).slice(PROFORMA_CARD_MARK.length);
+  return parseProformaCard(order)?.card || "";
 }
 
 function encodeProformaCard(cardText) {
-  return `${PROFORMA_CARD_MARK}${String(cardText || "").trim()}`;
+  return `${PROFORMA_CARD_MARK}${Date.now()}@@${String(cardText || "").trim()}`;
 }
 
 function isWholesaleProformaHold(order) {
@@ -36,8 +53,35 @@ function isWholesaleProformaHold(order) {
   );
 }
 
+function isWholesaleProformaApproved(order) {
+  return Boolean(
+    order?.isWholesale &&
+      order.status === "WAITING_PAYMENT" &&
+      !order.receiptImage &&
+      hasProformaCard(order) &&
+      !isProformaPayExpired(order)
+  );
+}
+
+function isRejectedProforma(order) {
+  return Boolean(
+    order?.isWholesale && order.status === "REJECTED" && !order.receiptImage
+  );
+}
+
+function isProformaPayExpired(order) {
+  if (!order?.isWholesale || order.status !== "WAITING_PAYMENT" || order.receiptImage) {
+    return false;
+  }
+  const parsed = parseProformaCard(order);
+  if (!parsed) return false;
+  return Date.now() - parsed.approvedAt > PROFORMA_PAY_MS;
+}
+
 function orderStatusLabel(order) {
   if (isWholesaleProformaHold(order)) return "⏳ در انتظار بررسی پیش‌فاکتور";
+  if (isProformaPayExpired(order)) return "⏰ اعتبار پیش‌فاکتور تمام شد";
+  if (isWholesaleProformaApproved(order)) return "⏳ در انتظار پرداخت پیش‌فاکتور";
   return statusLabel(order?.status);
 }
 
@@ -79,7 +123,14 @@ module.exports = {
   hasProformaCard,
   readProformaCard,
   encodeProformaCard,
+  parseProformaCard,
   isWholesaleProformaHold,
+  isWholesaleProformaApproved,
+  isRejectedProforma,
+  isProformaPayExpired,
+  PROFORMA_PAY_MS,
+  PROFORMA_REJECT_KEEP_MS,
+  MAX_OPEN_PROFORMAS,
   generateTrackingCode,
   generateTenantTrackingCode,
   generateServiceInvoiceCode,

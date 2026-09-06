@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const { formatPrice } = require("./price");
-const { isWholesaleProformaHold, orderStatusLabel } = require("./order");
+const { orderStatusLabel } = require("./order");
 const { SHOP_NAME, BANK_CARD, BANK_IBAN, BANK_HOLDER, BANK_NAME } = require("../config");
 
 function orderKindLabel(order) {
@@ -12,9 +12,10 @@ function orderKindLabel(order) {
 }
 
 function buildInvoiceText(order, items, shopName = SHOP_NAME) {
-  const title = isWholesaleProformaHold(order)
-    ? `🧾 پیش‌فاکتور ${shopName}`
-    : `🧾 فاکتور ${shopName}`;
+  const title =
+    order?.isWholesale && order.status === "WAITING_PAYMENT" && !order.receiptImage
+      ? `🧾 پیش‌فاکتور ${shopName}`
+      : `🧾 فاکتور ${shopName}`;
   const lines = [
     title,
     `━━━━━━━━━━━━━━━━━━`,

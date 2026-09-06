@@ -15,6 +15,8 @@ const {
   readProformaCard,
   encodeProformaCard,
   isWholesaleProformaHold,
+  isProformaPayExpired,
+  MAX_OPEN_PROFORMAS,
 } = require("../utils/order");
 const {
   buildInvoiceText,
@@ -38,6 +40,18 @@ module.exports.startCheckout = async function startCheckout(user, chatId) {
   if (!check.ok) {
     await reply(user, chatId, check.message);
     return;
+  }
+
+  if (check.wholesale) {
+    const open = await require("../services/proformaCleanup").countOpenProformas(user.id);
+    if (open >= MAX_OPEN_PROFORMAS) {
+      await reply(
+        user,
+        chatId,
+        `حداکثر ${MAX_OPEN_PROFORMAS} پیش‌فاکتور باز می‌توانید داشته باشید.\nثبت سفارش تا تعیین تکلیف پیش‌فاکتورهای قبلی در انتظار می‌ماند.`
+      );
+      return;
+    }
   }
 
   const savedAddresses = await prisma.savedAddress.findMany({
@@ -183,6 +197,19 @@ async function finalizeOrder(user, chatId, description) {
     return;
   }
 
+  if (check.wholesale) {
+    const open = await require("../services/proformaCleanup").countOpenProformas(fresh.id);
+    if (open >= MAX_OPEN_PROFORMAS) {
+      await reply(
+        fresh,
+        chatId,
+        `حداکثر ${MAX_OPEN_PROFORMAS} پیش‌فاکتور باز می‌توانید داشته باشید.\nثبت سفارش تا تعیین تکلیف پیش‌فاکتورهای قبلی در انتظار می‌ماند.`,
+        mainMenu(fresh)
+      );
+      return;
+    }
+  }
+
   const trackingCode = generateTrackingCode();
   const wholesale = check.wholesale;
 
@@ -264,7 +291,7 @@ async function finalizeOrder(user, chatId, description) {
     await reply(
       fresh,
       chatId,
-      `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور برای بررسی موجودی به ادمین ارسال شد.\nپس از تایید، شماره کارت واریز برایتان ارسال می‌شود.\nتا آن زمان رسید پرداخت نفرستید.`,
+      `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور برای بررسی موجودی به ادمین ارسال شد.\nبعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید.\nپیش‌فاکتورهای تایید شده تا ۳۰ دقیقه اعتبار دارند.\nتا تایید ادمین، رسید پرداخت نفرستید.`,
       mainMenu(fresh)
     );
     await notifyAdminsProforma(withBuyer);
@@ -473,14 +500,33 @@ module.exports.handleReceiptPhoto = async function handleReceiptPhoto(
       isWholesale: true,
       receiptImage: true,
       shipmentInfo: true,
+      updatedAt: true,
+      trackingCode: true,
     },
   });
   if (!pending) return false;
+  if (isProformaPayExpired(pending)) {
+    await require("../services/proformaCleanup").closeExpiredProforma(
+      { ...pending, userId: user.id },
+      false
+    );
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, pendingOrderId: null },
+    });
+    await reply(
+      user,
+      chatId,
+      "⏰ اعتبار این پیش‌فاکتور تمام شده است.\nبرای خرید باید دوباره سفارش ثبت کنید.",
+      mainMenu(user)
+    );
+    return true;
+  }
   if (isWholesaleProformaHold(pending)) {
     await reply(
       user,
       chatId,
-      "پیش‌فاکتور هنوز تایید نشده. بعد از تایید ادمین، اطلاعات واریز برایتان ارسال می‌شود."
+      "پیش‌فاکتور هنوز تایید نشده. بعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید."
     );
     return true;
   }
@@ -610,6 +656,21 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   if (!order || !String(order.trackingCode).startsWith("PL-")) return false;
 
   if (order.status === "WAITING_PAYMENT") {
+    if (isProformaPayExpired(order)) {
+      await require("../services/proformaCleanup").closeExpiredProforma(order, false);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { adminStep: null, orderStep: null, pendingOrderId: null },
+      });
+      await reply(
+        user,
+        chatId,
+        `⏰ اعتبار پیش‌فاکتور ${order.trackingCode} تمام شده است.\nبرای خرید باید دوباره سفارش ثبت کنید.`,
+        mainMenu(user)
+      );
+      return true;
+    }
+
     const invoice = buildInvoiceText(order, order.items);
 
     if (isWholesaleProformaHold(order)) {
@@ -620,7 +681,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
       await reply(
         user,
         chatId,
-        `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور در انتظار بررسی موجودی ادمین است.\nپس از تایید، شماره کارت واریز برایتان ارسال می‌شود.`,
+        `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور در انتظار بررسی موجودی ادمین است.\nبعد از تایید، ادامه پرداخت را از همین بخش «سفارشات من» انجام دهید.`,
         mainMenu(user)
       );
       return true;
@@ -633,7 +694,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
 
     const pay =
       order.isWholesale && hasProformaCard(order)
-        ? wholesalePayText(order)
+        ? `${wholesalePayText(order)}\n\n⏱ اعتبار پرداخت این پیش‌فاکتور ۳۰ دقیقه است.`
         : buildPaymentInfo();
     await reply(
       user,
@@ -667,7 +728,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   detail += `━━━━━━━━━━━━━━━━━━\n`;
   detail += `💰 جمع کل: ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
 
-  if (order.shipmentInfo) {
+  if (order.shipmentInfo && !String(order.shipmentInfo).startsWith("@@CARD@@")) {
     detail += `\n\n🚚 اطلاعات ارسال: ${order.shipmentInfo}`;
   }
 
@@ -772,32 +833,24 @@ module.exports.handleProformaCardText = async function handleProformaCardText(
 
   await prisma.user.update({
     where: { id: order.userId },
-    data: { orderStep: "UPLOAD_RECEIPT", pendingOrderId: order.id },
+    data: { orderStep: null, pendingOrderId: order.id },
   });
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: null, pendingOrderId: null },
+    data: { adminStep: "ADMIN_PF_OK", pendingOrderId: null },
   });
+  user.adminStep = "ADMIN_PF_OK";
+  user.pendingOrderId = null;
 
-  const invoice = buildInvoiceText(order, order.items);
-  const buyer = await prisma.user.findUnique({
-    where: { id: order.userId },
-    select: { baleId: true },
-  });
-  if (buyer?.baleId) {
-    await bale.sendKeyboard(
-      buyer.baleId,
-      `✅ پیش‌فاکتور تایید شد.\n\n${invoice}\n\n${wholesalePayText(order)}`,
-      paymentMenu()
-    );
-  }
+  await notifyWholesaleBuyer(
+    order,
+    `✅ پیش‌فاکتور ${order.trackingCode} تایید شد.
 
-  await reply(
-    user,
-    chatId,
-    `✅ اطلاعات واریز برای ${order.trackingCode} ارسال شد.`,
-    adminBackMenu()
+از بخش «📦 سفارشات من» وارد همین پیش‌فاکتور شوید و پرداخت را نهایی کنید.
+پیش‌فاکتورهای تایید شده تا ۳۰ دقیقه اعتبار دارند.`
   );
+
+  await require("./admin").showProformaList(user, chatId, "ok");
   return true;
 };
 
@@ -843,15 +896,22 @@ module.exports.handleProformaRejectText = async function handleProformaRejectTex
   });
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: null, pendingOrderId: null },
+    data: { adminStep: "ADMIN_PF_NO", pendingOrderId: null },
   });
+  user.adminStep = "ADMIN_PF_NO";
+  user.pendingOrderId = null;
 
   await notifyWholesaleBuyer(
     order,
-    `❌ پیش‌فاکتور رد شد.\n\n🔖 ${order.trackingCode}\nدلیل: ${reason}\n\nاقلام دوباره به سبد خرید برگشت. سبد را اصلاح کنید و دوباره ثبت سفارش بزنید.`
+    `❌ پیش‌فاکتور ${order.trackingCode} رد شد.
+
+علت: ${reason}
+
+از بخش «📦 سفارشات من» می‌توانید علت رد را ببینید.
+اقلام دوباره به سبد خرید برگشت؛ سبد را اصلاح کنید و دوباره ثبت سفارش بزنید.`
   );
 
-  await reply(user, chatId, "پیش‌فاکتور رد شد و سبد خرید کاربر بازیابی شد.", adminBackMenu());
+  await require("./admin").showProformaList(user, chatId, "no");
   return true;
 };
 

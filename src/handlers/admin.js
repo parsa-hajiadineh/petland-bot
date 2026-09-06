@@ -9,6 +9,7 @@ const {
   BTN,
   adminMenu,
   adminInvoiceKindMenu,
+  adminProformaMenu,
   adminInvoicesMenu,
   adminBackMenu,
   adminOrderActions,
@@ -17,8 +18,8 @@ const {
   kb,
 } = require("../keyboards/menus");
 const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
-const { statusLabel } = require("../utils/order");
-const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText } = require("./order");
+const { statusLabel, isWholesaleProformaHold } = require("../utils/order");
+const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
@@ -135,9 +136,92 @@ async function showInvoiceKindMenu(user, chatId) {
   await reply(
     user,
     chatId,
-    "🧾 سفارش‌های مشتریان\n\nنوع فاکتور را انتخاب کنید:",
+    "🧾 سفارش‌های مشتریان\n\nنوع فاکتور یا پیش‌فاکتور را انتخاب کنید:",
     adminInvoiceKindMenu()
   );
+}
+
+function invoiceRejectedWhere() {
+  return {
+    status: "REJECTED",
+    OR: [{ isWholesale: false }, { receiptImage: { not: null } }],
+  };
+}
+
+const PF_LIST = {
+  wait: {
+    step: "ADMIN_PF_WAIT",
+    title: "⏳ پیش فاکتورهای در انتظار",
+    more: "pfwait_more",
+    where: {
+      isWholesale: true,
+      status: "WAITING_PAYMENT",
+      receiptImage: null,
+      shipmentInfo: null,
+    },
+  },
+  ok: {
+    step: "ADMIN_PF_OK",
+    title: "✅ پیش فاکتورهای تایید شده",
+    more: "pfok_more",
+    where: {
+      isWholesale: true,
+      status: "WAITING_PAYMENT",
+      receiptImage: null,
+      shipmentInfo: { startsWith: "@@CARD@@" },
+    },
+  },
+  no: {
+    step: "ADMIN_PF_NO",
+    title: "❌ پیش فاکتورهای رد شده",
+    more: "pfno_more",
+    where: {
+      isWholesale: true,
+      status: "REJECTED",
+      receiptImage: null,
+    },
+  },
+};
+
+async function showProformaHub(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: "ADMIN_PROFORMA", pendingOrderId: null },
+  });
+  user.adminStep = "ADMIN_PROFORMA";
+  user.pendingOrderId = null;
+  await reply(
+    user,
+    chatId,
+    "📋 پیش فاکتورها\nهمکار و بازاریابان مانلی",
+    adminProformaMenu()
+  );
+}
+
+async function showProformaList(user, chatId, kind, offset = 0) {
+  const spec = PF_LIST[kind];
+  if (!spec) {
+    await showProformaHub(user, chatId);
+    return;
+  }
+  await require("../services/proformaCleanup").expireApprovedProformas();
+  await showOrdersInline(
+    user,
+    chatId,
+    spec.where,
+    spec.title,
+    spec.more,
+    offset,
+    spec.step,
+    { skipKind: true }
+  );
+}
+
+async function replayProformaList(user, chatId, step) {
+  if (step === "ADMIN_PF_WAIT") return showProformaList(user, chatId, "wait");
+  if (step === "ADMIN_PF_OK") return showProformaList(user, chatId, "ok");
+  if (step === "ADMIN_PF_NO") return showProformaList(user, chatId, "no");
+  await showProformaHub(user, chatId);
 }
 
 async function showInvoicesMenu(user, chatId) {
@@ -174,7 +258,7 @@ async function replayInvoiceList(user, chatId, step) {
     return;
   }
   if (step === "ADMIN_REJECTED") {
-    await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
+    await showOrdersInline(user, chatId, invoiceRejectedWhere(), "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
     return;
   }
   if (step === "ADMIN_SHIPPED") {
@@ -188,13 +272,7 @@ async function goAdminBack(user, chatId) {
   const step = user.adminStep || "";
 
   if (step === "PROFORMA_CARD" || step === "PROFORMA_REJECT") {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { adminStep: null, pendingOrderId: null },
-    });
-    user.adminStep = null;
-    user.pendingOrderId = null;
-    await module.exports.showAdminPanel(user, chatId);
+    await showProformaHub(user, chatId);
     return true;
   }
 
@@ -235,6 +313,29 @@ async function goAdminBack(user, chatId) {
     });
     const support = require("./support");
     await support.adminListTickets(user, chatId);
+    return true;
+  }
+
+  if (
+    user.pendingOrderId &&
+    ["ADMIN_PF_WAIT", "ADMIN_PF_OK", "ADMIN_PF_NO"].includes(step)
+  ) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { pendingOrderId: null },
+    });
+    user.pendingOrderId = null;
+    await replayProformaList(user, chatId, step);
+    return true;
+  }
+
+  if (["ADMIN_PF_WAIT", "ADMIN_PF_OK", "ADMIN_PF_NO"].includes(step)) {
+    await showProformaHub(user, chatId);
+    return true;
+  }
+
+  if (step === "ADMIN_PROFORMA") {
+    await showInvoiceKindMenu(user, chatId);
     return true;
   }
 
@@ -324,7 +425,7 @@ module.exports.showAdminPanel = async function showAdminPanel(user, chatId) {
   await reply(user, chatId, "⚙️ پنل ادمین", adminMenu());
 };
 
-async function showOrdersInline(user, chatId, where, title, morePrefix = null, offset = 0, listStep = null) {
+async function showOrdersInline(user, chatId, where, title, morePrefix = null, offset = 0, listStep = null, options = {}) {
   const take = 10;
   const paginated = !!morePrefix;
 
@@ -339,7 +440,7 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 
   let orders;
   try {
-    const kind = readInvKind(user);
+    const kind = options.skipKind ? null : readInvKind(user);
     const kindFilter = kind ? invKindWhere(kind) : {};
     orders = await prisma.order.findMany({
       where: {
@@ -352,6 +453,7 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
       take: paginated ? take + 1 : 50,
       select: {
         id: true,
+        trackingCode: true,
         totalAmount: true,
         user: { select: { fullName: true, baleId: true } },
       },
@@ -372,7 +474,9 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
   const hasMore = paginated && orders.length > take;
 
   const rows = shown.map((o) => [{
-    text: `👤 ${o.user?.fullName || o.user?.baleId} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`,
+    text: options.skipKind
+      ? `🔖 ${o.trackingCode} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`
+      : `👤 ${o.user?.fullName || o.user?.baleId} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`,
     callback_data: `ordr:${o.id}`,
   }]);
 
@@ -380,7 +484,7 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
     rows.push([{ text: "⬅️ ۱۰ فاکتور قدیمی‌تر", callback_data: `${morePrefix}:${offset + take}` }]);
   }
 
-  const kind = readInvKind(user);
+  const kind = options.skipKind ? null : readInvKind(user);
   const kindNote = kind ? ` — ${invKindTitle(kind)}` : "";
   const pageInfo = paginated && offset > 0 ? ` — صفحه ${Math.floor(offset / take) + 1}` : "";
   await reply(user, chatId, `${title}${kindNote}${pageInfo}`, adminBackMenu());
@@ -427,6 +531,22 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
     await showInvoicesMenu(user, chatId);
     return true;
   }
+  if (text === BTN.ADMIN_PROFORMAS) {
+    await showProformaHub(user, chatId);
+    return true;
+  }
+  if (text === BTN.ADMIN_PF_WAIT) {
+    await showProformaList(user, chatId, "wait");
+    return true;
+  }
+  if (text === BTN.ADMIN_PF_OK) {
+    await showProformaList(user, chatId, "ok");
+    return true;
+  }
+  if (text === BTN.ADMIN_PF_NO) {
+    await showProformaList(user, chatId, "no");
+    return true;
+  }
 
   if (user.adminStep === "PROFORMA_CARD" && user.pendingOrderId) {
     if (text === BTN.BACK_PRODUCT_LIST) {
@@ -455,11 +575,27 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (text === BTN.APPROVE && user.pendingOrderId) {
+    const pending = await prisma.order.findUnique({
+      where: { id: user.pendingOrderId },
+      select: ORDER_WITH_ITEMS_SELECT,
+    }).catch(() => null);
+    if (pending && isWholesaleProformaHold(pending)) {
+      await handleProformaCallback(user, chatId, `pf:ok:${pending.id}`);
+      return true;
+    }
     await approveOrder(user, chatId);
     return true;
   }
 
   if (text === BTN.REJECT && user.pendingOrderId) {
+    const pending = await prisma.order.findUnique({
+      where: { id: user.pendingOrderId },
+      select: ORDER_WITH_ITEMS_SELECT,
+    }).catch(() => null);
+    if (pending && isWholesaleProformaHold(pending)) {
+      await handleProformaCallback(user, chatId, `pf:no:${pending.id}`);
+      return true;
+    }
     await prisma.user.update({
       where: { id: user.id },
       data: { adminStep: "REJECT_REASON" },
@@ -509,7 +645,7 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   }
 
   if (text === BTN.ADMIN_REJECTED) {
-    await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
+    await showOrdersInline(user, chatId, invoiceRejectedWhere(), "❌ فاکتورهای رد شده", "rej_more", 0, "ADMIN_REJECTED");
     return true;
   }
 
@@ -808,6 +944,11 @@ async function showAdminOrderDetail(user, chatId, order) {
   const invoice = buildInvoiceText(withBuyer, withBuyer.items);
   let keyboard = adminBackMenu();
 
+  if (isWholesaleProformaHold(order)) {
+    await reply(user, chatId, invoice, adminOrderActions());
+    return;
+  }
+
   if (order.status === "WAITING_APPROVAL") {
     keyboard = adminOrderActions();
 
@@ -955,8 +1096,11 @@ module.exports.viewOrderById = async function viewOrderById(user, chatId, orderI
 };
 
 module.exports.showRejectedOrders = async function showRejectedOrders(user, chatId, offset) {
-  await showOrdersInline(user, chatId, { status: "REJECTED" }, "❌ فاکتورهای رد شده", "rej_more", offset, "ADMIN_REJECTED");
+  await showOrdersInline(user, chatId, invoiceRejectedWhere(), "❌ فاکتورهای رد شده", "rej_more", offset, "ADMIN_REJECTED");
 };
+
+module.exports.showProformaList = showProformaList;
+module.exports.showProformaHub = showProformaHub;
 
 module.exports.showShippedOrders = async function showShippedOrders(user, chatId, offset) {
   await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", offset, "ADMIN_SHIPPED");

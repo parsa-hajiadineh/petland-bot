@@ -28,9 +28,11 @@ async function tick() {
   try {
     await motivation.runScheduled();
     const dayKey = tehranDayKey();
+    await require("./proformaCleanup").expireApprovedProformas();
     if (dayKey !== lastDailyKey) {
       lastDailyKey = dayKey;
       await require("./receiptCleanup").purgeExpiredReceipts();
+      await require("./proformaCleanup").purgeOldRejectedProformas();
     }
   } catch (err) {
     console.error("SCHEDULER TICK:", err.message);
@@ -48,6 +50,11 @@ function start() {
   setInterval(() => {
     tick().catch((err) => console.error("SCHEDULER:", err.message));
   }, HOUR_MS);
+  setInterval(() => {
+    require("./proformaCleanup")
+      .expireApprovedProformas()
+      .catch((err) => console.error("PROFORMA EXPIRE:", err.message));
+  }, 60 * 1000);
 }
 
 module.exports = {

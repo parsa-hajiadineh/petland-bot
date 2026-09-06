@@ -156,6 +156,10 @@ const BTN = {
   ADMIN_APPROVED: "✅ فاکتورهای تایید شده",
   ADMIN_REJECTED: "❌ فاکتورهای رد شده",
   ADMIN_SHIPPED: "🚚 فاکتورهای ارسال شده",
+  ADMIN_PROFORMAS: "📋 پیش فاکتورها",
+  ADMIN_PF_WAIT: "⏳ پیش فاکتورهای در انتظار",
+  ADMIN_PF_OK: "✅ پیش فاکتورهای تایید شده",
+  ADMIN_PF_NO: "❌ پیش فاکتورهای رد شده",
   ADMIN_TICKETS: "🎫 مدیریت تیکت‌ها",
   TICKET_OPEN: "📭 پاسخ داده نشده",
   TICKET_ANSWERED: "📬 پاسخ داده شده",
@@ -456,6 +460,16 @@ function adminInvoiceKindMenu() {
   return kb([
     [{ text: BTN.INV_RETAIL }, { text: BTN.INV_COLLEAGUE }],
     [{ text: BTN.INV_MANELI }],
+    [{ text: BTN.ADMIN_PROFORMAS }],
+    [{ text: BTN.BACK_PRODUCT_LIST }],
+  ]);
+}
+
+function adminProformaMenu() {
+  return kb([
+    [{ text: BTN.ADMIN_PF_WAIT }],
+    [{ text: BTN.ADMIN_PF_OK }],
+    [{ text: BTN.ADMIN_PF_NO }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
@@ -595,6 +609,7 @@ module.exports = {
   adminServiceInvoiceActions,
   adminServiceInvoicesMenu,
   adminInvoiceKindMenu,
+  adminProformaMenu,
   adminInvoicesMenu,
   colleagueGateMenu,
   adminManageMenu,

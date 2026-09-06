@@ -5,7 +5,7 @@ const { BTN, kb, backMain, mainMenu, PRODUCT_CATEGORIES, adminBackMenu } = requi
 const { reply } = require("../bot/messenger");
 const { MARKETING_ACCESS_CODE } = require("../config");
 const { isMother } = require("../bot/context");
-const { isWholesaleProformaHold } = require("../utils/order");
+const { isWholesaleProformaHold, isProformaPayExpired } = require("../utils/order");
 
 const productsHandler = require("./products");
 const cartHandler = require("./cart");
@@ -224,11 +224,24 @@ module.exports = async function messageHandler(message, user) {
           shipmentInfo: true,
         },
       });
+      if (pending && isProformaPayExpired(pending)) {
+        await require("../services/proformaCleanup").closeExpiredProforma(
+          { ...pending, userId: user.id },
+          false
+        );
+        await reply(
+          user,
+          chatId,
+          "⏰ اعتبار این پیش‌فاکتور تمام شده است.\nبرای خرید باید دوباره سفارش ثبت کنید.",
+          mainMenu(user)
+        );
+        return;
+      }
       if (pending && isWholesaleProformaHold(pending)) {
         await reply(
           user,
           chatId,
-          "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، اطلاعات واریز برایتان ارسال می‌شود."
+          "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید."
         );
         return;
       }
@@ -250,11 +263,24 @@ module.exports = async function messageHandler(message, user) {
         shipmentInfo: true,
       },
     });
+    if (pendingOrder && isProformaPayExpired(pendingOrder)) {
+      await require("../services/proformaCleanup").closeExpiredProforma(
+        { ...pendingOrder, userId: user.id },
+        false
+      );
+      await reply(
+        user,
+        chatId,
+        "⏰ اعتبار این پیش‌فاکتور تمام شده است.\nبرای خرید باید دوباره سفارش ثبت کنید.",
+        mainMenu(user)
+      );
+      return;
+    }
     if (pendingOrder && isWholesaleProformaHold(pendingOrder)) {
       await reply(
         user,
         chatId,
-        "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، اطلاعات واریز برایتان ارسال می‌شود."
+        "پیش‌فاکتور در انتظار بررسی ادمین است. بعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید."
       );
       return;
     }
@@ -545,6 +571,22 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
   if (data.startsWith("stats:") && isAdmin(user)) {
     const yearMonth = data.split(":")[1];
     await adminHandler.showMonthStats(user, chatId, yearMonth);
+    return;
+  }
+
+  if (data.startsWith("pfwait_more:") && isAdmin(user)) {
+    const offset = parseInt(data.replace("pfwait_more:", ""), 10) || 0;
+    await adminHandler.showProformaList(user, chatId, "wait", offset);
+    return;
+  }
+  if (data.startsWith("pfok_more:") && isAdmin(user)) {
+    const offset = parseInt(data.replace("pfok_more:", ""), 10) || 0;
+    await adminHandler.showProformaList(user, chatId, "ok", offset);
+    return;
+  }
+  if (data.startsWith("pfno_more:") && isAdmin(user)) {
+    const offset = parseInt(data.replace("pfno_more:", ""), 10) || 0;
+    await adminHandler.showProformaList(user, chatId, "no", offset);
     return;
   }
 
