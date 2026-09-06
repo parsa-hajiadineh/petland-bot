@@ -2,12 +2,17 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const { formatPrice } = require("./price");
-const { orderStatusLabel } = require("./order");
+const { orderStatusLabel, readWholesaleKind, wholesaleKindLabel } = require("./order");
 const { SHOP_NAME, BANK_CARD, BANK_IBAN, BANK_HOLDER, BANK_NAME } = require("../config");
 
 function orderKindLabel(order) {
-  if (order?.user?.role === "MANELI" || order?.isManeli) return "🏷 نوع: بازاریابان مانلی";
-  if (order?.isWholesale) return "🏷 نوع: خرید همکار";
+  if (order?.isWholesale || order?.user?.role === "MANELI" || order?.isManeli) {
+    const kind =
+      order?.isManeli || order?.user?.role === "MANELI"
+        ? "maneli"
+        : readWholesaleKind(order);
+    return `🏷 نوع: ${wholesaleKindLabel(kind)}`;
+  }
   return "🏷 نوع: خرید عادی";
 }
 

@@ -6,7 +6,7 @@ const partnerNotify = require("../services/partnerNotify");
 const { BTN, checkoutSkipMenu, paymentMenu, mainMenu, backMain, inlineKb, confirmAddressMenu, adminBackMenu } = require("../keyboards/menus");
 const bale = require("../bot/bale");
 const { validateCheckout } = require("./cart");
-const { getUnitPrice } = require("../utils/price");
+const { getUnitPrice, isManeliCheckout } = require("../utils/price");
 const {
   generateTrackingCode,
   statusLabel,
@@ -14,6 +14,9 @@ const {
   hasProformaCard,
   readProformaCard,
   encodeProformaCard,
+  encodeWholesaleKind,
+  readWholesaleKind,
+  wholesaleKindLabel,
   isWholesaleProformaHold,
   isProformaPayExpired,
   MAX_OPEN_PROFORMAS,
@@ -226,6 +229,9 @@ async function finalizeOrder(user, chatId, description) {
       description,
       totalAmount: check.total,
       isWholesale: wholesale,
+      shipmentInfo: wholesale
+        ? encodeWholesaleKind(isManeliCheckout(fresh) ? "maneli" : "colleague")
+        : null,
       userId: fresh.id,
       items: {
         create: check.items.map((item) => ({
@@ -271,7 +277,10 @@ async function finalizeOrder(user, chatId, description) {
     }
   }
 
-  const withBuyer = { ...order, user: { role: fresh.role } };
+  const withBuyer = {
+    ...order,
+    user: { role: isManeliCheckout(fresh) ? "MANELI" : fresh.role },
+  };
 
   if (wholesale) {
     await prisma.user.update({
@@ -323,9 +332,14 @@ async function finalizeOrder(user, chatId, description) {
 
 async function notifyAdminsProforma(order) {
   const invoice = buildInvoiceText(order, order.items);
-  const kind =
-    order.user?.role === "MANELI" ? "بازاریابان مانلی" : "خرید همکار";
-  const text = `🆕 پیش‌فاکتور ${kind} — بررسی موجودی\n\n${invoice}\n\nپس از تطبیق با انبار، تایید یا رد کنید.`;
+  const kind = wholesaleKindLabel(readWholesaleKind(order));
+  const text = `🆕 پیش‌فاکتور جدید — بررسی موجودی
+
+🏷 این پیش‌فاکتور مربوط به: ${kind}
+
+${invoice}
+
+پس از تطبیق با انبار، تایید یا رد کنید.`;
   const keyboard = inlineKb([
     [{ text: "✅ تایید پیش‌فاکتور", callback_data: `pf:ok:${order.id}` }],
     [{ text: "❌ رد پیش‌فاکتور", callback_data: `pf:no:${order.id}` }],
@@ -728,7 +742,11 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   detail += `━━━━━━━━━━━━━━━━━━\n`;
   detail += `💰 جمع کل: ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
 
-  if (order.shipmentInfo && !String(order.shipmentInfo).startsWith("@@CARD@@")) {
+  if (
+    order.shipmentInfo &&
+    !String(order.shipmentInfo).startsWith("@@CARD@@") &&
+    !String(order.shipmentInfo).startsWith("@@KIND:")
+  ) {
     detail += `\n\n🚚 اطلاعات ارسال: ${order.shipmentInfo}`;
   }
 
@@ -812,9 +830,9 @@ module.exports.handleProformaCardText = async function handleProformaCardText(
       status: "WAITING_PAYMENT",
       isWholesale: true,
       receiptImage: null,
-      shipmentInfo: null,
+      NOT: { shipmentInfo: { startsWith: "@@CARD@@" } },
     },
-    data: { shipmentInfo: encodeProformaCard(card) },
+    data: { shipmentInfo: encodeProformaCard(card, readWholesaleKind(current)) },
   });
   if (moved.count !== 1) {
     await reply(
@@ -869,7 +887,7 @@ module.exports.handleProformaRejectText = async function handleProformaRejectTex
       status: "WAITING_PAYMENT",
       isWholesale: true,
       receiptImage: null,
-      shipmentInfo: null,
+      NOT: { shipmentInfo: { startsWith: "@@CARD@@" } },
     },
     data: { status: "REJECTED", rejectReason: reason },
   });

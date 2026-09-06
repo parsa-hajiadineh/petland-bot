@@ -29,19 +29,47 @@ function parseProformaCard(order) {
   if (sep > 0) {
     const ts = Number(rest.slice(0, sep));
     if (Number.isFinite(ts) && ts > 1e12) {
-      return { approvedAt: ts, card: rest.slice(sep + 2) };
+      let card = rest.slice(sep + 2);
+      let kind = null;
+      if (card.startsWith("MANELI@@")) {
+        kind = "maneli";
+        card = card.slice("MANELI@@".length);
+      } else if (card.startsWith("COLLEAGUE@@")) {
+        kind = "colleague";
+        card = card.slice("COLLEAGUE@@".length);
+      }
+      return { approvedAt: ts, card, kind };
     }
   }
   const fallback = order?.updatedAt ? new Date(order.updatedAt).getTime() : Date.now();
-  return { approvedAt: fallback, card: rest };
+  return { approvedAt: fallback, card: rest, kind: null };
 }
 
 function readProformaCard(order) {
   return parseProformaCard(order)?.card || "";
 }
 
-function encodeProformaCard(cardText) {
-  return `${PROFORMA_CARD_MARK}${Date.now()}@@${String(cardText || "").trim()}`;
+function encodeWholesaleKind(kind) {
+  return kind === "maneli" ? "@@KIND:MANELI@@" : "@@KIND:COLLEAGUE@@";
+}
+
+function readWholesaleKind(order) {
+  const info = String(order?.shipmentInfo || "");
+  if (info.startsWith("@@KIND:MANELI") || info.includes("@@MANELI@@")) return "maneli";
+  if (info.startsWith("@@KIND:COLLEAGUE") || info.includes("@@COLLEAGUE@@")) {
+    return "colleague";
+  }
+  if (order?.user?.role === "MANELI") return "maneli";
+  return "colleague";
+}
+
+function wholesaleKindLabel(kind) {
+  return kind === "maneli" ? "بازاریابان مانلی" : "خرید همکار";
+}
+
+function encodeProformaCard(cardText, kind) {
+  const tag = kind === "maneli" ? "MANELI" : "COLLEAGUE";
+  return `${PROFORMA_CARD_MARK}${Date.now()}@@${tag}@@${String(cardText || "").trim()}`;
 }
 
 function isWholesaleProformaHold(order) {
@@ -123,6 +151,9 @@ module.exports = {
   hasProformaCard,
   readProformaCard,
   encodeProformaCard,
+  encodeWholesaleKind,
+  readWholesaleKind,
+  wholesaleKindLabel,
   parseProformaCard,
   isWholesaleProformaHold,
   isWholesaleProformaApproved,

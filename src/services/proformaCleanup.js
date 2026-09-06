@@ -104,7 +104,32 @@ async function purgeOldRejectedProformas() {
 }
 
 async function countOpenProformas(userId) {
-  await expireApprovedProformas();
+  try {
+    const open = await prisma.order.findMany({
+      where: {
+        userId,
+        isWholesale: true,
+        status: "WAITING_PAYMENT",
+        receiptImage: null,
+        trackingCode: { startsWith: "PL-" },
+      },
+      select: {
+        id: true,
+        userId: true,
+        trackingCode: true,
+        status: true,
+        isWholesale: true,
+        receiptImage: true,
+        shipmentInfo: true,
+        updatedAt: true,
+      },
+    });
+    for (const order of open) {
+      await closeExpiredProforma(order, false);
+    }
+  } catch (err) {
+    console.error("PROFORMA OPEN COUNT EXPIRE SKIP:", err.message);
+  }
   return prisma.order.count({
     where: {
       userId,

@@ -2,7 +2,7 @@ const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb, inlineKb, colleagueGateMenu } = require("../keyboards/menus");
-const { setAdminRetailView } = require("../utils/price");
+const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
 const {
   provisionShop,
   findOwnedTenant,
@@ -523,6 +523,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     }
 
     setAdminRetailView(user.id, true);
+    setAdminManeliView(user.id, false);
     await prisma.user.update({
       where: { id: user.id },
       data: { orderStep: null },
@@ -587,8 +588,10 @@ module.exports = async function colleagueHandler(user, chatId, text) {
         });
       }
     }
-    if (user.role === "ADMIN") setAdminRetailView(user.id, false);
-    else user.role = "MANELI";
+    if (user.role === "ADMIN") {
+      setAdminRetailView(user.id, false);
+      setAdminManeliView(user.id, true);
+    } else user.role = "MANELI";
     user.orderStep = null;
 
     await reply(
@@ -624,8 +627,10 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       where: { id: user.id },
       data: roleData,
     });
-    if (user.role === "ADMIN") setAdminRetailView(user.id, false);
-    else user.role = "COLLEAGUE";
+    if (user.role === "ADMIN") {
+      setAdminRetailView(user.id, false);
+      setAdminManeliView(user.id, false);
+    } else user.role = "COLLEAGUE";
 
     await require("../services/goldenCampaign")
       .startGoldenPeriod(user.id)

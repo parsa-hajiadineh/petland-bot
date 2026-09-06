@@ -16,10 +16,16 @@ function formatPrice(amount) {
 }
 
 const adminRetailView = new Set();
+const adminManeliView = new Set();
 
 function setAdminRetailView(userId, enabled) {
   if (enabled) adminRetailView.add(userId);
   else adminRetailView.delete(userId);
+}
+
+function setAdminManeliView(userId, enabled) {
+  if (enabled) adminManeliView.add(userId);
+  else adminManeliView.delete(userId);
 }
 
 function isWholesaleUser(user) {
@@ -32,6 +38,11 @@ function isManeliUser(user) {
   return user?.role === "MANELI";
 }
 
+function isManeliCheckout(user) {
+  if (user?.role === "MANELI") return true;
+  return user?.role === "ADMIN" && adminManeliView.has(user.id);
+}
+
 function getMinOrderAmount() {
   return 0;
 }
@@ -42,6 +53,8 @@ module.exports = {
   formatPrice,
   isWholesaleUser,
   isManeliUser,
+  isManeliCheckout,
   getMinOrderAmount,
   setAdminRetailView,
+  setAdminManeliView,
 };

@@ -67,6 +67,16 @@ module.exports = async function messageHandler(message, user) {
     return;
   }
 
+  if (user.orderStep === "PRODUCT_QTY" && /^\d+$/.test(text)) {
+    const qty = parseInt(text, 10);
+    if (!qty || qty < 1 || qty > 999) {
+      await reply(user, chatId, "لطفاً یک عدد معتبر (1 تا 999) وارد کنید.");
+      return;
+    }
+    await productsHandler.addToCartWithQty(user, chatId, qty);
+    return;
+  }
+
   if (text.startsWith("PL-") && user.adminStep === "VIEW_MY_ORDERS") {
     const shown = await orderHandler.showOrderByTracking(user, chatId, text);
     if (!shown) {
@@ -301,16 +311,6 @@ module.exports = async function messageHandler(message, user) {
     if (!shown) {
       await reply(user, chatId, "❌ سفارشی با این کد پیگیری یافت نشد.\nلطفاً کد را بررسی و دوباره ارسال کنید.");
     }
-    return;
-  }
-
-  if (user.orderStep === "PRODUCT_QTY") {
-    const qty = parseInt(text, 10);
-    if (!qty || qty < 1 || qty > 999) {
-      await reply(user, chatId, "لطفاً یک عدد معتبر (1 تا 999) وارد کنید.");
-      return;
-    }
-    await productsHandler.addToCartWithQty(user, chatId, qty);
     return;
   }
 

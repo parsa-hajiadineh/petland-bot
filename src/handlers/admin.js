@@ -18,7 +18,7 @@ const {
   kb,
 } = require("../keyboards/menus");
 const { buildInvoiceText, generateInvoicePdf } = require("../utils/invoice");
-const { statusLabel, isWholesaleProformaHold } = require("../utils/order");
+const { statusLabel, isWholesaleProformaHold, readWholesaleKind, wholesaleKindLabel } = require("../utils/order");
 const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback } = require("./order");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
@@ -157,7 +157,7 @@ const PF_LIST = {
       isWholesale: true,
       status: "WAITING_PAYMENT",
       receiptImage: null,
-      shipmentInfo: null,
+      NOT: { shipmentInfo: { startsWith: "@@CARD@@" } },
     },
   },
   ok: {
@@ -455,7 +455,8 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
         id: true,
         trackingCode: true,
         totalAmount: true,
-        user: { select: { fullName: true, baleId: true } },
+        shipmentInfo: true,
+        user: { select: { fullName: true, baleId: true, role: true } },
       },
     });
   } catch (err) {
@@ -475,7 +476,7 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 
   const rows = shown.map((o) => [{
     text: options.skipKind
-      ? `🔖 ${o.trackingCode} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`
+      ? `🔖 ${o.trackingCode} | ${readWholesaleKind(o) === "maneli" ? "مانلی" : "همکار"} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`
       : `👤 ${o.user?.fullName || o.user?.baleId} | 💰 ${o.totalAmount.toLocaleString("fa-IR")} تومان`,
     callback_data: `ordr:${o.id}`,
   }]);
@@ -546,6 +547,17 @@ module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
   if (text === BTN.ADMIN_PF_NO) {
     await showProformaList(user, chatId, "no");
     return true;
+  }
+
+  const shoppingStep = user.orderStep || "";
+  if (
+    shoppingStep === "PRODUCT_QTY" ||
+    shoppingStep === "SEARCH" ||
+    shoppingStep === "ADDR_CONFIRM" ||
+    shoppingStep === "UPLOAD_RECEIPT" ||
+    shoppingStep.startsWith("CHECKOUT")
+  ) {
+    return false;
   }
 
   if (user.adminStep === "PROFORMA_CARD" && user.pendingOrderId) {
