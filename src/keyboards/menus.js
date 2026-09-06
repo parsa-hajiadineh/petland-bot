@@ -43,7 +43,6 @@ const PRODUCT_CATEGORIES = [
       "فنبی (Fanbi)",
     ],
   },
-  },
   {
     btn: "🍖 تشویقی، اسنک و مکمل غذایی",
     subMenus: [
