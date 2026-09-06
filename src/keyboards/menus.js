@@ -174,6 +174,7 @@ const BTN = {
   BC_ALL_CUST: "🌐 مشتری همه ربات‌ها",
   BC_ALL_USERS: "👥 تمام کاربرها",
   BC_MANUAL: "🎯 نفر / لیست دستی",
+  BC_GROUPS: "📢 پیام در گروه",
   BC_DONE_PICK: "✅ ادامه و نوشتن پیام",
   BC_CONFIRM: "✅ ارسال پیام",
   ADMIN_PRODUCTS: "📦 مدیریت محصولات",

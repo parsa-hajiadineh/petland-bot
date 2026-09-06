@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { ADMIN_BALE_IDS } = require("../config");
+const { ADMIN_BALE_IDS, BROADCAST_GROUP_CHATS } = require("../config");
 const { reply, notify, notifyShop, notifyMother } = require("../bot/messenger");
 const { notifyColleague } = require("../services/partnerNotify");
 const bale = require("../bot/bale");
@@ -15,6 +15,7 @@ const { searchPeople } = require("./adminManage");
 const STEP_HUB = "BC:HUB";
 const STEP_SHOP = "BC:SHOP";
 const STEP_PICK = "BC:PICK";
+const STEP_GROUPS = "BC:GROUPS";
 const STEP_MSG = "BC:MSG";
 const STEP_CONFIRM = "BC:CONFIRM";
 const PAGE = 10;
@@ -26,6 +27,7 @@ const AUDIENCE_FA = {
   all_cust: "مشتری‌های همه ربات‌ها",
   all_users: "تمام کاربرها",
   manual: "نفر / لیست دستی",
+  groups: "گروه‌های ثبت‌شده",
 };
 
 function isBroadcastStep(step) {
@@ -74,6 +76,7 @@ function broadcastMenu() {
     [{ text: BTN.BC_MOTHER }, { text: BTN.BC_COLLEAGUES }],
     [{ text: BTN.BC_SHOP }, { text: BTN.BC_ALL_CUST }],
     [{ text: BTN.BC_ALL_USERS }, { text: BTN.BC_MANUAL }],
+    [{ text: BTN.BC_GROUPS }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }
@@ -246,6 +249,17 @@ async function resolveTargets(state) {
         via: u.role === "COLLEAGUE" || u.role === "ADMIN" ? "colleague" : "mother",
       }));
   }
+  if (audience === "groups") {
+    const selected = new Set((state.groupIds || []).map(String));
+    return BROADCAST_GROUP_CHATS.filter((group) => selected.has(String(group.chatId))).map(
+      (group) => ({
+        id: group.chatId,
+        baleId: group.chatId,
+        fullName: group.name,
+        via: "group",
+      })
+    );
+  }
   return [];
 }
 
@@ -259,11 +273,64 @@ async function deliver(target, text) {
   return notifyMother(target.baleId, text);
 }
 
+function targetCountLabel(state, count) {
+  if (state.audience === "groups") {
+    return `${count.toLocaleString("fa-IR")} گروه`;
+  }
+  return `${count.toLocaleString("fa-IR")} نفر`;
+}
+
+async function showGroups(user, chatId) {
+  const groups = BROADCAST_GROUP_CHATS;
+  if (!groups.length) {
+    await setStep(user, STEP_HUB);
+    await reply(
+      user,
+      chatId,
+      "هیچ گروهی ثبت نشده است.\nدر متغیر محیطی BROADCAST_GROUP_CHATS آیدی گروه‌ها را بگذارید.\nمثال:\nگروه بزرگ پت‌شاپ:-123456,گروه همکاران:-654321\n\nبرای گرفتن آیدی، ربات مادر را به گروه اضافه کنید و در همان گروه /chatid بفرستید.",
+      broadcastMenu()
+    );
+    return;
+  }
+  if (groups.length === 1) {
+    await askMessage(user, chatId, {
+      audience: "groups",
+      groupIds: [groups[0].chatId],
+      ids: [],
+      tenantId: null,
+    });
+    return;
+  }
+
+  const prev = readState(user);
+  const state = await setStep(user, STEP_GROUPS, {
+    audience: "groups",
+    groupIds: prev.audience === "groups" ? prev.groupIds || [] : [],
+    ids: [],
+    tenantId: null,
+  });
+  const selected = new Set((state.groupIds || []).map(String));
+  const rows = groups.map((group) => [
+    {
+      text: `${selected.has(String(group.chatId)) ? "✅ " : ""}${group.name}`.slice(0, 64),
+      callback_data: `bcg:${group.key}`.slice(0, 64),
+    },
+  ]);
+  await reply(
+    user,
+    chatId,
+    `گروه‌های مقصد را انتخاب کنید.\nانتخاب‌شده: ${selected.size.toLocaleString("fa-IR")} گروه\nبعد «ادامه و نوشتن پیام» را بزنید.`,
+    pickMenu()
+  );
+  await bale.sendKeyboard(chatId, "روی گروه بزنید تا اضافه یا حذف شود:", inlineKb(rows));
+}
+
 async function showHub(user, chatId) {
   await setStep(user, STEP_HUB, {
     audience: null,
     tenantId: null,
     ids: [],
+    groupIds: [],
     q: "",
     msg: "",
   });
@@ -282,7 +349,7 @@ async function askMessage(user, chatId, state) {
   await reply(
     user,
     chatId,
-    `مخاطب: ${AUDIENCE_FA[state.audience] || ""}${shopNote}\nتعداد گیرنده: ${targets.length.toLocaleString("fa-IR")}\n\nمتن پیام را بنویسید:`,
+    `مخاطب: ${AUDIENCE_FA[state.audience] || ""}${shopNote}\nتعداد گیرنده: ${targetCountLabel(state, targets.length)}\n\nمتن پیام را بنویسید:`,
     adminBackMenu()
   );
 }
@@ -410,7 +477,7 @@ async function previewConfirm(user, chatId, message) {
   await reply(
     user,
     chatId,
-    `✉️ پیش‌نمایش\nمخاطب: ${AUDIENCE_FA[state.audience] || ""}\nگیرنده: ${targets.length.toLocaleString("fa-IR")} نفر\nزمان تقریبی ارسال: ${formatDuration(estimateSendMs(targets.length))}\n━━━━━━━━━━━━━━━━━━\n${preview}${message.length > 400 ? "…" : ""}\n━━━━━━━━━━━━━━━━━━\nارسال را تایید کنید.`,
+    `✉️ پیش‌نمایش\nمخاطب: ${AUDIENCE_FA[state.audience] || ""}\nگیرنده: ${targetCountLabel(state, targets.length)}\nزمان تقریبی ارسال: ${formatDuration(estimateSendMs(targets.length))}\n━━━━━━━━━━━━━━━━━━\n${preview}${message.length > 400 ? "…" : ""}\n━━━━━━━━━━━━━━━━━━\nارسال را تایید کنید.`,
     confirmMenu()
   );
 }
@@ -563,10 +630,18 @@ async function goBack(user, chatId) {
       );
       return true;
     }
+    if (state.audience === "groups") {
+      if (BROADCAST_GROUP_CHATS.length > 1) {
+        await showGroups(user, chatId);
+        return true;
+      }
+      await showHub(user, chatId);
+      return true;
+    }
     await showHub(user, chatId);
     return true;
   }
-  if (step === STEP_SHOP || step === STEP_PICK) {
+  if (step === STEP_SHOP || step === STEP_PICK || step === STEP_GROUPS) {
     await showHub(user, chatId);
     return true;
   }
@@ -620,6 +695,21 @@ async function handleCallback(user, chatId, data) {
     await showPickResults(user, chatId, state.q || "", Number(data.slice(4)) || 0);
     return true;
   }
+  if (data.startsWith("bcg:")) {
+    const group = BROADCAST_GROUP_CHATS.find((item) => item.key === data.slice(4));
+    if (!group) {
+      await reply(user, chatId, "گروه پیدا نشد.", broadcastMenu());
+      return true;
+    }
+    const state = readState(user);
+    const ids = new Set((state.groupIds || []).map(String));
+    const chatIdKey = String(group.chatId);
+    if (ids.has(chatIdKey)) ids.delete(chatIdKey);
+    else ids.add(chatIdKey);
+    await writeState(user, { audience: "groups", groupIds: [...ids] });
+    await showGroups(user, chatId);
+    return true;
+  }
   return false;
 }
 
@@ -663,6 +753,21 @@ async function handleText(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.BC_GROUPS) {
+    await showGroups(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.BC_DONE_PICK && user.adminStep === STEP_GROUPS) {
+    const state = readState(user);
+    if (!(state.groupIds || []).length) {
+      await reply(user, chatId, "حداقل یک گروه را انتخاب کنید.", pickMenu());
+      return true;
+    }
+    await askMessage(user, chatId, state);
+    return true;
+  }
+
   if (text === BTN.BC_DONE_PICK && user.adminStep === STEP_PICK) {
     const state = readState(user);
     if (!(state.ids || []).length) {
@@ -702,7 +807,7 @@ async function handleText(user, chatId, text) {
     await reply(
       user,
       chatId,
-      `ارسال برای ${targets.length.toLocaleString("fa-IR")} نفر در صف پس‌زمینه قرار گرفت.\nفاصله ارسال رعایت می‌شود تا به سقف بله نخورد.\nزمان تقریبی: ${formatDuration(estimateSendMs(targets.length))}\nنتیجه بعد از اتمام برایتان می‌آید.`,
+      `ارسال برای ${targetCountLabel(state, targets.length)} در صف پس‌زمینه قرار گرفت.\nفاصله ارسال رعایت می‌شود تا به سقف بله نخورد.\nزمان تقریبی: ${formatDuration(estimateSendMs(targets.length))}\nنتیجه بعد از اتمام برایتان می‌آید.`,
       adminTicketsMenu()
     );
     setTimeout(() => {
@@ -711,6 +816,11 @@ async function handleText(user, chatId, text) {
         notify(user.baleId, "ارسال پیام با خطا متوقف شد.").catch(() => {});
       });
     }, 0);
+    return true;
+  }
+
+  if (user.adminStep === STEP_GROUPS) {
+    await showGroups(user, chatId);
     return true;
   }
 

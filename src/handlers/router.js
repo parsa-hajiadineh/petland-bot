@@ -501,7 +501,8 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     (data.startsWith("bcsh:") ||
       data.startsWith("bcm:") ||
       data.startsWith("bcu:") ||
-      data.startsWith("bcp:")) &&
+      data.startsWith("bcp:") ||
+      data.startsWith("bcg:")) &&
     isAdmin(user)
   ) {
     await require("./adminBroadcast").handleCallback(user, chatId, data);

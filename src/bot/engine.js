@@ -70,6 +70,23 @@ async function processUpdate(update, runtimeCtx) {
     if (!update.message) return;
 
     const msg = update.message;
+    const chatType = String(msg.chat?.type || "");
+    if (chatType && chatType !== "private") {
+      if (
+        runtimeCtx?.isMother &&
+        String(msg.text || "").trim() === "/chatid"
+      ) {
+        const { ADMIN_BALE_IDS } = require("../config");
+        const fromId = String(msg.from?.id || "");
+        if (ADMIN_BALE_IDS.includes(fromId)) {
+          await bale.sendMessage(
+            msg.chat.id,
+            `آیدی این گفتگو:\n${msg.chat.id}`
+          );
+        }
+      }
+      return;
+    }
 
     let referrerBaleId = null;
     if (msg.text && msg.text.startsWith("/start ref_")) {

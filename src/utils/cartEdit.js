@@ -51,7 +51,7 @@ async function sendEditList(user, chatId, items, offset = 0) {
   );
   await bale.sendKeyboard(
     chatId,
-    "محصول سبد را انتخاب کنید:",
+    "برای افزایش یا کاهش تعداد و یا حذف یک محصول از سبد روی نام آن کلیک کنید",
     inlineKb(rows)
   );
 }
