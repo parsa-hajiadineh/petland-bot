@@ -12,7 +12,7 @@ const {
   subMenuKb,
 } = require("../keyboards/menus");
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
-const { sqlCompact, buildAndLikes, scoreText } = require("../utils/smartSearch");
+const { scoreText } = require("../utils/smartSearch");
 const { isMother } = require("../bot/context");
 
 const PRODUCT_LIST_SELECT = {
@@ -576,37 +576,29 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
 
   let products = [];
   try {
-    const like = buildAndLikes(
-      sqlCompact(`concat_ws(' ', p."title", p."code", p."brand", p."description", c."title")`),
-      term
-    );
-    if (like) {
-      const motherId = getMotherTenantId();
-      const tenantSql = motherId
-        ? `(p."tenantId" IS NULL OR p."tenantId" = $${like.params.length + 1})`
-        : `p."tenantId" IS NULL`;
-      const params = motherId ? [...like.params, motherId] : like.params;
-      const rows = await prisma.$queryRawUnsafe(
-        `SELECT p."id", p."code", p."title", p."costPrice", p."profitPercent", p."status", p."brand"
-         FROM "Product" p
-         LEFT JOIN "Category" c ON c."id" = p."categoryId"
-         WHERE p."status" = 'AVAILABLE'
-           AND ${tenantSql}
-           AND ${like.sql}
-         LIMIT 80`,
-        ...params
-      );
-      products = (rows || [])
-        .map((row) => ({
-          ...row,
-          _score: scoreText(
-            `${row.title || ""} ${row.code || ""} ${row.brand || ""}`,
-            term
-          ),
-        }))
-        .sort((a, b) => b._score - a._score)
-        .slice(0, 30);
-    }
+    const rows = await prisma.product.findMany({
+      where: motherCatalogWhere(),
+      select: {
+        ...PRODUCT_LIST_SELECT,
+        description: true,
+        category: { select: { title: true } },
+      },
+    });
+    products = (rows || [])
+      .map((row) => ({
+        ...row,
+        _score: scoreText(
+          `${row.title || ""} ${row.code || ""} ${row.brand || ""} ${row.description || ""} ${row.category?.title || ""}`,
+          term
+        ),
+      }))
+      .filter((row) => row._score > 0)
+      .sort((a, b) => {
+        if (a.status === "AVAILABLE" && b.status !== "AVAILABLE") return -1;
+        if (a.status !== "AVAILABLE" && b.status === "AVAILABLE") return 1;
+        return b._score - a._score;
+      })
+      .slice(0, 30);
   } catch (err) {
     console.error("SEARCH PRODUCTS QUERY:", err);
     await reply(

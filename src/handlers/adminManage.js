@@ -13,7 +13,7 @@ const shopBlock = require("../services/shopBlock");
 const subscriptions = require("../services/tenantSubscriptions");
 const creditLedger = require("../services/creditLedger");
 const campaign = require("../services/goldenCampaign");
-const { sqlCompact, buildAndLikes, scoreText } = require("../utils/smartSearch");
+const { scoreText } = require("../utils/smartSearch");
 
 const STEP_HUB = "MGR:HUB";
 const STEP_LIST = "MGR:LIST";
@@ -103,40 +103,72 @@ async function showHub(user, chatId) {
   );
 }
 
-async function searchPeople(query) {
-  const like = buildAndLikes(
-    sqlCompact(`concat_ws(' ',
-      u."fullName", u."phone", u."baleId", u."id",
-      c."fullName", c."phone", c."shopName",
-      t."name", t."ownerName", t."phone", t."nationalId", t."pageName",
-      s."shopName", s."supportPhone", s."shopAddress",
-      a."fullName", a."phone", a."address",
-      o."fullName", o."phone"
-    )`),
-    query
-  );
-  if (!like) return [];
-  try {
-    const rows = await prisma.$queryRawUnsafe(
-      `SELECT DISTINCT u."id", u."fullName", u."phone", u."baleId", u."role"
-       FROM "User" u
-       LEFT JOIN "Customer" c ON c."userId" = u."id"
-       LEFT JOIN "Tenant" t ON t."ownerUserId" = u."id"
-       LEFT JOIN "TenantSettings" s ON s."tenantId" = t."id"
-       LEFT JOIN "SavedAddress" a ON a."userId" = u."id"
-       LEFT JOIN "Order" o ON o."userId" = u."id"
-       WHERE ${like.sql}
-       LIMIT 80`,
-      ...like.params
+function personBlob(user) {
+  const parts = [user.fullName, user.phone, user.baleId, user.id];
+  const tenant = user.ownedTenant;
+  if (tenant) {
+    parts.push(
+      tenant.name,
+      tenant.ownerName,
+      tenant.phone,
+      tenant.nationalId,
+      tenant.pageName
     );
+    const settings = tenant.settings;
+    if (settings) {
+      parts.push(settings.shopName, settings.supportPhone, settings.shopAddress);
+    }
+  }
+  for (const item of user.customers || []) {
+    parts.push(item.fullName, item.phone, item.shopName);
+  }
+  for (const item of user.savedAddresses || []) {
+    parts.push(item.fullName, item.phone, item.address);
+  }
+  for (const item of user.orders || []) {
+    parts.push(item.fullName, item.phone);
+  }
+  return parts.filter(Boolean).join(" ");
+}
+
+async function searchPeople(query) {
+  const term = String(query || "").trim();
+  if (!term) return [];
+  try {
+    const rows = await prisma.user.findMany({
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        baleId: true,
+        role: true,
+        customers: { select: { fullName: true, phone: true, shopName: true } },
+        savedAddresses: { select: { fullName: true, phone: true, address: true } },
+        orders: {
+          select: { fullName: true, phone: true },
+          take: 20,
+          orderBy: { createdAt: "desc" },
+        },
+        ownedTenant: {
+          select: {
+            name: true,
+            ownerName: true,
+            phone: true,
+            nationalId: true,
+            pageName: true,
+            settings: {
+              select: { shopName: true, supportPhone: true, shopAddress: true },
+            },
+          },
+        },
+      },
+    });
     return (rows || [])
       .map((row) => ({
         ...row,
-        _score: scoreText(
-          `${row.fullName || ""} ${row.phone || ""} ${row.baleId || ""}`,
-          query
-        ),
+        _score: scoreText(personBlob(row), term),
       }))
+      .filter((row) => row._score > 0)
       .sort((a, b) => b._score - a._score)
       .slice(0, 50);
   } catch (err) {

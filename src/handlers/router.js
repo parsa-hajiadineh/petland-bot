@@ -190,8 +190,9 @@ module.exports = async function messageHandler(message, user) {
   if (text === BTN.SEARCH) {
     await prisma.user.update({
       where: { id: user.id },
-      data: { orderStep: "SEARCH" },
+      data: { orderStep: "SEARCH", adminStep: null },
     });
+    user.adminStep = null;
     await reply(
       user,
       chatId,
