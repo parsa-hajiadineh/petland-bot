@@ -1,9 +1,15 @@
 const prisma = require("../database/prisma");
-const {
-  ADMIN_BALE_IDS,
-  WAREHOUSE_ADMIN_BALE_IDS,
-  normalizeBaleId,
-} = require("../config");
+const { normalizeBaleId, parseIds } = require("../config");
+
+function adminIds() {
+  return parseIds(process.env.ADMIN_BALE_IDS);
+}
+
+function warehouseAdminIds() {
+  return parseIds(
+    process.env.WAREHOUSE_ADMIN_BALE_IDS || process.env.WAREHOUSE_ADMIN_BALE_ID
+  );
+}
 
 function baleIdOf(userOrId) {
   const raw =
@@ -13,14 +19,18 @@ function baleIdOf(userOrId) {
   return normalizeBaleId(raw);
 }
 
+function idListHas(list, value) {
+  const id = normalizeBaleId(value);
+  if (!id) return false;
+  return list.includes(id) || list.includes(String(value || "").trim());
+}
+
 function isPrimaryAdmin(user) {
-  const id = baleIdOf(user);
-  return Boolean(id) && ADMIN_BALE_IDS.includes(id);
+  return idListHas(adminIds(), baleIdOf(user));
 }
 
 function isWarehouseAdmin(user) {
-  const id = baleIdOf(user);
-  return Boolean(id) && WAREHOUSE_ADMIN_BALE_IDS.includes(id);
+  return idListHas(warehouseAdminIds(), baleIdOf(user));
 }
 
 function isWarehouseOnly(user) {
@@ -28,18 +38,22 @@ function isWarehouseOnly(user) {
 }
 
 function isStaffBaleId(baleId) {
-  const id = normalizeBaleId(baleId);
-  return Boolean(id) && (ADMIN_BALE_IDS.includes(id) || WAREHOUSE_ADMIN_BALE_IDS.includes(id));
+  return idListHas(adminIds(), baleId) || idListHas(warehouseAdminIds(), baleId);
 }
 
 function staffNotifyIds() {
-  if (WAREHOUSE_ADMIN_BALE_IDS.length) return WAREHOUSE_ADMIN_BALE_IDS;
-  return ADMIN_BALE_IDS;
+  const warehouse = warehouseAdminIds();
+  if (warehouse.length) return warehouse;
+  return adminIds();
 }
 
 async function getOrCreateUser(msg, referrerBaleId = null) {
   const baleId = String(msg?.from?.id || msg?.chat?.id || "");
   if (!baleId) throw new Error("NO_BALE_ID");
+  const staff =
+    isStaffBaleId(baleId) ||
+    isStaffBaleId(msg?.from?.id) ||
+    isStaffBaleId(msg?.chat?.id);
 
   let user = await prisma.user.findUnique({
     where: { baleId },
@@ -59,14 +73,11 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
       data: {
         baleId,
         fullName: msg.from.first_name || "",
-        role: isStaffBaleId(baleId) ? "ADMIN" : "CUSTOMER",
+        role: staff ? "ADMIN" : "CUSTOMER",
         ...(referrerId ? { referrerId } : {}),
       },
     });
-  } else if (
-    isStaffBaleId(baleId) &&
-    user.role !== "ADMIN"
-  ) {
+  } else if (staff && user.role !== "ADMIN") {
     user = await prisma.user.update({
       where: { id: user.id },
       data: { role: "ADMIN" },

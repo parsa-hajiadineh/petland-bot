@@ -425,6 +425,19 @@ function isColleagueEntryBtn(text) {
   return t === BTN.COLLEAGUE || t === "خرید همکار" || t.endsWith("خرید همکار");
 }
 
+function isWholesaleLocked(user) {
+  return user.role === "COLLEAGUE" || user.role === "MANELI";
+}
+
+async function rejectModeChange(user, chatId) {
+  await reply(
+    user,
+    chatId,
+    "تغییر حالت حساب امکان‌پذیر نیست.",
+    mainMenu(user)
+  );
+}
+
 async function showColleagueGate(user, chatId) {
   await prisma.user.update({
     where: { id: user.id },
@@ -479,16 +492,28 @@ async function askManeliCode(user, chatId) {
 module.exports = async function colleagueHandler(user, chatId, text) {
   if (isColleagueEntryBtn(text)) {
     if (user.adminStep === "ADMIN_INV_KIND") return false;
+    if (isWholesaleLocked(user)) {
+      await rejectModeChange(user, chatId);
+      return true;
+    }
     await showColleagueGate(user, chatId);
     return true;
   }
 
   if (text === BTN.ENTER_COLLEAGUE) {
+    if (isWholesaleLocked(user)) {
+      await rejectModeChange(user, chatId);
+      return true;
+    }
     await askColleagueCode(user, chatId);
     return true;
   }
 
   if (text === BTN.ENTER_MANELI) {
+    if (isWholesaleLocked(user)) {
+      await rejectModeChange(user, chatId);
+      return true;
+    }
     await askManeliCode(user, chatId);
     return true;
   }
@@ -540,6 +565,15 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (user.orderStep === "MANELI_CODE") {
+    if (isWholesaleLocked(user)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { orderStep: null },
+      });
+      user.orderStep = null;
+      await rejectModeChange(user, chatId);
+      return true;
+    }
     if (!MANELI_ACCESS_CODE || text.trim() !== MANELI_ACCESS_CODE) {
       await reply(
         user,
@@ -598,6 +632,15 @@ PawOra | More Than Care`,
   }
 
   if (user.orderStep === "COLLEAGUE_CODE") {
+    if (isWholesaleLocked(user)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { orderStep: null },
+      });
+      user.orderStep = null;
+      await rejectModeChange(user, chatId);
+      return true;
+    }
     if (!COLLEAGUE_ACCESS_CODE || text.trim() !== COLLEAGUE_ACCESS_CODE) {
       await reply(
         user,

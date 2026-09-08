@@ -280,10 +280,17 @@ function mainMenu(user) {
     rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
   }
 
-  if (warehouseOnly || user.role === "ADMIN" || primaryAdmin) {
+  const wholesaleLocked = user.role === "COLLEAGUE" || user.role === "MANELI";
+
+  if (warehouseOnly) {
+    rows.push([{ text: BTN.ADMIN_PANEL }]);
+    rows.push([{ text: BTN.ADMIN_INVOICES }, { text: BTN.ADMIN_PROFORMAS }]);
+    rows.push([{ text: BTN.ADMIN_TICKETS }]);
+    rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
+  } else if (user.role === "ADMIN" || primaryAdmin) {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
-  } else {
+  } else if (!wholesaleLocked) {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }
 
@@ -430,8 +437,8 @@ function walletMenu() {
 
 function warehouseAdminMenu() {
   return kb([
-    [{ text: BTN.WAREHOUSE_ORDERS }, { text: BTN.WAREHOUSE_TICKETS }],
-    [{ text: BTN.ADMIN_SVC_INVOICES }],
+    [{ text: BTN.ADMIN_INVOICES }, { text: BTN.ADMIN_PROFORMAS }],
+    [{ text: BTN.ADMIN_TICKETS }, { text: BTN.ADMIN_SVC_INVOICES }],
     [{ text: BTN.BACK_MAIN }],
   ]);
 }

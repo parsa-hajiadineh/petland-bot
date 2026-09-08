@@ -47,6 +47,7 @@ module.exports = {
     process.env.WAREHOUSE_ADMIN_BALE_IDS || process.env.WAREHOUSE_ADMIN_BALE_ID
   ),
   normalizeBaleId,
+  parseIds,
   BROADCAST_GROUP_CHATS: parseBroadcastGroups(process.env.BROADCAST_GROUP_CHATS),
   COLLEAGUE_ACCESS_CODE: process.env.COLLEAGUE_ACCESS_CODE || "",
   MANELI_ACCESS_CODE: process.env.MANELI_ACCESS_CODE || "",
