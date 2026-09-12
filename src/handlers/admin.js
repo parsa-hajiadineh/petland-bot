@@ -287,10 +287,29 @@ async function sendApprovedInvoiceToBuyer(orderId, refNo) {
     where: { id: order.userId },
   });
   if (!owner) return;
+  const invoiceOrder = { ...withRef, user: owner };
   await partnerNotify.notifyOrderBuyer(
-    { ...withRef, user: owner },
-    buildInvoiceText({ ...withRef, user: owner }, withRef.items)
+    invoiceOrder,
+    buildInvoiceText(invoiceOrder, withRef.items)
   );
+  try {
+    const { buildInvoicePdf } = require("../services/invoicePdf");
+    const buffer = await buildInvoicePdf(invoiceOrder, withRef.items);
+    if (buffer) {
+      const fileCode = String(withRef.trackingCode || "invoice").replace(
+        /[^\w-]/g,
+        ""
+      );
+      await partnerNotify.notifyOrderBuyerDocument(
+        invoiceOrder,
+        buffer,
+        `pawora-invoice-${fileCode}.pdf`,
+        "فاکتور فروش پائورا"
+      );
+    }
+  } catch (err) {
+    console.error("INVOICE PDF SEND SKIP:", err.message);
+  }
 }
 
 async function flushPendingAdminRef(user) {

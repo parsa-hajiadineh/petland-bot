@@ -114,6 +114,25 @@ async function notifyShop(chatId, text, tenantId) {
   return notifyMother(chatId, text);
 }
 
+async function notifyMotherDocument(chatId, buffer, filename, caption) {
+  return bale.sendDocument(chatId, buffer, caption, filename, BOT_TOKEN);
+}
+
+async function notifyShopDocument(chatId, buffer, filename, caption, tenantId) {
+  const token = await getShopBotToken(tenantId, { liveOnly: true });
+  if (token) {
+    const result = await bale.sendDocument(
+      chatId,
+      buffer,
+      caption,
+      filename,
+      token
+    );
+    if (result?.ok) return result;
+  }
+  return notifyMotherDocument(chatId, buffer, filename, caption);
+}
+
 async function sendReceiptPhoto(chatId, fileId, tenantId, caption) {
   if (!chatId || !fileId) return { ok: false };
   let result = await bale.sendPhoto(chatId, fileId, caption || "📸 رسید پرداخت");
@@ -141,6 +160,8 @@ module.exports = {
   notify,
   notifyMother,
   notifyShop,
+  notifyMotherDocument,
+  notifyShopDocument,
   sendReceiptPhoto,
   clearLastMessage,
 };

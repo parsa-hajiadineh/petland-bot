@@ -1,5 +1,10 @@
 const prisma = require("../database/prisma");
-const { notifyMother, notifyShop } = require("../bot/messenger");
+const {
+  notifyMother,
+  notifyShop,
+  notifyMotherDocument,
+  notifyShopDocument,
+} = require("../bot/messenger");
 const { findOwnedTenant } = require("./shopProvision");
 
 function isColleagueBuyer(user) {
@@ -44,8 +49,38 @@ async function notifyOrderBuyer(order, text) {
   return notifyMother(user.baleId, text);
 }
 
+async function notifyColleagueDocument(userId, buffer, filename, caption) {
+  const user = await loadUser(userId);
+  if (!user?.baleId || !buffer) return { ok: false };
+  if (!isColleagueBuyer(user)) return { ok: false, skipped: "not_colleague" };
+
+  const tenant = await findOwnedTenant(userId).catch(() => null);
+  if (tenant?.status === "SUSPENDED") {
+    return { ok: false, skipped: "blocked" };
+  }
+  if (tenant?.id) {
+    return notifyShopDocument(user.baleId, buffer, filename, caption, tenant.id);
+  }
+  return notifyMotherDocument(user.baleId, buffer, filename, caption);
+}
+
+async function notifyOrderBuyerDocument(order, buffer, filename, caption) {
+  const user = await loadUser(order?.userId);
+  if (!user?.baleId || !buffer) return { ok: false };
+  if (user.role === "MANELI") {
+    return notifyMotherDocument(user.baleId, buffer, filename, caption);
+  }
+  const colleague =
+    isColleagueBuyer(user) || Boolean(order?.isWholesale);
+  if (colleague) {
+    return notifyColleagueDocument(user.id, buffer, filename, caption);
+  }
+  return notifyMotherDocument(user.baleId, buffer, filename, caption);
+}
+
 module.exports = {
   isColleagueBuyer,
   notifyColleague,
   notifyOrderBuyer,
+  notifyOrderBuyerDocument,
 };
