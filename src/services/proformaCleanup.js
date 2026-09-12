@@ -6,7 +6,7 @@ const {
   MAX_OPEN_PROFORMAS,
 } = require("../utils/order");
 
-const EXPIRE_REASON = "اعتبار ۳۰ دقیقه پرداخت تمام شد.";
+const EXPIRE_REASON = "اعتبار ۳ ساعت پرداخت تمام شد.";
 
 async function closeExpiredProforma(order, notifyUser = false) {
   if (!order?.id || !isProformaPayExpired(order)) return false;

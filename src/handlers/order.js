@@ -27,6 +27,18 @@ const {
   buildShippingInfo,
 } = require("../utils/invoice");
 
+const CHECKOUT_NOTE_TEXT =
+  "📝 توضیحات سفارش خود را بنویسید.\nبر فرض مثال طعم محصول یا سایز مد نظر خود را وارد کنید.\n\nاین مرحله اختیاری است؛ با دکمه «رد کردن» می‌توانید سفارش یا پیش‌فاکتور را ثبت کنید.";
+
+async function askCheckoutNote(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "CHECKOUT_DESC" },
+  });
+  user.orderStep = "CHECKOUT_DESC";
+  await reply(user, chatId, CHECKOUT_NOTE_TEXT, checkoutSkipMenu());
+}
+
 async function notifyAdmins(text) {
   for (const adminId of staffNotifyIds()) {
     try {
@@ -161,14 +173,10 @@ module.exports.handleCheckoutStep = async function handleCheckoutStep(
   if (step === "CHECKOUT_POSTAL") {
     await prisma.user.update({
       where: { id: user.id },
-      data: { tempPostalCode: text, orderStep: "CHECKOUT_DESC" },
+      data: { tempPostalCode: text },
     });
-    await reply(
-      user,
-      chatId,
-      "📝 توضیحات تکمیلی (اختیاری):\nیا «⏭ رد کردن» را بزنید.",
-      checkoutSkipMenu()
-    );
+    user.tempPostalCode = text;
+    await askCheckoutNote(user, chatId);
     return true;
   }
 
@@ -300,7 +308,7 @@ async function finalizeOrder(user, chatId, description) {
     await reply(
       fresh,
       chatId,
-      `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور برای بررسی موجودی به ادمین ارسال شد.\nبعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید.\nپیش‌فاکتورهای تایید شده تا ۳۰ دقیقه اعتبار دارند.\nتا تایید ادمین، رسید پرداخت نفرستید.`,
+      `${invoice}\n\n${buildShippingInfo()}\n\nپیش‌فاکتور برای بررسی موجودی به ادمین ارسال شد.\nبعد از تایید، ادامه پرداخت را از «📦 سفارشات من» انجام دهید.\nپیش‌فاکتورهای تایید شده تا ۳ ساعت اعتبار دارند.\nتا تایید ادمین، رسید پرداخت نفرستید.`,
       mainMenu(fresh)
     );
     await notifyAdminsProforma(withBuyer);
@@ -459,12 +467,12 @@ module.exports.confirmSavedAddress = async function confirmSavedAddress(
       tempAddress: addr.address,
       tempPostalCode: addr.postalCode || null,
       tempAddressId: null,
-      orderStep: null,
+      orderStep: "CHECKOUT_DESC",
     },
   });
 
   const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
-  await finalizeOrder(freshUser, chatId, null);
+  await askCheckoutNote(freshUser, chatId);
 };
 
 module.exports.deleteSavedAddress = async function deleteSavedAddress(
@@ -708,7 +716,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
 
     const pay =
       order.isWholesale && hasProformaCard(order)
-        ? `${wholesalePayText(order)}\n\n⏱ اعتبار پرداخت این پیش‌فاکتور ۳۰ دقیقه است.`
+        ? `${wholesalePayText(order)}\n\n⏱ اعتبار پرداخت این پیش‌فاکتور ۳ ساعت است.`
         : buildPaymentInfo();
     await reply(
       user,
@@ -865,7 +873,7 @@ module.exports.handleProformaCardText = async function handleProformaCardText(
     `✅ پیش‌فاکتور ${order.trackingCode} تایید شد.
 
 از بخش «📦 سفارشات من» وارد همین پیش‌فاکتور شوید و پرداخت را نهایی کنید.
-پیش‌فاکتورهای تایید شده تا ۳۰ دقیقه اعتبار دارند.`
+پیش‌فاکتورهای تایید شده تا ۳ ساعت اعتبار دارند.`
   );
 
   await require("./admin").showProformaList(user, chatId, "ok");

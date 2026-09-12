@@ -13,7 +13,7 @@ function statusLabel(status) {
 }
 
 const PROFORMA_CARD_MARK = "@@CARD@@";
-const PROFORMA_PAY_MS = 30 * 60 * 1000;
+const PROFORMA_PAY_MS = 3 * 60 * 60 * 1000;
 const PROFORMA_REJECT_KEEP_MS = 10 * 24 * 60 * 60 * 1000;
 const MAX_OPEN_PROFORMAS = 3;
 

@@ -70,9 +70,7 @@ function isStaffBaleId(baleId) {
 }
 
 function staffNotifyIds() {
-  const warehouse = warehouseAdminIds();
-  if (warehouse.length) return warehouse;
-  return adminIds();
+  return warehouseAdminIds();
 }
 
 async function getOrCreateUser(msg, referrerBaleId = null) {
