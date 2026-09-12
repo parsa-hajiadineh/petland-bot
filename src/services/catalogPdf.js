@@ -68,6 +68,15 @@ function hasPersian(text) {
   return /[\u0600-\u06FF]/.test(text);
 }
 
+function isNumberToken(word) {
+  return /^[\d۰-۹٠-٩٫.,٬]+$/.test(word);
+}
+
+function drawToken(word) {
+  if (!isNumberToken(word)) return word;
+  return [...word].reverse().join("");
+}
+
 function brandKey(brand) {
   const raw = String(brand || "سایر")
     .replace(/\s*\([^)]*\)\s*/g, " ")
@@ -204,14 +213,15 @@ function buildPdf(products, user) {
       }
       const words = raw.split(/\s+/).filter(Boolean);
       const space = doc.widthOfString(" ");
+      const tokens = words.map((word) => drawToken(word));
       const total =
-        words.reduce((sum, word) => sum + doc.widthOfString(word), 0) +
-        space * Math.max(0, words.length - 1);
+        tokens.reduce((sum, token) => sum + doc.widthOfString(token), 0) +
+        space * Math.max(0, tokens.length - 1);
       let cursor =
         align === "center" ? x + (width + total) / 2 : x + width;
-      for (const word of words) {
-        cursor -= doc.widthOfString(word);
-        paintText(word, cursor, y, { lineBreak: false });
+      for (const token of tokens) {
+        cursor -= doc.widthOfString(token);
+        paintText(token, cursor, y, { lineBreak: false });
         cursor -= space;
       }
     }
