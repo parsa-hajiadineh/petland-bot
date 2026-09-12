@@ -49,6 +49,16 @@ module.exports = async function messageHandler(message, user) {
     console.error("RELOAD USER SKIP:", err.message);
   }
 
+  if (text === "/myid" || text === "/id") {
+    await reply(
+      user,
+      chatId,
+      `آیدی عددی بله شما:\n${user.baleId}`,
+      mainMenu(user)
+    );
+    return;
+  }
+
   if (
     text === BTN.BACK_MAIN ||
     isStartText(text) ||

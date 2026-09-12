@@ -2,13 +2,17 @@ const prisma = require("../database/prisma");
 const { normalizeBaleId, parseIds } = require("../config");
 
 function adminIds() {
-  return parseIds(process.env.ADMIN_BALE_IDS);
+  const { ADMIN_BALE_IDS } = require("../config");
+  const live = parseIds(process.env.ADMIN_BALE_IDS);
+  return [...new Set([...live, ...(ADMIN_BALE_IDS || [])])];
 }
 
 function warehouseAdminIds() {
-  return parseIds(
+  const { WAREHOUSE_ADMIN_BALE_IDS } = require("../config");
+  const live = parseIds(
     process.env.WAREHOUSE_ADMIN_BALE_IDS || process.env.WAREHOUSE_ADMIN_BALE_ID
   );
+  return [...new Set([...live, ...(WAREHOUSE_ADMIN_BALE_IDS || [])])];
 }
 
 function baleIdOf(userOrId) {
@@ -19,6 +23,13 @@ function baleIdOf(userOrId) {
   return normalizeBaleId(raw);
 }
 
+function idsCompatible(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const min = Math.min(a.length, b.length);
+  return min >= 8 && (a.endsWith(b) || b.endsWith(a));
+}
+
 function idListHas(list, value) {
   const raw =
     value && typeof value === "object"
@@ -26,9 +37,15 @@ function idListHas(list, value) {
       : String(value || "");
   const id = normalizeBaleId(raw);
   if (!id) return false;
-  return list.some(
-    (item) => item === id || item === raw.trim() || normalizeBaleId(item) === id
-  );
+  return list.some((item) => {
+    const n = normalizeBaleId(item);
+    return (
+      item === id ||
+      item === raw.trim() ||
+      n === id ||
+      idsCompatible(n, id)
+    );
+  });
 }
 
 function isPrimaryAdmin(user) {
