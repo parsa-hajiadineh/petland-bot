@@ -599,7 +599,7 @@ module.exports.showCatalogPdf = async function showCatalogPdf(user, chatId) {
       chatId,
       buffer,
       CATALOG_CAPTION,
-      "paura-catalog.pdf"
+      "pawora-catalog.pdf"
     );
     if (!result?.ok) {
       console.error("CATALOG PDF SEND:", result);

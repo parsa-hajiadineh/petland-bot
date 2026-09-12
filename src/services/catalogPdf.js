@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const reshape = require("arabic-reshaper").convertArabic;
-const bidiFactory = require("bidi-js");
 const prisma = require("../database/prisma");
 const { getMotherTenantId } = prisma;
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
@@ -27,11 +26,27 @@ const FONT_PATH = path.join(
   __dirname,
   "../../assets/fonts/Vazirmatn-Regular.ttf"
 );
-const bidi = bidiFactory();
+const LOGO_PATH = path.join(__dirname, "../../assets/brand/pawora-logo.png");
+
+const COLOR = {
+  title: "#1E3A8A",
+  muted: "#5B4B8A",
+  head: "#2563EB",
+  group: "#EDE9FE",
+  groupText: "#5B21B6",
+  row: "#F5F3FF",
+  ink: "#1F2937",
+  line: "#C4B5FD",
+  footerBg: "#EEF2FF",
+  footer: "#3730A3",
+};
 
 const BRAND_TITLES = [
   { re: /royal\s*canin|رویال\s*کنین/, title: "محصولات رویال کنین" },
-  { re: /vet\s*expert|وت\s*اکسپرت/, title: "محصولات وت اکسپرت" },
+  {
+    re: /vet\s*expert|وت\s*اکسپرت|vet\s*medin|وت\s*مدین|vetmedin|vet\s*skin|وت\s*اسکین|vetskin/,
+    title: "محصولات وت اکسپرت",
+  },
   { re: /monge|مونژه/, title: "محصولات مونژه" },
   { re: /gemon|جمون/, title: "محصولات جمون" },
   { re: /simba|سیمبا/, title: "محصولات سیمبا" },
@@ -49,11 +64,9 @@ const BRAND_TITLES = [
 function rtl(text) {
   const raw = String(text || "");
   if (!raw) return "";
-  if (/^[\x00-\x7F]+$/.test(raw)) return raw;
+  if (/^[\x00-\x7F@._\-]+$/.test(raw)) return raw;
   try {
-    const converted = reshape(raw);
-    const embedding = bidi.getEmbeddingLevels(converted, "rtl");
-    return bidi.getReorderedString(converted, embedding);
+    return reshape(raw).split("").reverse().join("");
   } catch (err) {
     return raw;
   }
@@ -138,7 +151,7 @@ function buildPdf(products, user) {
     const doc = new PDFDocument({
       size: "A4",
       margin: 26,
-      info: { Title: "لیست جامع محصولات پائورا" },
+      info: { Title: "لیست جامع محصولات Pawora" },
     });
     const chunks = [];
     doc.on("data", (chunk) => chunks.push(chunk));
@@ -157,7 +170,7 @@ function buildPdf(products, user) {
     const xName = margin + colPrice + colCode;
     const xCode = margin + colPrice;
     const xPrice = margin;
-    const footerLimit = () => doc.page.height - 32;
+    const footerLimit = () => doc.page.height - 58;
 
     function drawText(text, x, y, width, opts = {}) {
       doc.text(rtl(text), x + 4, y + 6, {
@@ -176,27 +189,56 @@ function buildPdf(products, user) {
       return Math.max(minRowH, Math.ceil(h) + 12);
     }
 
+    function paintWatermark() {
+      if (!fs.existsSync(LOGO_PATH)) return;
+      doc.save();
+      doc.opacity(0.06);
+      const size = 360;
+      doc.image(LOGO_PATH, (doc.page.width - size) / 2, (doc.page.height - size) / 2, {
+        width: size,
+      });
+      doc.restore();
+    }
+
+    function paintFooter() {
+      const y = doc.page.height - 50;
+      doc.save();
+      doc.rect(margin, y, tableW, 36).fill(COLOR.footerBg);
+      doc.restore();
+      doc.fontSize(8).fillColor(COLOR.footer);
+      doc.text("@Pawora_bot", margin + 8, y + 8, { width: 130, align: "left" });
+      drawText("ربات فروشگاهی بله", margin + 138, y + 2, tableW - 146);
+      doc.fontSize(8).fillColor(COLOR.footer);
+      doc.text("@support_pawora", margin + 8, y + 22, { width: 130, align: "left" });
+      drawText("پشتیبانی بله و واتساپ", margin + 138, y + 16, tableW - 146);
+    }
+
     function paintHeader() {
-      doc.y = 22;
-      doc.fontSize(15).fillColor("#0f3d2e");
-      drawText("لیست جامع محصولات پائورا", margin, 20, tableW);
-      doc.fontSize(9).fillColor("#4b5563");
+      paintWatermark();
+      paintFooter();
+      if (fs.existsSync(LOGO_PATH)) {
+        doc.image(LOGO_PATH, margin, 14, { width: 44, height: 44 });
+      }
+      const titleW = tableW - 56;
+      doc.fontSize(15).fillColor(COLOR.title);
+      drawText("لیست جامع محصولات پائورا", margin, 18, titleW);
+      doc.fontSize(9).fillColor(COLOR.muted);
       drawText(
         wholesale
           ? "قیمت همکاری — فقط کالاهای موجود"
           : "قیمت خرد — فقط کالاهای موجود",
         margin,
-        42,
-        tableW
+        40,
+        titleW
       );
-      doc.y = 64;
+      doc.y = 66;
     }
 
     function paintTableHead() {
       const y = doc.y;
       const h = 22;
       doc.save();
-      doc.rect(margin, y, tableW, h).fill("#0f3d2e");
+      doc.rect(margin, y, tableW, h).fill(COLOR.head);
       doc.restore();
       doc.fontSize(10).fillColor("#ffffff");
       drawText("نام محصول", xName, y, colName);
@@ -224,9 +266,9 @@ function buildPdf(products, user) {
       ensureSpace(minRowH * 2 + 14, false);
       const y = doc.y + 10;
       doc.save();
-      doc.rect(margin, y, tableW, 24).fill("#d7efe4");
+      doc.rect(margin, y, tableW, 24).fill(COLOR.group);
       doc.restore();
-      doc.fontSize(11).fillColor("#0f3d2e");
+      doc.fontSize(11).fillColor(COLOR.groupText);
       drawText(group.title, margin, y, tableW);
       doc.y = y + 24;
       paintTableHead();
@@ -242,13 +284,13 @@ function buildPdf(products, user) {
         doc.save();
         doc
           .rect(margin, yRow, tableW, h)
-          .fill(rowIndex % 2 === 0 ? "#f4fbf7" : "#ffffff");
+          .fill(rowIndex % 2 === 0 ? COLOR.row : "#ffffff");
         doc.restore();
         doc.save();
-        doc.lineWidth(0.35).strokeColor("#c5ddd2");
+        doc.lineWidth(0.35).strokeColor(COLOR.line);
         doc.rect(margin, yRow, tableW, h).stroke();
         doc.restore();
-        doc.fontSize(9).fillColor("#1f2937");
+        doc.fontSize(9).fillColor(COLOR.ink);
         drawText(title, xName, yRow, colName);
         drawText(code, xCode, yRow, colCode, { align: "center" });
         drawText(price, xPrice, yRow, colPrice, { align: "center" });
