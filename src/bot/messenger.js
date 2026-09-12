@@ -7,6 +7,9 @@ const fetch = require("node-fetch");
 async function clearLastMessage(user, chatId) {
   if (!user?.lastMessageId) return;
 
+  const { isKeptCatalogPdf } = require("../services/catalogPdf");
+  if (isKeptCatalogPdf(user.id, user.lastMessageId)) return;
+
   try {
     await bale.deleteMessage(chatId, user.lastMessageId);
   } catch (err) {

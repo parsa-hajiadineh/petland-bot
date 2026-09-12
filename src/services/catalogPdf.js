@@ -7,6 +7,22 @@ const prisma = require("../database/prisma");
 const { getMotherTenantId } = prisma;
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
 
+const keptPdfIds = new Map();
+
+function isKeptCatalogPdf(userId, messageId) {
+  return Boolean(userId && messageId && keptPdfIds.get(userId) === messageId);
+}
+
+function rememberCatalogPdf(userId, messageId) {
+  if (userId && messageId) keptPdfIds.set(userId, messageId);
+}
+
+function takePreviousCatalogPdf(userId) {
+  const prev = keptPdfIds.get(userId);
+  if (prev) keptPdfIds.delete(userId);
+  return prev || null;
+}
+
 const FONT_PATH = path.join(
   __dirname,
   "../../assets/fonts/Vazirmatn-Regular.ttf"
@@ -254,4 +270,7 @@ async function buildCatalogPdf(user) {
 
 module.exports = {
   buildCatalogPdf,
+  isKeptCatalogPdf,
+  rememberCatalogPdf,
+  takePreviousCatalogPdf,
 };

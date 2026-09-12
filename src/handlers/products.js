@@ -12,7 +12,12 @@ const {
   subMenuKb,
   mainMenu,
 } = require("../keyboards/menus");
-const { buildCatalogPdf } = require("../services/catalogPdf");
+const {
+  buildCatalogPdf,
+  isKeptCatalogPdf,
+  rememberCatalogPdf,
+  takePreviousCatalogPdf,
+} = require("../services/catalogPdf");
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
 const { scoreText } = require("../utils/smartSearch");
 const { isMother } = require("../bot/context");
@@ -143,6 +148,7 @@ async function clearProductListMessages(user, chatId) {
   inlineListIds.delete(user.id);
 
   for (const id of ids) {
+    if (isKeptCatalogPdf(user.id, id)) continue;
     try {
       await bale.deleteMessage(chatId, id);
     } catch (err) {
@@ -604,6 +610,24 @@ module.exports.showCatalogPdf = async function showCatalogPdf(user, chatId) {
         mainMenu(user),
         { keepLast: true }
       );
+      return;
+    }
+    const pdfId = result?.result?.message_id;
+    const prevPdfId = takePreviousCatalogPdf(user.id);
+    if (prevPdfId && prevPdfId !== pdfId) {
+      try {
+        await bale.deleteMessage(chatId, prevPdfId);
+      } catch (err) {
+        console.log("DELETE OLD CATALOG PDF SKIP:", err.message);
+      }
+    }
+    if (pdfId) rememberCatalogPdf(user.id, pdfId);
+    if (user.lastMessageId === pdfId) {
+      user.lastMessageId = null;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastMessageId: null },
+      });
     }
   } catch (err) {
     console.error("CATALOG PDF:", err);
