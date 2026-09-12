@@ -196,11 +196,12 @@ async function listPackages({ includeArchived = false } = {}) {
   await ensureServicePackages();
   if (hasPackageModel()) {
     try {
-      return await prisma.servicePackage.findMany({
+      const rows = await prisma.servicePackage.findMany({
         where: includeArchived ? {} : { isArchived: false },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         select: PACKAGE_SELECT,
       });
+      return rows.filter((pack) => pack.code !== "SPECIAL_SERVICES_TEXT");
     } catch (err) {
       console.error("SERVICE LIST PRISMA SKIP:", err.message);
     }
@@ -215,7 +216,9 @@ async function listPackages({ includeArchived = false } = {}) {
          FROM "ServicePackage" WHERE "isArchived" = false
          ORDER BY "sortOrder" ASC, "createdAt" ASC`
       );
-  return (rows || []).map(mapRow);
+  return (rows || [])
+    .map(mapRow)
+    .filter((pack) => pack.code !== "SPECIAL_SERVICES_TEXT");
 }
 
 async function listActivePackages(filter = {}) {

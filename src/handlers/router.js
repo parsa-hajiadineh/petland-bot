@@ -488,6 +488,11 @@ module.exports.handleCallbackQuery = async function handleCallbackQuery(cq, user
     return;
   }
 
+  if (data.startsWith("prog:")) {
+    await colleagueHandler.handleProgrammingCallback(user, chatId, data);
+    return;
+  }
+
   if (
     data.startsWith("sb") ||
     data.startsWith("siv:") ||

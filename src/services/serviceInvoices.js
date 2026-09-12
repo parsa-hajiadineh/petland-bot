@@ -447,8 +447,32 @@ function isOpenInvoiceStatus(status) {
 }
 
 async function getOpenInvoice(tenantId) {
+  if (!tenantId) return null;
+  await ensureServiceInvoices();
+  if (hasInvoiceModel()) {
+    try {
+      const row = await prisma.serviceInvoice.findFirst({
+        where: {
+          tenantId,
+          kind: { not: "SPECIAL" },
+          status: { in: ["WAITING_PAYMENT", "WAITING_APPROVAL"] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      return row ? getInvoice(row.id) : null;
+    } catch (err) {
+      console.error("SERVICE INVOICE OPEN SKIP:", err.message);
+    }
+  }
   const latest = await getLatestInvoice(tenantId);
-  if (!latest || !isOpenInvoiceStatus(latest.status)) return null;
+  if (
+    !latest ||
+    latest.kind === "SPECIAL" ||
+    !isOpenInvoiceStatus(latest.status)
+  ) {
+    return null;
+  }
   return latest;
 }
 
@@ -563,6 +587,34 @@ function formatPeriodButton(invoice) {
 }
 
 function formatInvoiceText(invoice) {
+  if (invoice.kind === "SPECIAL") {
+    const created = invoice.createdAt
+      ? new Date(invoice.createdAt).toLocaleDateString("fa-IR")
+      : "—";
+    const lines = [
+      "🧾 فاکتور خدمات ویژه",
+      `🔖 ${invoice.trackingCode}`,
+      `📅 تاریخ ثبت: ${created}`,
+      "━━━━━━━━━━━━━━━━━━",
+      "",
+    ];
+    for (const item of invoice.items || []) {
+      lines.push(`• ${item.title || "خدمات ویژه"}`);
+      if (item.description) lines.push(String(item.description));
+      lines.push("");
+    }
+    if (Number(invoice.creditAmount || 0) > 0) {
+      lines.push(`کسر از اعتبار: ${formatPrice(invoice.creditAmount)}`);
+    }
+    if (Number(invoice.totalAmount || 0) > 0) {
+      lines.push(`مبلغ: ${formatPrice(invoice.totalAmount)}`);
+    }
+    lines.push(`وضعیت: ${invoiceStatusLabel(invoice.status)}`);
+    if (invoice.status === "REJECTED" && invoice.rejectReason) {
+      lines.push(`علت رد: ${invoice.rejectReason}`);
+    }
+    return lines.join("\n");
+  }
   const isInitial = invoice.kind === "INITIAL";
   const title = isInitial ? "🧾 فاکتور راه‌اندازی" : "🧾 فاکتور اشتراک ماهانه";
   const created = invoice.createdAt
@@ -804,6 +856,121 @@ async function listInvoices(tenantId, take = 10) {
   return invoices;
 }
 
+async function createSpecialInvoice({ userId, tenantId, brief, phone }) {
+  await ensureServiceInvoices();
+  const note = `تلفن: ${String(phone || "").trim()}\nشرح پروژه:\n${String(brief || "").trim()}`;
+  for (let i = 0; i < 4; i++) {
+    const trackingCode = generateServiceInvoiceCode();
+    const id = newId();
+    const itemId = newId();
+    try {
+      if (hasInvoiceModel()) {
+        const created = await prisma.serviceInvoice.create({
+          data: {
+            id,
+            trackingCode,
+            kind: "SPECIAL",
+            status: "WAITING_APPROVAL",
+            onceAmount: 0,
+            monthlyAmount: 0,
+            totalAmount: 0,
+            creditAmount: 0,
+            cashAmount: 0,
+            paymentMethod: "CREDIT",
+            userId,
+            tenantId: tenantId || null,
+            items: {
+              create: {
+                id: itemId,
+                packageId: null,
+                code: "SPECIAL",
+                title: "خدمات ویژه برنامه‌نویسی",
+                description: note,
+                unitPrice: 0,
+                kind: "SERVICE",
+                billing: "ONCE",
+                quantity: 1,
+              },
+            },
+          },
+        });
+        return getInvoice(created.id);
+      }
+    } catch (err) {
+      if (String(err.message || "").includes("Unique")) continue;
+      console.error("SPECIAL INVOICE CREATE SKIP:", err.message);
+    }
+    try {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "ServiceInvoice"
+          ("id","trackingCode","kind","status","onceAmount","monthlyAmount","totalAmount","creditAmount","cashAmount","paymentMethod","userId","tenantId","createdAt","updatedAt")
+         VALUES ($1,$2,'SPECIAL','WAITING_APPROVAL',0,0,0,0,0,'CREDIT',$3,$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+        id,
+        trackingCode,
+        userId,
+        tenantId || null
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "ServiceInvoiceItem"
+          ("id","packageId","code","title","description","unitPrice","kind","billing","quantity","invoiceId")
+         VALUES ($1,NULL,'SPECIAL',$2,$3,0,'SERVICE','ONCE',1,$4)`,
+        itemId,
+        "خدمات ویژه برنامه‌نویسی",
+        note,
+        id
+      );
+      return getInvoice(id);
+    } catch (err) {
+      if (String(err.message || "").includes("Unique")) continue;
+      console.error("SPECIAL INVOICE SQL SKIP:", err.message);
+    }
+  }
+  return null;
+}
+
+async function approveSpecialInvoice(id, amount, actorUserId) {
+  const current = await getInvoice(id);
+  if (!current || current.kind !== "SPECIAL") return null;
+  if (current.status === "APPROVED" || current.status === "REJECTED") return null;
+  const n = Math.max(0, Math.floor(Number(amount) || 0));
+  if (n > 0) {
+    const creditLedger = require("./creditLedger");
+    await creditLedger.appendTransaction({
+      tenantId: current.tenantId,
+      userId: current.userId,
+      amount: -n,
+      type: creditLedger.CREDIT_TYPE.SERVICE_PAYMENT,
+      title: "خدمات ویژه برنامه‌نویسی",
+      note: current.trackingCode,
+      referenceType: "SERVICE_INVOICE",
+      referenceId: current.id,
+      createdByUserId: actorUserId || null,
+    });
+  }
+  const moved = await claimInvoiceStatus(id, "APPROVED");
+  if (moved !== 1) return null;
+  await patchPaymentSplit(id, n, 0, n > 0 ? "CREDIT" : "CASH");
+  try {
+    if (hasInvoiceModel()) {
+      await prisma.serviceInvoice.update({
+        where: { id },
+        data: { totalAmount: n, creditAmount: n, cashAmount: 0 },
+      });
+    } else {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "ServiceInvoice"
+         SET "totalAmount" = $2, "creditAmount" = $2, "cashAmount" = 0, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "id" = $1`,
+        id,
+        n
+      );
+    }
+  } catch (err) {
+    console.error("SPECIAL INVOICE AMOUNT SKIP:", err.message);
+  }
+  return getInvoice(id);
+}
+
 module.exports = {
   ensureServiceInvoices,
   hasInitialInvoice,
@@ -816,6 +983,8 @@ module.exports = {
   listInvoicesByStatus,
   approveInvoice,
   rejectInvoice,
+  approveSpecialInvoice,
+  createSpecialInvoice,
   markWaitingApproval,
   invoiceStatusLabel,
   formatPeriodButton,

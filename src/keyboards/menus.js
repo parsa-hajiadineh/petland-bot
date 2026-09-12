@@ -131,7 +131,7 @@ const BTN = {
   INV_RETAIL: "🛒 خرید عادی",
   INV_COLLEAGUE: "🤝 فاکتورهای همکار",
   INV_MANELI: "🧾 فاکتورهای مانلی",
-  CREATE_SHOP_BOT: "🤖 ساخت ربات فروشگاهی",
+  CREATE_SHOP_BOT: "💻 خدمات برنامه‌نویسی",
   SHOP_ONLINE: "🌐 آنلاین شاپ",
   SHOP_PHYSICAL: "🏪 فروشگاه حضوری",
   SHOP_BOTH: "🌐🏪 آنلاین و حضوری",
@@ -200,6 +200,7 @@ const BTN = {
   CREDIT_SET_GOLDEN_PCT: "⭐ درصد اعتبار ویژه",
   CREDIT_SET_STANDARD_PCT: "📈 درصد اعتبار عادی",
   SVC_NEW: "➕ پکیج جدید",
+  SVC_SPECIAL_TEXT: "📝 متن خدمات ویژه",
   SVC_EDIT_TITLE: "✏️ نام",
   SVC_EDIT_PRICE: "💰 قیمت",
   SVC_EDIT_DESC: "📝 توضیحات",
@@ -460,7 +461,7 @@ function adminMenu() {
 
 function adminServicesMenu() {
   return kb([
-    [{ text: BTN.SVC_NEW }],
+    [{ text: BTN.SVC_NEW }, { text: BTN.SVC_SPECIAL_TEXT }],
     [{ text: BTN.BACK_PRODUCT_LIST }],
   ]);
 }

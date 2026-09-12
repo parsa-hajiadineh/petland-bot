@@ -1,9 +1,11 @@
 const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply, notify } = require("../bot/messenger");
-const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
+const bale = require("../bot/bale");
+const { BTN, mainMenu, backMain, kb, inlineKb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
-const { isWarehouseOnly, canSwitchModes } = require("../services/user");
+const { isWarehouseOnly, canSwitchModes, staffNotifyIds } = require("../services/user");
+const specialServices = require("../services/specialServices");
 const {
   provisionShop,
   findOwnedTenant,
@@ -23,6 +25,31 @@ const PROFILE_STEPS = [
 ];
 
 const MANELI_STEPS = ["MANELI_NAME", "MANELI_PHONE"];
+
+const COLLEAGUE_WELCOME = `✅ حالت خرید همکار فعال شد.
+
+📖 راهنمای بخش همکاران:
+
+در حالت همکار می‌توانید محصولات را با شرایط و قیمت همکاری مشاهده و سفارش خود را ثبت نمایید.
+
+📦 • می‌توانید آدرس مشتری خودتان را مستقیم وارد کنید
+• محصول را به صورت دراپ شیپینگ بفروشید
+• تسویه با ما به قیمت همکاری انجام می‌شود
+• فاکتور برای مشتریان شما ارسال نمی‌شود
+•توجه داشته باشید که ثبت سفارش به این شکل است که بعد از انتخاب محصولات مد نظر و صدور پیش فاکتور، کالاهای درخواستی شما با موجودی لحظه ای انبار چک می‌شود و در صورت تایید پیش فاکتور، به شما اطلاع داده می‌شود؛ لازم به ذکر است که پیش فاکتور های تایید شده تا ۳ ساعت قابلیت پرداخت داشته و اعتبار دارند.
+شما میتوانید از بخش سفارشات من، پرداخت پیش فاکتور های تایید شده خود را انجام دهید.
+پردازش پیش فاکتور ها در روز های کاری تا ساعت ۱۷ انجام می‌گیرد و پیش فاکتور های باقیمانده در روز بعد پردازش خواهند شد .
+
+
+✅اعتبار ویژه پائورا:
+
+🎁 ۱۰٪ از مبلغ فاکتورهای شما به عنوان اعتبار استفاده از خدمات پلتفرم پائورا به عنوان پاداش همکاری به کیف پول شما بازمی‌گردد
+🌟 بابت قدردانی از حسن انتخاب شما، تا ۴۸ ساعت آتی، اعتبار بازگشتی به کیف پول شما (تا سقف ۵۰ میلیون تومان اعتبار) با ضریب ۵۰۰٪ محاسبه می‌شود
+
+🤖 از طریق دکمه «خدمات برنامه‌نویسی» می‌توانید از امکانات و پنل‌ها و خدمات مجاز مجموعه پائورا استفاده نمایید.
+💳 قابلیت پرداخت تمامی هزینه‌های خدمات دریافتی همکاران محترم، از طریق اعتبارهای هدیه شما فراهم شده است
+
+PawOra | More Than Care`;
 
 const MANELI_WELCOME = `✅ پنل بازاریابان مانلی فعال شد.
 
@@ -283,8 +310,7 @@ ${snapshot}
 
 ${snapshot}
 
-از منوی اصلی می‌توانید خرید همکاری را شروع کنید.
-ساخت ربات فروشگاهی و خرید پکیج بعداً از همین منو در دسترس است.`,
+${COLLEAGUE_WELCOME}`,
     mainMenu(user)
   );
 }
@@ -305,6 +331,86 @@ async function waitSetupApproval(user, chatId, invoice) {
 تا تایید پرداخت هزینه راه‌اندازی، امکان ساخت ربات وجود ندارد.
 بعد از تایید، دوباره «ساخت ربات فروشگاهی» را بزنید.`,
     mainMenu(user)
+  );
+}
+
+async function rememberInline(user, result) {
+  const msgId = result?.result?.message_id;
+  if (!msgId || !user?.id) return;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastMessageId: msgId },
+  });
+  user.lastMessageId = msgId;
+}
+
+async function showProgrammingHub(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "PROG_HUB" },
+  });
+  user.orderStep = "PROG_HUB";
+  await reply(
+    user,
+    chatId,
+    "💻 خدمات برنامه‌نویسی\nیکی از گزینه‌ها را انتخاب کنید:",
+    kb([[{ text: BTN.BACK_MAIN }]])
+  );
+  const result = await bale.sendKeyboard(
+    chatId,
+    "انتخاب کنید:",
+    inlineKb([
+      [{ text: "🤖 ساخت ربات فروشگاهی", callback_data: "prog:shop" }],
+      [{ text: "⭐ استفاده از خدمات ویژه", callback_data: "prog:special" }],
+    ])
+  );
+  await rememberInline(user, result);
+}
+
+async function showSpecialServices(user, chatId) {
+  const body = await specialServices.getText();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "PROG_SPECIAL" },
+  });
+  user.orderStep = "PROG_SPECIAL";
+  await reply(user, chatId, body, kb([[{ text: BTN.BACK_MAIN }]]));
+  const result = await bale.sendKeyboard(
+    chatId,
+    "ثبت درخواست:",
+    inlineKb([
+      [{ text: "📝 ثبت فاکتور جدید", callback_data: "prog:new" }],
+      [{ text: "🔙 بازگشت", callback_data: "prog:hub" }],
+    ])
+  );
+  await rememberInline(user, result);
+}
+
+async function askSpecialBrief(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "PROG_BRIEF" },
+  });
+  user.orderStep = "PROG_BRIEF";
+  await reply(
+    user,
+    chatId,
+    "حدود کار و شرح پروژه را بنویسید:",
+    profileNavKb()
+  );
+}
+
+async function askSpecialPhone(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: "PROG_PHONE" },
+  });
+  user.orderStep = "PROG_PHONE";
+  await reply(
+    user,
+    chatId,
+    "شماره تماسی که همکاران خدمات بتوانند با شما تماس بگیرند را وارد کنید:",
+    profileNavKb()
   );
 }
 
@@ -668,8 +774,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   if (text === BTN.CREATE_SHOP_BOT) {
     if (isWarehouseOnly(user)) return false;
     if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
-    const tenant = await findOwnedTenant(user.id);
-    await gateShopBotCreate(user, chatId, tenant);
+    await showProgrammingHub(user, chatId);
     return true;
   }
 
@@ -679,6 +784,71 @@ module.exports = async function colleagueHandler(user, chatId, text) {
 
   if (text === BTN.BACK_QUESTION && PROFILE_STEPS.includes(user.orderStep)) {
     await goProfileBack(user, chatId);
+    return true;
+  }
+
+  if (text === BTN.BACK_QUESTION && user.orderStep === "PROG_PHONE") {
+    await askSpecialBrief(user, chatId);
+    return true;
+  }
+  if (text === BTN.BACK_QUESTION && user.orderStep === "PROG_BRIEF") {
+    await showSpecialServices(user, chatId);
+    return true;
+  }
+
+  if (user.orderStep === "PROG_BRIEF") {
+    if (Object.values(BTN).includes(text)) return false;
+    const brief = text.trim();
+    if (!brief) {
+      await reply(user, chatId, "شرح پروژه را بنویسید.", profileNavKb());
+      return true;
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { tempDescription: brief, orderStep: "PROG_PHONE" },
+    });
+    user.tempDescription = brief;
+    await askSpecialPhone(user, chatId);
+    return true;
+  }
+
+  if (user.orderStep === "PROG_PHONE") {
+    if (Object.values(BTN).includes(text)) return false;
+    const phone = text.trim();
+    if (!phone) {
+      await reply(user, chatId, "شماره تماس را وارد کنید.", profileNavKb());
+      return true;
+    }
+    const tenant = await findOwnedTenant(user.id);
+    const invoice = await invoices.createSpecialInvoice({
+      userId: user.id,
+      tenantId: tenant?.id || null,
+      brief: user.tempDescription || "",
+      phone,
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orderStep: null, tempDescription: null },
+    });
+    user.orderStep = null;
+    user.tempDescription = null;
+    const code = invoice?.trackingCode ? `\n🔖 ${invoice.trackingCode}` : "";
+    await reply(
+      user,
+      chatId,
+      `✅ درخواست خدمات ویژه ثبت شد.${code}\n\nهمکاران ما از بخش خدمات با شما تماس خواهند گرفت.`,
+      mainMenu(user)
+    );
+    if (invoice) {
+      const notice = `🆕 فاکتور خدمات ویژه\n🔖 ${invoice.trackingCode}\n👤 ${user.fullName || user.baleId}\n📞 ${phone}`;
+      for (const adminId of staffNotifyIds()) {
+        try {
+          await notify(adminId, notice);
+        } catch (err) {
+          console.log("SPECIAL INVOICE NOTIFY SKIP:", err.message);
+        }
+      }
+    }
     return true;
   }
 
@@ -822,42 +992,11 @@ module.exports = async function colleagueHandler(user, chatId, text) {
         console.error("GOLDEN PERIOD START SKIP:", err.message);
       });
 
-    await reply(
-      user,
-      chatId,
-      `✅ حالت خرید همکار فعال شد.
+    await reply(user, chatId, COLLEAGUE_WELCOME, mainMenu(user));
 
-📖 راهنمای بخش همکاران:
-
-در حالت همکار می‌توانید محصولات را با شرایط و قیمت همکاری مشاهده و سفارش خود را ثبت نمایید.
-
-📦 • می‌توانید آدرس مشتری خودتان را مستقیم وارد کنید
-• محصول را به صورت دراپ شیپینگ بفروشید
-• تسویه با ما به قیمت همکاری انجام می‌شود
-• فاکتور برای مشتریان شما ارسال نمی‌شود
-•توجه داشته باشید که ثبت سفارش به این شکل است که بعد از انتخاب محصولات مد نظر و صدور پیش فاکتور، کالاهای درخواستی شما با موجودی لحظه ای انبار چک می‌شود و در صورت تایید پیش فاکتور، به شما اطلاع داده می‌شود؛ لازم به ذکر است که پیش فاکتور های تایید شده تا ۳ ساعت قابلیت پرداخت داشته و اعتبار دارند.
-شما میتوانید از بخش سفارشات من، پرداخت پیش فاکتور های تایید شده خود را انجام دهید.
-پردازش پیش فاکتور ها در روز های کاری تا ساعت ۱۷ انجام می‌گیرد و پیش فاکتور های باقیمانده در روز بعد پردازش خواهند شد .
-
-
-✅اعتبار ویژه پائورا:
-
-🎁 ۱۰٪ از مبلغ فاکتورهای شما به عنوان اعتبار استفاده از خدمات پلتفرم پائورا به عنوان پاداش همکاری به کیف پول شما بازمی‌گردد
-🌟 بابت قدردانی از حسن انتخاب شما، تا ۴۸ ساعت آتی، اعتبار بازگشتی به کیف پول شما (تا سقف ۵۰ میلیون تومان اعتبار) با ضریب ۵۰۰٪ محاسبه می‌شود
-
-🤖 از طریق دکمه «ساخت ربات فروشگاهی» می‌توانید از امکانات و پنل‌ها و خدمات مجاز مجموعه پائورا استفاده نمایید.
-💳 قابلیت پرداخت تمامی هزینه‌های خدمات دریافتی همکاران محترم، از طریق اعتبارهای هدیه شما فراهم شده است
-
-🛒 از طریق دکمه «خرید اشتراک» می‌توانید تعرفه خدمات را بررسی نمایید و پس از انتخاب تعرفه خود، فروشگاه خود را به سادگی آماده نمایید
-
-PawOra | More Than Care`
-    );
-
-    const tenant = await findOwnedTenant(user.id);
-    if (!tenant) {
-      await startProfile(user, chatId);
-    } else {
-      await reply(user, chatId, "از منوی زیر استفاده کنید:", mainMenu(user));
+    if (!keepRole) {
+      const tenant = await findOwnedTenant(user.id);
+      if (!tenant) await startProfile(user, chatId);
     }
 
     return true;
@@ -999,6 +1138,33 @@ PawOra | More Than Care`
     return true;
   }
 
+  return false;
+};
+
+module.exports.handleProgrammingCallback = async function handleProgrammingCallback(
+  user,
+  chatId,
+  data
+) {
+  if (isWarehouseOnly(user)) return false;
+  if (user.role !== "COLLEAGUE" && user.role !== "ADMIN") return false;
+  if (data === "prog:hub") {
+    await showProgrammingHub(user, chatId);
+    return true;
+  }
+  if (data === "prog:shop") {
+    const tenant = await findOwnedTenant(user.id);
+    await gateShopBotCreate(user, chatId, tenant);
+    return true;
+  }
+  if (data === "prog:special") {
+    await showSpecialServices(user, chatId);
+    return true;
+  }
+  if (data === "prog:new") {
+    await askSpecialBrief(user, chatId);
+    return true;
+  }
   return false;
 };
 

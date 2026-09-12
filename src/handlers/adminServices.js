@@ -238,7 +238,12 @@ async function showInvoiceList(user, chatId, kind, offset = 0) {
   if (hasMore) rows = rows.slice(0, PAGE_SIZE);
   const buttons = [];
   for (const inv of rows) {
-    const labelKind = inv.kind === "INITIAL" ? "راه‌اندازی" : "ماهانه";
+    const labelKind =
+      inv.kind === "INITIAL"
+        ? "راه‌اندازی"
+        : inv.kind === "SPECIAL"
+          ? "ویژه"
+          : "ماهانه";
     buttons.push([
       {
         text: `${inv.trackingCode} | ${labelKind} | ${formatPrice(inv.totalAmount)}`,
@@ -330,11 +335,11 @@ async function rejectServiceInvoice(user, chatId, reason) {
       select: { baleId: true },
     });
     if (owner?.baleId) {
-      await notifyShop(
-        owner.baleId,
-        `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nعلت رد: ${note}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`,
-        invoice.tenantId
-      );
+      const rejectNote =
+        invoice.kind === "SPECIAL"
+          ? `❌ درخواست خدمات ویژه رد شد.\n🔖 ${invoice.trackingCode}\n\nعلت رد: ${note}`
+          : `❌ فاکتور خدمات رد شد.\n🔖 ${invoice.trackingCode}\n\nعلت رد: ${note}\n\nبرای همان دوره اشتراک دوباره خرید کنید.`;
+      await notifyShop(owner.baleId, rejectNote, invoice.tenantId);
     }
   } catch (err) {
     console.error("SERVICE INVOICE USER REJECT NOTIFY:", err.message);
@@ -348,7 +353,121 @@ async function rejectServiceInvoice(user, chatId, reason) {
   await showInvoiceList(user, chatId, "p", 0);
 }
 
+async function askSpecialDeduct(user, chatId, invoice) {
+  const creditLedger = require("../services/creditLedger");
+  const home = await creditLedger.getWalletHome({
+    userId: invoice.userId,
+    tenantId: invoice.tenantId || null,
+  });
+  await setStep(user, "SINV:SPECIAL_AMT", { pendingOrderId: invoice.id });
+  user.pendingOrderId = invoice.id;
+  await reply(
+    user,
+    chatId,
+    `💰 موجودی کیف پول اعتباری همکار: ${formatPrice(home.balance)}\n\nچه مبلغی از این اعتبار کسر شود؟\nعدد را به تومان بفرستید (برای بدون کسر، ۰ بفرستید).`,
+    adminBackMenu()
+  );
+}
+
+function parseAmountAllowZero(text) {
+  const map = {
+    "۰": "0",
+    "۱": "1",
+    "۲": "2",
+    "۳": "3",
+    "۴": "4",
+    "۵": "5",
+    "۶": "6",
+    "۷": "7",
+    "۸": "8",
+    "۹": "9",
+    "٠": "0",
+    "١": "1",
+    "٢": "2",
+    "٣": "3",
+    "٤": "4",
+    "٥": "5",
+    "٦": "6",
+    "٧": "7",
+    "٨": "8",
+    "٩": "9",
+  };
+  const normalized = String(text || "")
+    .replace(/[۰-۹٠-٩]/g, (d) => map[d] || d)
+    .replace(/[^\d]/g, "");
+  if (!normalized) return null;
+  const n = Number(normalized);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+async function confirmSpecialDeduct(user, chatId, text) {
+  const amount = parseAmountAllowZero(text);
+  if (amount === null) {
+    await reply(user, chatId, "یک عدد معتبر به تومان وارد کنید.", adminBackMenu());
+    return;
+  }
+  const invoice = await invoices.getInvoice(user.pendingOrderId);
+  if (!invoice || invoice.kind !== "SPECIAL") {
+    await reply(user, chatId, "این فاکتور پیدا نشد.", adminServiceInvoicesMenu());
+    return;
+  }
+  const creditLedger = require("../services/creditLedger");
+  const home = await creditLedger.getWalletHome({
+    userId: invoice.userId,
+    tenantId: invoice.tenantId || null,
+  });
+  if (amount > home.balance) {
+    await reply(
+      user,
+      chatId,
+      `مبلغ بیشتر از موجودی است.\nموجودی: ${formatPrice(home.balance)}`,
+      adminBackMenu()
+    );
+    return;
+  }
+  const approved = await invoices.approveSpecialInvoice(
+    invoice.id,
+    amount,
+    user.id
+  );
+  if (!approved) {
+    await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminBackMenu());
+    return;
+  }
+  try {
+    const owner = await prisma.user.findUnique({
+      where: { id: approved.userId },
+      select: { baleId: true },
+    });
+    if (owner?.baleId) {
+      await notifyShop(
+        owner.baleId,
+        `✅ درخواست خدمات ویژه تایید شد.\n🔖 ${approved.trackingCode}${
+          amount > 0 ? `\nمبلغ کسر شده از اعتبار: ${formatPrice(amount)}` : ""
+        }`,
+        approved.tenantId
+      );
+    }
+  } catch (err) {
+    console.error("SPECIAL INVOICE USER NOTIFY:", err.message);
+  }
+  await reply(
+    user,
+    chatId,
+    `✅ فاکتور ${approved.trackingCode} تایید شد.${
+      amount > 0 ? `\nکسر شد: ${formatPrice(amount)}` : ""
+    }`,
+    adminServiceInvoicesMenu()
+  );
+  await showInvoiceList(user, chatId, "p", 0);
+}
+
 async function approveServiceInvoice(user, chatId) {
+  const current = await invoices.getInvoice(user.pendingOrderId);
+  if (current?.kind === "SPECIAL") {
+    await askSpecialDeduct(user, chatId, current);
+    return;
+  }
   const invoice = await invoices.approveInvoice(user.pendingOrderId, user.id);
   if (!invoice) {
     await reply(user, chatId, "تایید فاکتور ممکن نشد.", adminBackMenu());
@@ -398,6 +517,10 @@ async function goBack(user, chatId) {
       await showInvoiceDetail(user, chatId, user.pendingOrderId);
       return true;
     }
+    if (step === "SINV:SPECIAL_AMT" && user.pendingOrderId) {
+      await showInvoiceDetail(user, chatId, user.pendingOrderId);
+      return true;
+    }
     return false;
   }
   if (!isServiceAdminStep(step)) return false;
@@ -409,7 +532,7 @@ async function goBack(user, chatId) {
     return true;
   }
 
-  if (step.startsWith("SVC:NEW")) {
+  if (step === "SVC:SPECIAL_TEXT" || step.startsWith("SVC:NEW")) {
     await showList(user, chatId);
     return true;
   }
@@ -472,10 +595,40 @@ async function handleText(user, chatId, text) {
     await rejectServiceInvoice(user, chatId, text);
     return true;
   }
+  if (
+    user.adminStep === "SINV:SPECIAL_AMT" &&
+    user.pendingOrderId &&
+    !Object.values(BTN).includes(text)
+  ) {
+    await confirmSpecialDeduct(user, chatId, text);
+    return true;
+  }
   if (warehouseOnly) return false;
   if (text === BTN.BACK_PRODUCT_LIST || text === BTN.BACK_MAIN) return false;
   if (text === BTN.SVC_NEW && isServiceAdminStep(user.adminStep)) {
     await startCreate(user, chatId);
+    return true;
+  }
+  if (text === BTN.SVC_SPECIAL_TEXT && isServiceAdminStep(user.adminStep)) {
+    const specialServices = require("../services/specialServices");
+    const current = await specialServices.getText();
+    await setStep(user, "SVC:SPECIAL_TEXT");
+    await reply(
+      user,
+      chatId,
+      `📝 متن فعلی خدمات ویژه:\n\n${current}\n\nمتن جدید را بفرستید:`,
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
+    return true;
+  }
+  if (
+    user.adminStep === "SVC:SPECIAL_TEXT" &&
+    !Object.values(BTN).includes(text)
+  ) {
+    const specialServices = require("../services/specialServices");
+    await specialServices.setText(text);
+    await reply(user, chatId, "✅ متن خدمات ویژه ذخیره شد.", adminServicesMenu());
+    await showList(user, chatId);
     return true;
   }
 
