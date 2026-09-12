@@ -10,7 +10,9 @@ const {
   PRODUCT_CATEGORIES,
   productCategoriesMenu,
   subMenuKb,
+  mainMenu,
 } = require("../keyboards/menus");
+const { buildCatalogPdf } = require("../services/catalogPdf");
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
 const { scoreText } = require("../utils/smartSearch");
 const { isMother } = require("../bot/context");
@@ -565,6 +567,54 @@ module.exports.backToProductList = async function backToProductList(user, chatId
     product.category.title,
     product.brand
   );
+};
+
+const CATALOG_INTRO =
+  "تمام محصولات موجود را یک‌جا می‌توانید ببینید.\n\nبرای سفارش سریع، به‌جای استفاده از دکمه‌های منوی محصولات، کد محصول را در قسمت جستجوی سریع وارد کنید و محصول را انتخاب کنید.";
+
+const CATALOG_CAPTION =
+  "به علت نوسانات شدید ارزی، قبل از سفارش از لیست قیمتی به‌روز استفاده کنید.";
+
+module.exports.showCatalogPdf = async function showCatalogPdf(user, chatId) {
+  await reply(user, chatId, CATALOG_INTRO, mainMenu(user));
+  try {
+    const { buffer } = await buildCatalogPdf(user);
+    if (!buffer) {
+      await reply(
+        user,
+        chatId,
+        "در حال حاضر محصول موجودی برای نمایش در فایل نیست.",
+        mainMenu(user),
+        { keepLast: true }
+      );
+      return;
+    }
+    const result = await bale.sendDocument(
+      chatId,
+      buffer,
+      CATALOG_CAPTION,
+      "paura-catalog.pdf"
+    );
+    if (!result?.ok) {
+      console.error("CATALOG PDF SEND:", result);
+      await reply(
+        user,
+        chatId,
+        "ارسال فایل لیست محصولات ممکن نشد. لطفاً دوباره تلاش کنید.",
+        mainMenu(user),
+        { keepLast: true }
+      );
+    }
+  } catch (err) {
+    console.error("CATALOG PDF:", err);
+    await reply(
+      user,
+      chatId,
+      "ساخت فایل لیست محصولات ممکن نشد. لطفاً دوباره تلاش کنید.",
+      mainMenu(user),
+      { keepLast: true }
+    );
+  }
 };
 
 module.exports.handleSearch = async function handleSearch(user, chatId, query) {

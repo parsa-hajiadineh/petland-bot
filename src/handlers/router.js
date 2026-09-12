@@ -64,6 +64,7 @@ module.exports = async function messageHandler(message, user) {
     isStartText(text) ||
     text === BTN.BACK_PRODUCTS ||
     text === BTN.PRODUCTS ||
+    text === BTN.CATALOG_PDF ||
     text === BTN.CART ||
     text === BTN.SEARCH ||
     text === BTN.HELP ||
@@ -224,6 +225,11 @@ module.exports = async function messageHandler(message, user) {
 
   if (text === BTN.BACK_PRODUCT_LIST) {
     await productsHandler.backToProductList(user, chatId);
+    return;
+  }
+
+  if (text === BTN.CATALOG_PDF) {
+    await productsHandler.showCatalogPdf(user, chatId);
     return;
   }
 

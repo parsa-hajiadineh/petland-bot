@@ -120,6 +120,7 @@ const PRODUCT_CATEGORIES = [
 
 const BTN = {
   PRODUCTS: "🛍 محصولات",
+  CATALOG_PDF: "📋 لیست جامع محصولات",
   CART: "🛒 سبد خرید",
   ORDERS: "📦 سفارشات من",
   SUPPORT: "🎫 پشتیبانی",
@@ -264,13 +265,15 @@ function mainMenu(user) {
     warehouseOnly || staffAdmin || user.role === "ADMIN";
 
   const rows = [
-    [{ text: BTN.PRODUCTS }, { text: showAdmin ? BTN.ADMIN_PANEL : BTN.SEARCH }],
+    [{ text: BTN.PRODUCTS }, { text: BTN.CATALOG_PDF }],
     [{ text: BTN.CART }, { text: BTN.ORDERS }],
     [{ text: BTN.SUPPORT }, { text: BTN.HELP }],
   ];
 
   if (showAdmin) {
-    rows.splice(1, 0, [{ text: BTN.SEARCH }, { text: BTN.COLLEAGUE }]);
+    rows.splice(1, 0, [{ text: BTN.SEARCH }, { text: BTN.ADMIN_PANEL }]);
+  } else {
+    rows.splice(1, 0, [{ text: BTN.SEARCH }]);
   }
 
   if (
@@ -290,7 +293,7 @@ function mainMenu(user) {
     (user.role === "COLLEAGUE" || user.role === "MANELI") && !staffAdmin;
 
   if (showAdmin) {
-    rows.push([{ text: BTN.RETAIL_MODE }]);
+    rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
   } else if (!wholesaleLocked) {
     rows.push([{ text: BTN.COLLEAGUE }]);
   }

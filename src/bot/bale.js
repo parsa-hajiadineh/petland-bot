@@ -102,21 +102,35 @@ async function deleteMessage(chatId, messageId) {
   });
 }
 
-async function sendDocument(chatId, document, caption) {
+async function sendDocument(
+  chatId,
+  document,
+  caption,
+  filename = "catalog.pdf",
+  token
+) {
   const FormData = require("form-data");
   const form = new FormData();
 
   form.append("chat_id", chatId);
-  form.append("document", document);
+  if (Buffer.isBuffer(document)) {
+    form.append("document", document, {
+      filename,
+      contentType: "application/pdf",
+    });
+  } else {
+    form.append("document", document);
+  }
 
   if (caption) {
     form.append("caption", caption);
   }
 
-  const response = await fetch(`${botApiUrl()}/sendDocument`, {
+  const response = await fetch(`${botApiUrl(token)}/sendDocument`, {
     method: "POST",
     body: form,
     headers: form.getHeaders(),
+    timeout: 60000,
   });
 
   const text = await response.text();
