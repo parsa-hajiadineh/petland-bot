@@ -38,16 +38,21 @@ function watermarkPath() {
 
 const COLOR = {
   title: "#1E3A8A",
-  muted: "#5B4B8A",
-  head: "#2563EB",
-  group: "#EDE9FE",
-  groupText: "#5B21B6",
-  row: "#F5F3FF",
-  ink: "#1F2937",
+  muted: "#7C3AED",
+  row: "#F0F9FF",
+  ink: "#0F172A",
   line: "#C4B5FD",
-  footerBg: "#EEF2FF",
   footer: "#3730A3",
+  white: "#FFFFFF",
 };
+
+function chromeGradient(doc, x1, y1, x2, y2) {
+  const grad = doc.linearGradient(x1, y1, x2, y2);
+  grad.stop(0, "#22D3EE");
+  grad.stop(0.45, "#3B82F6");
+  grad.stop(1, "#D946EF");
+  return grad;
+}
 
 const BRAND_TITLES = [
   { re: /royal\s*canin|رویال\s*کنین/, title: "محصولات رویال کنین" },
@@ -257,10 +262,37 @@ function buildPdf(products, user) {
       doc.y = prevY;
     }
 
+    function paintPageBg() {
+      const bg = doc.linearGradient(0, 0, doc.page.width, doc.page.height);
+      bg.stop(0, "#F8FBFF");
+      bg.stop(1, "#F4F0FF");
+      doc.save();
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(bg);
+      doc.restore();
+    }
+
+    function paintGlassBox(x, y, w, h) {
+      const fill = doc.linearGradient(x, y, x, y + h);
+      fill.stop(0, "#FFFFFF");
+      fill.stop(0.4, "#F0F9FF");
+      fill.stop(1, "#F5F3FF");
+      doc.save();
+      doc.roundedRect(x, y, w, h, 9).fill(fill);
+      doc.restore();
+      doc.save();
+      doc.fillOpacity(0.42);
+      doc.roundedRect(x + 2, y + 2, w - 4, Math.min(11, h * 0.32), 6).fill("#FFFFFF");
+      doc.restore();
+      doc.save();
+      doc.lineWidth(1.4);
+      doc.roundedRect(x, y, w, h, 9).stroke(chromeGradient(doc, x, y, x + w, y + h));
+      doc.restore();
+    }
+
     function paintWatermark() {
       if (!fs.existsSync(watermarkPath())) return;
       doc.save();
-      doc.opacity(0.1);
+      doc.opacity(0.08);
       const size = 280;
       paintImage(
         watermarkPath(),
@@ -276,18 +308,16 @@ function buildPdf(products, user) {
       const prevY = doc.y;
       const bottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      const y = doc.page.height - 36;
-      doc.save();
-      doc.rect(margin, y, tableW, 22).fill(COLOR.footerBg);
-      doc.restore();
+      const y = doc.page.height - 38;
+      paintGlassBox(margin, y, tableW, 24);
       doc.fontSize(9).fillColor(COLOR.footer);
-      paintText("@Pawora_bot", margin + 8, y + 5, {
-        width: tableW / 2 - 10,
+      paintText("@Pawora_bot", margin + 10, y + 6, {
+        width: tableW / 2 - 12,
         align: "left",
         lineBreak: false,
       });
-      paintText("@support_pawora", margin + tableW / 2 + 2, y + 5, {
-        width: tableW / 2 - 10,
+      paintText("@support_pawora", margin + tableW / 2 + 2, y + 6, {
+        width: tableW / 2 - 12,
         align: "right",
         lineBreak: false,
       });
@@ -297,6 +327,7 @@ function buildPdf(products, user) {
     }
 
     function paintHeader() {
+      paintPageBg();
       paintFooter();
       if (fs.existsSync(logoPath())) {
         paintImage(logoPath(), margin, 12, { width: 48, height: 48 });
@@ -313,16 +344,25 @@ function buildPdf(products, user) {
         40,
         titleW
       );
-      doc.y = 66;
+      doc.save();
+      doc.lineWidth(2);
+      doc
+        .moveTo(margin + 56, 62)
+        .lineTo(margin + tableW, 62)
+        .stroke(chromeGradient(doc, margin + 56, 62, margin + tableW, 62));
+      doc.restore();
+      doc.y = 70;
     }
 
     function paintTableHead() {
       const y = doc.y;
       const h = 22;
       doc.save();
-      doc.rect(margin, y, tableW, h).fill(COLOR.head);
+      doc.rect(margin, y, tableW, h).fill(
+        chromeGradient(doc, margin, y, margin + tableW, y)
+      );
       doc.restore();
-      doc.fontSize(10).fillColor("#ffffff");
+      doc.fontSize(10).fillColor(COLOR.white);
       drawText("نام محصول", xName, y, colName);
       drawText("کد", xCode, y, colCode, { align: "center" });
       drawText("قیمت", xPrice, y, colPrice, { align: "center" });
@@ -349,9 +389,11 @@ function buildPdf(products, user) {
       ensureSpace(minRowH * 2 + 14, false);
       const y = doc.y + 10;
       doc.save();
-      doc.rect(margin, y, tableW, 24).fill(COLOR.group);
+      doc.roundedRect(margin, y, tableW, 24, 8).fill(
+        chromeGradient(doc, margin, y, margin + tableW, y)
+      );
       doc.restore();
-      doc.fontSize(11).fillColor(COLOR.groupText);
+      doc.fontSize(11).fillColor(COLOR.white);
       drawText(group.title, margin, y, tableW);
       doc.y = y + 24;
       paintTableHead();
@@ -367,7 +409,7 @@ function buildPdf(products, user) {
         doc.save();
         doc
           .rect(margin, yRow, tableW, h)
-          .fill(rowIndex % 2 === 0 ? COLOR.row : "#ffffff");
+          .fill(rowIndex % 2 === 0 ? COLOR.row : COLOR.white);
         doc.restore();
         doc.save();
         doc.lineWidth(0.35).strokeColor(COLOR.line);
