@@ -13,7 +13,7 @@ const shopBlock = require("../services/shopBlock");
 const subscriptions = require("../services/tenantSubscriptions");
 const creditLedger = require("../services/creditLedger");
 const campaign = require("../services/goldenCampaign");
-const { scoreText } = require("../utils/smartSearch");
+const { scorePerson, phoneKeys } = require("../utils/smartSearch");
 
 const STEP_HUB = "MGR:HUB";
 const STEP_LIST = "MGR:LIST";
@@ -24,6 +24,7 @@ const PAGE_SIZE = 10;
 const ROLE_FA = {
   CUSTOMER: "مشتری",
   COLLEAGUE: "همکار",
+  MANELI: "مانلی",
   ADMIN: "ادمین",
 };
 
@@ -104,7 +105,18 @@ async function showHub(user, chatId) {
 }
 
 function personBlob(user) {
-  const parts = [user.fullName, user.phone, user.baleId, user.id];
+  const parts = [
+    user.fullName,
+    user.phone,
+    user.baleId,
+    user.id,
+    ROLE_FA[user.role] || user.role,
+  ];
+  if (user.role === "MANELI") parts.push("مانلی", "بازاریاب", "بازاریابان مانلی");
+  if (user.role === "COLLEAGUE") parts.push("همکار", "فروشگاه");
+  if (user.role === "CUSTOMER") parts.push("مشتری", "یوزر", "کاربر");
+  parts.push(...phoneKeys(user.phone), ...phoneKeys(user.baleId));
+
   const tenant = user.ownedTenant;
   if (tenant) {
     parts.push(
@@ -112,21 +124,46 @@ function personBlob(user) {
       tenant.ownerName,
       tenant.phone,
       tenant.nationalId,
-      tenant.pageName
+      tenant.pageName,
+      TYPE_FA[tenant.type] || tenant.type
     );
+    parts.push(...phoneKeys(tenant.phone), ...phoneKeys(tenant.nationalId));
+    if (tenant.bot) {
+      parts.push(tenant.bot.username, tenant.bot.baleBotId);
+      if (tenant.bot.username) parts.push(`@${tenant.bot.username}`);
+    }
     const settings = tenant.settings;
     if (settings) {
       parts.push(settings.shopName, settings.supportPhone, settings.shopAddress);
+      parts.push(...phoneKeys(settings.supportPhone));
     }
   }
   for (const item of user.customers || []) {
     parts.push(item.fullName, item.phone, item.shopName);
+    parts.push(...phoneKeys(item.phone));
   }
   for (const item of user.savedAddresses || []) {
-    parts.push(item.fullName, item.phone, item.address);
+    parts.push(
+      item.fullName,
+      item.phone,
+      item.address,
+      item.province,
+      item.city,
+      item.postalCode
+    );
+    parts.push(...phoneKeys(item.phone), ...phoneKeys(item.postalCode));
   }
   for (const item of user.orders || []) {
-    parts.push(item.fullName, item.phone);
+    parts.push(
+      item.fullName,
+      item.phone,
+      item.trackingCode,
+      item.province,
+      item.city,
+      item.address,
+      item.postalCode
+    );
+    parts.push(...phoneKeys(item.phone), ...phoneKeys(item.postalCode));
   }
   return parts.filter(Boolean).join(" ");
 }
@@ -143,10 +180,27 @@ async function searchPeople(query) {
         baleId: true,
         role: true,
         customers: { select: { fullName: true, phone: true, shopName: true } },
-        savedAddresses: { select: { fullName: true, phone: true, address: true } },
+        savedAddresses: {
+          select: {
+            fullName: true,
+            phone: true,
+            address: true,
+            province: true,
+            city: true,
+            postalCode: true,
+          },
+        },
         orders: {
-          select: { fullName: true, phone: true },
-          take: 20,
+          select: {
+            fullName: true,
+            phone: true,
+            trackingCode: true,
+            province: true,
+            city: true,
+            address: true,
+            postalCode: true,
+          },
+          take: 40,
           orderBy: { createdAt: "desc" },
         },
         ownedTenant: {
@@ -156,6 +210,8 @@ async function searchPeople(query) {
             phone: true,
             nationalId: true,
             pageName: true,
+            type: true,
+            bot: { select: { username: true, baleBotId: true } },
             settings: {
               select: { shopName: true, supportPhone: true, shopAddress: true },
             },
@@ -166,7 +222,7 @@ async function searchPeople(query) {
     return (rows || [])
       .map((row) => ({
         ...row,
-        _score: scoreText(personBlob(row), term),
+        _score: scorePerson(row, term, personBlob(row)),
       }))
       .filter((row) => row._score > 0)
       .sort((a, b) => b._score - a._score)

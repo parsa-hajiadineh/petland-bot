@@ -122,6 +122,81 @@ function scoreCatalogItem(row, query) {
   return score;
 }
 
+function digitKey(text) {
+  return foldDigits(text).replace(/\D/g, "");
+}
+
+function phoneKeys(text) {
+  const digits = digitKey(text);
+  if (!digits) return [];
+  const keys = new Set([digits]);
+  if (digits.startsWith("98") && digits.length > 10) keys.add(digits.slice(2));
+  if (digits.startsWith("0098") && digits.length > 12) keys.add(digits.slice(4));
+  if (digits.startsWith("0") && digits.length > 1) keys.add(digits.slice(1));
+  if (!digits.startsWith("0") && digits.length === 10) {
+    keys.add(`0${digits}`);
+    keys.add(`98${digits}`);
+  }
+  if (digits.startsWith("0") && digits.length === 11) keys.add(`98${digits.slice(1)}`);
+  return [...keys];
+}
+
+function phonesOverlap(query, haystack) {
+  const qKeys = phoneKeys(query);
+  const hKeys = phoneKeys(haystack);
+  if (!qKeys.length || !hKeys.length) return false;
+  for (const q of qKeys) {
+    for (const h of hKeys) {
+      if (q === h) return true;
+      if (q.length >= 7 && h.includes(q)) return true;
+      if (h.length >= 7 && q.includes(h)) return true;
+    }
+  }
+  return false;
+}
+
+function scorePerson(row, query, blob) {
+  let score = scoreText(blob, query);
+  const h = compact(blob);
+  const q = compact(query);
+  const qDigits = digitKey(query);
+  const tokens = searchTokens(query);
+
+  if (!score && tokens.length && h) {
+    const fuzzy = tokens.every(
+      (token) =>
+        h.includes(token) ||
+        (token.length >= 4 && h.includes(token.slice(0, -1)))
+    );
+    if (fuzzy) score = 40;
+  }
+
+  const bale = compact(row?.baleId || "");
+  if (bale && q) {
+    if (bale === q) return 200;
+    if (bale.startsWith(q) || (q.length >= 3 && bale.includes(q))) {
+      score = Math.max(score, 140);
+    }
+  }
+  if (qDigits && bale && bale.includes(qDigits)) score = Math.max(score, 140);
+
+  if (phonesOverlap(query, blob)) {
+    score = Math.max(score, qDigits.length >= 7 ? 160 : 100);
+  }
+
+  const nid = compact(row?.ownedTenant?.nationalId || "");
+  if (nid && q && (nid === q || nid.includes(q))) score = Math.max(score, 150);
+
+  const codes = (row?.orders || [])
+    .map((order) => compact(order.trackingCode || ""))
+    .filter(Boolean);
+  if (q && codes.some((code) => code === q || code.includes(q) || q.includes(code))) {
+    score = Math.max(score, 170);
+  }
+
+  return score;
+}
+
 module.exports = {
   foldDigits,
   normalizeFa,
@@ -132,4 +207,8 @@ module.exports = {
   buildAndLikes,
   scoreText,
   scoreCatalogItem,
+  digitKey,
+  phoneKeys,
+  phonesOverlap,
+  scorePerson,
 };
