@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const reshape = require("arabic-reshaper").convertArabic;
+const bidiFactory = require("bidi-js");
+const bidi = bidiFactory();
 const prisma = require("../database/prisma");
 const { getMotherTenantId } = prisma;
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
@@ -26,7 +28,11 @@ const FONT_PATH = path.join(
   __dirname,
   "../../assets/fonts/Vazirmatn-Regular.ttf"
 );
-const LOGO_PATH = path.join(__dirname, "../../assets/brand/pawora-logo.png");
+function logoPath() {
+  const clear = path.join(__dirname, "../../assets/brand/pawora-logo-clear.png");
+  const original = path.join(__dirname, "../../assets/brand/pawora-logo.png");
+  return fs.existsSync(clear) ? clear : original;
+}
 
 const COLOR = {
   title: "#1E3A8A",
@@ -64,9 +70,11 @@ const BRAND_TITLES = [
 function rtl(text) {
   const raw = String(text || "");
   if (!raw) return "";
-  if (/^[\x00-\x7F@._\-]+$/.test(raw)) return raw;
+  if (!/[\u0600-\u06FF]/.test(raw)) return raw;
   try {
-    return reshape(raw).split("").reverse().join("");
+    const reshaped = reshape(raw);
+    const levels = bidi.getEmbeddingLevels(reshaped, "rtl");
+    return bidi.getReorderedString(reshaped, levels);
   } catch (err) {
     return raw;
   }
@@ -150,7 +158,7 @@ function buildPdf(products, user) {
 
     const doc = new PDFDocument({
       size: "A4",
-      margin: 26,
+      margins: { top: 26, bottom: 48, left: 26, right: 26 },
       info: { Title: "لیست جامع محصولات Pawora" },
     });
     const chunks = [];
@@ -170,56 +178,100 @@ function buildPdf(products, user) {
     const xName = margin + colPrice + colCode;
     const xCode = margin + colPrice;
     const xPrice = margin;
-    const footerLimit = () => doc.page.height - 58;
+    const footerLimit = () => doc.page.maxY();
+
+    function wrapLogical(text, width) {
+      const words = String(text || "")
+        .split(/\s+/)
+        .filter(Boolean);
+      if (!words.length) return [""];
+      const lines = [];
+      let current = words[0];
+      for (let i = 1; i < words.length; i += 1) {
+        const trial = `${current} ${words[i]}`;
+        if (doc.widthOfString(rtl(trial)) > width) {
+          lines.push(current);
+          current = words[i];
+        } else {
+          current = trial;
+        }
+      }
+      lines.push(current);
+      return lines;
+    }
 
     function drawText(text, x, y, width, opts = {}) {
-      doc.text(rtl(text), x + 4, y + 6, {
-        width: width - 8,
-        align: opts.align || "right",
-        lineGap: 1,
-      });
+      const lines = wrapLogical(text, width - 8);
+      let yy = y + 6;
+      for (const line of lines) {
+        const prepared = rtl(line);
+        doc.text(prepared, x + 4, yy, {
+          width: width - 8,
+          align: opts.align || "right",
+          lineBreak: false,
+        });
+        yy += Math.max(12, Math.ceil(doc.heightOfString(prepared)) + 1);
+      }
     }
 
     function lineHeight(text, width) {
-      const h = doc.heightOfString(rtl(text), {
-        width: width - 8,
-        align: "right",
-        lineGap: 1,
-      });
-      return Math.max(minRowH, Math.ceil(h) + 12);
+      const lines = wrapLogical(text, width - 8);
+      let total = 12;
+      for (const line of lines) {
+        total += Math.max(12, Math.ceil(doc.heightOfString(rtl(line))) + 1);
+      }
+      return Math.max(minRowH, total);
+    }
+
+    function paintImage(src, x, y, opts) {
+      const prevX = doc.x;
+      const prevY = doc.y;
+      doc.image(src, x, y, opts);
+      doc.x = prevX;
+      doc.y = prevY;
     }
 
     function paintWatermark() {
-      if (!fs.existsSync(LOGO_PATH)) return;
+      if (!fs.existsSync(logoPath())) return;
       doc.save();
       doc.opacity(0.06);
-      const size = 360;
-      doc.image(LOGO_PATH, (doc.page.width - size) / 2, (doc.page.height - size) / 2, {
-        width: size,
-      });
+      const size = 280;
+      paintImage(
+        logoPath(),
+        (doc.page.width - size) / 2,
+        (doc.page.height - size) / 2,
+        { width: size }
+      );
       doc.restore();
     }
 
     function paintFooter() {
-      const y = doc.page.height - 50;
+      const prevX = doc.x;
+      const prevY = doc.y;
+      const bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      const y = doc.page.height - 36;
       doc.save();
-      doc.rect(margin, y, tableW, 36).fill(COLOR.footerBg);
+      doc.rect(margin, y, tableW, 22).fill(COLOR.footerBg);
       doc.restore();
-      doc.fontSize(8).fillColor(COLOR.footer);
-      doc.text("@Pawora_bot", margin + 8, y + 8, { width: 130, align: "left" });
-      drawText("ربات فروشگاهی بله", margin + 138, y + 2, tableW - 146);
-      doc.fontSize(8).fillColor(COLOR.footer);
-      doc.text("@support_pawora", margin + 8, y + 22, { width: 130, align: "left" });
-      drawText("پشتیبانی بله و واتساپ", margin + 138, y + 16, tableW - 146);
+      doc.fontSize(9).fillColor(COLOR.footer);
+      doc.text("@Pawora_bot", margin, y + 5, {
+        width: tableW,
+        align: "center",
+        lineBreak: false,
+      });
+      doc.page.margins.bottom = bottom;
+      doc.x = prevX;
+      doc.y = prevY;
     }
 
     function paintHeader() {
       paintWatermark();
       paintFooter();
-      if (fs.existsSync(LOGO_PATH)) {
-        doc.image(LOGO_PATH, margin, 14, { width: 44, height: 44 });
+      if (fs.existsSync(logoPath())) {
+        paintImage(logoPath(), margin, 12, { width: 48, height: 48 });
       }
-      const titleW = tableW - 56;
+      const titleW = tableW - 60;
       doc.fontSize(15).fillColor(COLOR.title);
       drawText("لیست جامع محصولات پائورا", margin, 18, titleW);
       doc.fontSize(9).fillColor(COLOR.muted);
@@ -303,11 +355,13 @@ function buildPdf(products, user) {
   });
 }
 
-async function buildCatalogPdf(user) {
-  const products = await loadAvailableProducts();
-  if (!products.length) return { buffer: null, count: 0 };
-  const buffer = await buildPdf(products, user);
-  return { buffer, count: products.length };
+async function buildCatalogPdf(user, products) {
+  const list = Array.isArray(products)
+    ? products
+    : await loadAvailableProducts();
+  if (!list.length) return { buffer: null, count: 0 };
+  const buffer = await buildPdf(list, user);
+  return { buffer, count: list.length };
 }
 
 module.exports = {
