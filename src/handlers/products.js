@@ -592,12 +592,8 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
           term
         ),
       }))
-      .filter((row) => row._score > 0)
-      .sort((a, b) => {
-        if (a.status === "AVAILABLE" && b.status !== "AVAILABLE") return -1;
-        if (a.status !== "AVAILABLE" && b.status === "AVAILABLE") return 1;
-        return b._score - a._score;
-      })
+      .filter((row) => row._score > 0 && row.status === "AVAILABLE")
+      .sort((a, b) => b._score - a._score)
       .slice(0, 30);
   } catch (err) {
     console.error("SEARCH PRODUCTS QUERY:", err);

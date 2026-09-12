@@ -1,6 +1,6 @@
 const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
-const { reply } = require("../bot/messenger");
+const { reply, notify } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
 const { isWarehouseOnly, canSwitchModes } = require("../services/user");
@@ -434,6 +434,29 @@ function keepsAdminRole(user) {
   return user.role === "ADMIN" || canSwitchModes(user);
 }
 
+async function notifyReferrerLostCommission(user) {
+  if (!user.referrerId) return;
+  try {
+    const referrer = await prisma.user.findUnique({
+      where: { id: user.referrerId },
+      select: { baleId: true, role: true },
+    });
+    if (!referrer?.baleId) return;
+    if (referrer.role === "COLLEAGUE" || referrer.role === "MANELI") return;
+    const name = (user.fullName || "").trim() || "یکی از معرفی‌شده‌های شما";
+    await notify(
+      referrer.baleId,
+      `📣 اطلاع بازاریابی
+
+گزینه کمیسیون ۵٪ فقط برای مصرف‌کننده خرد است.
+
+چون «${name}» وارد حالت همکار شده، از این به بعد بابت خریدهای او پورسانتی دریافت نمی‌کنید و این شخص در آمار معرفی‌ها و کیف پول بازاریابی شما دیده نمی‌شود.`
+    );
+  } catch (err) {
+    console.error("REFERRER COLLEAGUE NOTICE SKIP:", err.message);
+  }
+}
+
 async function rejectModeChange(user, chatId) {
   await reply(
     user,
@@ -667,7 +690,10 @@ PawOra | More Than Care`,
     if (keepRole) {
       setAdminRetailView(user.id, false);
       setAdminManeliView(user.id, false);
-    } else user.role = "COLLEAGUE";
+    } else {
+      user.role = "COLLEAGUE";
+      await notifyReferrerLostCommission(user);
+    }
 
     await require("../services/goldenCampaign")
       .startGoldenPeriod(user.id)

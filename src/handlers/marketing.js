@@ -14,7 +14,10 @@ module.exports.showMarketing = async function showMarketing(user, chatId) {
   const referralLink = buildReferralLink(user.baleId);
 
   const referralCount = await prisma.user.count({
-    where: { referrerId: user.id },
+    where: {
+      referrerId: user.id,
+      role: { notIn: ["COLLEAGUE", "MANELI"] },
+    },
   });
 
   const lines = [
@@ -27,8 +30,9 @@ module.exports.showMarketing = async function showMarketing(user, chatId) {
     `• لینک اختصاصی خود را با دوستانتان به اشتراک بگذارید`,
     `• هر شخصی که از طریق لینک شما وارد ربات شود،`,
     `  برای همیشه به عنوان معرفی‌شده شما ثبت می‌شود`,
-    `• به ازای هر خرید تایید‌شده معرفی‌شده‌های شما،`,
+    `• به ازای هر خرید خرد تایید‌شده معرفی‌شده‌های شما،`,
     `  ۵٪ مبلغ فاکتور به کیف پول شما واریز می‌شود`,
+    `• اگر معرفی‌شده همکار شود، دیگر از او پورسانت نمی‌گیرید`,
     `• موجودی کیف پول را از بخش 💰 کیف پول مشاهده کنید`,
     ``,
     `👥 تعداد معرفی‌های شما: ${referralCount} نفر`,

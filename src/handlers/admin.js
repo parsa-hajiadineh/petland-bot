@@ -1068,9 +1068,23 @@ async function approveOrder(user, chatId) {
       buildInvoiceText({ ...order, user: owner }, order.items)
     );
 
-    if (owner.referrerId && owner.role !== "MANELI") {
+    if (
+      owner.referrerId &&
+      owner.role !== "MANELI" &&
+      owner.role !== "COLLEAGUE"
+    ) {
       const commission = Math.floor(order.totalAmount * 0.05);
-      if (commission > 0) {
+      const referrer = commission
+        ? await prisma.user.findUnique({
+            where: { id: owner.referrerId },
+          })
+        : null;
+      if (
+        commission > 0 &&
+        referrer &&
+        referrer.role !== "COLLEAGUE" &&
+        referrer.role !== "MANELI"
+      ) {
         const referrerWallet = await getOrCreateWallet(owner.referrerId);
         const before = Number(referrerWallet?.balance || 0);
         await prisma.wallet.update({
@@ -1088,17 +1102,10 @@ async function approveOrder(user, chatId) {
           reason: "referral_commission_5pct",
           detail: { trackingCode: order.trackingCode },
         });
-
-        const referrer = await prisma.user.findUnique({
-          where: { id: owner.referrerId },
-        });
-
-        if (referrer) {
-          await notify(
-            referrer.baleId,
-            `🎉 پورسانت دریافت کردید!\n\n💰 مبلغ: ${commission.toLocaleString("fa-IR")} تومان\n\nاین پورسانت بابت خرید تایید‌شده یکی از معرفی‌شده‌های شما است.\nبرای مشاهده موجودی کیف پول از منوی اصلی وارد شوید.`
-          );
-        }
+        await notify(
+          referrer.baleId,
+          `🎉 پورسانت دریافت کردید!\n\n💰 مبلغ: ${commission.toLocaleString("fa-IR")} تومان\n\nاین پورسانت بابت خرید تایید‌شده یکی از معرفی‌شده‌های شما است.\nبرای مشاهده موجودی کیف پول از منوی اصلی وارد شوید.`
+        );
       }
     }
   }
