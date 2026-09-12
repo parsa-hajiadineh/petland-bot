@@ -22,6 +22,41 @@ const PROFILE_STEPS = [
   "COLLEAGUE_CONFIRM",
 ];
 
+const MANELI_STEPS = ["MANELI_NAME", "MANELI_PHONE"];
+
+const MANELI_WELCOME = `✅ پنل بازاریابان مانلی فعال شد.
+
+در این حالت محصولات را با قیمت همکاری می‌بینید و سفارش ثبت می‌کنید.
+فاکتورهای شما در پنل ادمین مادر، بخش بازاریابان مانلی مدیریت می‌شود.
+
+•توجه داشته باشید که ثبت سفارش به این شکل است که بعد از انتخاب محصولات مد نظر و صدور پیش فاکتور، کالاهای درخواستی شما با موجودی لحظه ای انبار چک می‌شود و در صورت تایید پیش فاکتور، به شما اطلاع داده می‌شود؛ لازم به ذکر است که پیش فاکتور های تایید شده تا ۳ ساعت قابلیت پرداخت داشته و اعتبار دارند.
+شما میتوانید از بخش سفارشات من، پرداخت پیش فاکتور های تایید شده خود را انجام دهید.
+پردازش پیش فاکتور ها در روز های کاری تا ساعت ۱۷ انجام می‌گیرد و پیش فاکتور های باقیمانده در روز بعد پردازش خواهند شد .
+
+PawOra | More Than Care`;
+
+function colleaguePath(user) {
+  const mode = user.tempProvince;
+  const path = [
+    "COLLEAGUE_NAME",
+    "COLLEAGUE_PHONE",
+    "COLLEAGUE_BRAND",
+    "COLLEAGUE_SHOP_TYPE",
+  ];
+  if (mode === "PHYSICAL") path.push("COLLEAGUE_ADDRESS");
+  else if (mode === "BOTH") path.push("COLLEAGUE_PAGE", "COLLEAGUE_ADDRESS");
+  else path.push("COLLEAGUE_PAGE");
+  path.push("COLLEAGUE_CONFIRM");
+  return path;
+}
+
+function withColleagueStep(user, step, body) {
+  const path = colleaguePath(user);
+  const index = path.indexOf(step);
+  const current = index >= 0 ? index + 1 : 1;
+  return `مرحله ${current} از ${path.length}\n\n${body}`;
+}
+
 function profileNavKb() {
   return kb([[{ text: BTN.BACK_QUESTION }], [{ text: BTN.BACK_MAIN }]]);
 }
@@ -98,19 +133,33 @@ async function askStep(user, chatId, step) {
     await reply(
       user,
       chatId,
-      "برای تکمیل حساب همکار این اطلاعات را وارد کنید.\n\n👤 نام و نام خانوادگی:",
+      withColleagueStep(
+        user,
+        step,
+        "برای تکمیل حساب همکار این اطلاعات پت‌شاپ را وارد کنید.\n\n👤 نام و نام خانوادگی:"
+      ),
       backMain()
     );
     return;
   }
 
   if (step === "COLLEAGUE_PHONE") {
-    await reply(user, chatId, "📞 شماره تماس:", profileNavKb());
+    await reply(
+      user,
+      chatId,
+      withColleagueStep(user, step, "📞 شماره تماس:"),
+      profileNavKb()
+    );
     return;
   }
 
   if (step === "COLLEAGUE_BRAND") {
-    await reply(user, chatId, "🏷 نام برند:", profileNavKb());
+    await reply(
+      user,
+      chatId,
+      withColleagueStep(user, step, "🏷 نام برند:"),
+      profileNavKb()
+    );
     return;
   }
 
@@ -118,7 +167,11 @@ async function askStep(user, chatId, step) {
     await reply(
       user,
       chatId,
-      "فروشگاه شما تا به امروز به چه شکلی فعالیت داشته است؟",
+      withColleagueStep(
+        user,
+        step,
+        "فروشگاه شما تا به امروز به چه شکلی فعالیت داشته است؟"
+      ),
       shopTypeMenu()
     );
     return;
@@ -128,7 +181,7 @@ async function askStep(user, chatId, step) {
     await reply(
       user,
       chatId,
-      "🌐 نام و مشخصات پیج آنلاین را ارسال کنید:",
+      withColleagueStep(user, step, "🌐 نام و مشخصات پیج آنلاین را ارسال کنید:"),
       profileNavKb()
     );
     return;
@@ -138,14 +191,19 @@ async function askStep(user, chatId, step) {
     await reply(
       user,
       chatId,
-      "📍 آدرس فروشگاه حضوری را ارسال کنید:",
+      withColleagueStep(user, step, "📍 آدرس فروشگاه حضوری را ارسال کنید:"),
       profileNavKb()
     );
     return;
   }
 
   if (step === "COLLEAGUE_CONFIRM") {
-    await reply(user, chatId, summaryText(user), confirmMenu());
+    await reply(
+      user,
+      chatId,
+      withColleagueStep(user, step, summaryText(user)),
+      confirmMenu()
+    );
   }
 }
 
@@ -209,21 +267,26 @@ ${snapshot}
   await prisma.user.update({
     where: { id: user.id },
     data: {
+      orderStep: null,
       tempDescription: null,
       tempAddress: null,
       tempProvince: null,
       tempCity: null,
     },
   });
+  user.orderStep = null;
 
   await reply(
     user,
     chatId,
     `✅ اطلاعات همکار ثبت شد.
 
-${snapshot}`
+${snapshot}
+
+از منوی اصلی می‌توانید خرید همکاری را شروع کنید.
+ساخت ربات فروشگاهی و خرید پکیج بعداً از همین منو در دسترس است.`,
+    mainMenu(user)
   );
-  await gateShopBotCreate(user, chatId, saved.tenant);
 }
 
 async function waitSetupApproval(user, chatId, invoice) {
@@ -466,6 +529,33 @@ async function rejectModeChange(user, chatId) {
   );
 }
 
+async function askManeliStep(user, chatId, step) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: step },
+  });
+  user.orderStep = step;
+  if (step === "MANELI_NAME") {
+    await reply(
+      user,
+      chatId,
+      "برای تکمیل حساب بازاریاب مانلی، اطلاعات هویتی خود را وارد کنید.\n\n👤 نام و نام خانوادگی را به صورت کامل بنویسید:",
+      backMain()
+    );
+    return;
+  }
+  await reply(user, chatId, "📞 شماره تماس:", profileNavKb());
+}
+
+async function finishManeliWelcome(user, chatId) {
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { orderStep: null },
+  });
+  user.orderStep = null;
+  await reply(user, chatId, MANELI_WELCOME, mainMenu(user));
+}
+
 async function showColleagueGate(user, chatId) {
   await prisma.user.update({
     where: { id: user.id },
@@ -592,6 +682,15 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     return true;
   }
 
+  if (text === BTN.BACK_QUESTION && MANELI_STEPS.includes(user.orderStep)) {
+    if (user.orderStep === "MANELI_PHONE") {
+      await askManeliStep(user, chatId, "MANELI_NAME");
+      return true;
+    }
+    await showColleagueGate(user, chatId);
+    return true;
+  }
+
   if (user.orderStep === "MANELI_CODE") {
     if (isWholesaleLocked(user)) {
       await prisma.user.update({
@@ -638,24 +737,46 @@ module.exports = async function colleagueHandler(user, chatId, text) {
     if (keepRole) {
       setAdminRetailView(user.id, false);
       setAdminManeliView(user.id, true);
-    } else user.role = "MANELI";
-    user.orderStep = null;
+      await finishManeliWelcome(user, chatId);
+      return true;
+    }
+    user.role = "MANELI";
+    await askManeliStep(user, chatId, "MANELI_NAME");
+    return true;
+  }
 
-    await reply(
-      user,
-      chatId,
-      `✅ پنل بازاریابان مانلی فعال شد.
+  if (user.orderStep === "MANELI_NAME") {
+    const name = text.trim();
+    if (!name) {
+      await reply(
+        user,
+        chatId,
+        "لطفاً نام و نام خانوادگی را به صورت کامل وارد کنید.",
+        backMain()
+      );
+      return true;
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { fullName: name },
+    });
+    user.fullName = name;
+    await askManeliStep(user, chatId, "MANELI_PHONE");
+    return true;
+  }
 
-در این حالت محصولات را با قیمت همکاری می‌بینید و سفارش ثبت می‌کنید.
-فاکتورهای شما در پنل ادمین مادر، بخش بازاریابان مانلی مدیریت می‌شود.
-
-•توجه داشته باشید که ثبت سفارش به این شکل است که بعد از انتخاب محصولات مد نظر و صدور پیش فاکتور، کالاهای درخواستی شما با موجودی لحظه ای انبار چک می‌شود و در صورت تایید پیش فاکتور، به شما اطلاع داده می‌شود؛ لازم به ذکر است که پیش فاکتور های تایید شده تا ۳ ساعت قابلیت پرداخت داشته و اعتبار دارند.
-شما میتوانید از بخش سفارشات من، پرداخت پیش فاکتور های تایید شده خود را انجام دهید.
-پردازش پیش فاکتور ها در روز های کاری تا ساعت ۱۷ انجام می‌گیرد و پیش فاکتور های باقیمانده در روز بعد پردازش خواهند شد .
-
-PawOra | More Than Care`,
-      mainMenu(user)
-    );
+  if (user.orderStep === "MANELI_PHONE") {
+    const phone = text.trim();
+    if (!phone) {
+      await reply(user, chatId, "لطفاً شماره تماس را وارد کنید.", profileNavKb());
+      return true;
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { phone },
+    });
+    user.phone = phone;
+    await finishManeliWelcome(user, chatId);
     return true;
   }
 
