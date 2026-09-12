@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
-const reshape = require("arabic-reshaper").convertArabic;
 const bidiFactory = require("bidi-js");
 const bidi = bidiFactory();
 const prisma = require("../database/prisma");
@@ -67,17 +66,46 @@ const BRAND_TITLES = [
   { re: /bravecto/, title: "محصولات براوکتو" },
 ];
 
-function rtl(text) {
-  const raw = String(text || "");
-  if (!raw) return "";
-  if (!/[\u0600-\u06FF]/.test(raw)) return raw;
-  try {
-    const reshaped = reshape(raw);
-    const levels = bidi.getEmbeddingLevels(reshaped, "rtl");
-    return bidi.getReorderedString(reshaped, levels);
-  } catch (err) {
-    return raw;
+function reorderRuns(runs) {
+  let max = 0;
+  for (const run of runs) if (run.level > max) max = run.level;
+  let minOdd = Infinity;
+  for (const run of runs) {
+    const odd = run.level | 1;
+    if (odd < minOdd) minOdd = odd;
   }
+  const arr = runs.slice();
+  for (let level = max; level >= minOdd; level -= 1) {
+    let i = 0;
+    while (i < arr.length) {
+      if (arr[i].level >= level) {
+        let j = i;
+        while (j + 1 < arr.length && arr[j + 1].level >= level) j += 1;
+        const flipped = arr.slice(i, j + 1).reverse();
+        arr.splice(i, j - i + 1, ...flipped);
+        i = j + 1;
+      } else {
+        i += 1;
+      }
+    }
+  }
+  return arr;
+}
+
+function visualRuns(text) {
+  const raw = String(text || "");
+  if (!raw) return [];
+  if (!/[\u0600-\u06FF]/.test(raw)) return [{ text: raw, level: 0 }];
+  const { levels } = bidi.getEmbeddingLevels(raw, "rtl");
+  const runs = [];
+  let start = 0;
+  for (let i = 1; i <= raw.length; i += 1) {
+    if (i === raw.length || levels[i] !== levels[start]) {
+      runs.push({ text: raw.slice(start, i), level: levels[start] });
+      start = i;
+    }
+  }
+  return reorderRuns(runs);
 }
 
 function brandKey(brand) {
@@ -189,7 +217,7 @@ function buildPdf(products, user) {
       let current = words[0];
       for (let i = 1; i < words.length; i += 1) {
         const trial = `${current} ${words[i]}`;
-        if (doc.widthOfString(rtl(trial)) > width) {
+        if (doc.widthOfString(trial) > width) {
           lines.push(current);
           current = words[i];
         } else {
@@ -200,17 +228,32 @@ function buildPdf(products, user) {
       return lines;
     }
 
+    function drawLine(text, x, y, width, align) {
+      const raw = String(text || "");
+      if (!/[\u0600-\u06FF]/.test(raw) || align === "center") {
+        doc.text(raw, x, y, { width, align, lineBreak: false });
+        return;
+      }
+      const runs = visualRuns(raw);
+      if (runs.length <= 1) {
+        doc.text(raw, x, y, { width, align, lineBreak: false });
+        return;
+      }
+      const widths = runs.map((run) => doc.widthOfString(run.text));
+      const total = widths.reduce((sum, w) => sum + w, 0);
+      let cursor = align === "right" ? x + Math.max(0, width - total) : x;
+      for (let i = 0; i < runs.length; i += 1) {
+        doc.text(runs[i].text, cursor, y, { lineBreak: false });
+        cursor += widths[i];
+      }
+    }
+
     function drawText(text, x, y, width, opts = {}) {
       const lines = wrapLogical(text, width - 8);
       let yy = y + 6;
       for (const line of lines) {
-        const prepared = rtl(line);
-        doc.text(prepared, x + 4, yy, {
-          width: width - 8,
-          align: opts.align || "right",
-          lineBreak: false,
-        });
-        yy += Math.max(12, Math.ceil(doc.heightOfString(prepared)) + 1);
+        drawLine(line, x + 4, yy, width - 8, opts.align || "right");
+        yy += Math.max(12, Math.ceil(doc.heightOfString(line)) + 1);
       }
     }
 
@@ -218,7 +261,7 @@ function buildPdf(products, user) {
       const lines = wrapLogical(text, width - 8);
       let total = 12;
       for (const line of lines) {
-        total += Math.max(12, Math.ceil(doc.heightOfString(rtl(line))) + 1);
+        total += Math.max(12, Math.ceil(doc.heightOfString(line)) + 1);
       }
       return Math.max(minRowH, total);
     }
