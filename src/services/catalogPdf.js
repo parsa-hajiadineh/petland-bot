@@ -31,6 +31,11 @@ function logoPath() {
   return fs.existsSync(clear) ? clear : original;
 }
 
+function watermarkPath() {
+  const mark = path.join(__dirname, "../../assets/brand/pawora-watermark.png");
+  return fs.existsSync(mark) ? mark : logoPath();
+}
+
 const COLOR = {
   title: "#1E3A8A",
   muted: "#5B4B8A",
@@ -253,12 +258,12 @@ function buildPdf(products, user) {
     }
 
     function paintWatermark() {
-      if (!fs.existsSync(logoPath())) return;
+      if (!fs.existsSync(watermarkPath())) return;
       doc.save();
       doc.opacity(0.06);
       const size = 280;
       paintImage(
-        logoPath(),
+        watermarkPath(),
         (doc.page.width - size) / 2,
         (doc.page.height - size) / 2,
         { width: size }
