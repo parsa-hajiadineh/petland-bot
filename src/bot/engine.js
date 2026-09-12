@@ -148,6 +148,16 @@ async function processUpdate(update, runtimeCtx) {
     }
 
     return withCtx(async () => {
+      if (msg.message_id) {
+        const del = await bale.deleteMessage(msg.chat.id, msg.message_id);
+        if (!del?.ok) {
+          console.log(
+            "DELETE USER MESSAGE SKIP:",
+            del?.description || "not allowed"
+          );
+        }
+      }
+
       if (msg.photo?.length) {
         await messageHandler.handlePhoto(msg, user);
         return;
