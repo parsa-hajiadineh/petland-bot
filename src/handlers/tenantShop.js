@@ -155,6 +155,14 @@ async function handleMessageInner(message, user) {
     return;
   }
 
+  if (
+    user.adminStep === "TS:O_REF" &&
+    user.pendingOrderId &&
+    !Object.values(BTN).includes(text)
+  ) {
+    if (await tenantOrder.handleShopRefText(user, chatId, text)) return;
+  }
+
   if (text === BTN.HELP) {
     await tenantAdmin.clearTenantAdminState(user);
     await showHelp(user, chatId);

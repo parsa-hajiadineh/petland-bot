@@ -690,8 +690,11 @@ async function handleAdminText(user, chatId, text) {
       }
       return true;
     }
-    if (user.adminStep === "TS:O_REJECT" || user.adminStep === "TS:O_SHIP") {
+    if (user.adminStep === "TS:O_REJECT" || user.adminStep === "TS:O_SHIP" || user.adminStep === "TS:O_REF") {
       const tenantOrder = require("./tenantOrder");
+      if (user.adminStep === "TS:O_REF") {
+        await tenantOrder.flushPendingShopRef(user);
+      }
       if (user.pendingOrderId) {
         await tenantOrder.showShopOrderDetail(user, chatId, user.pendingOrderId);
       } else {
@@ -1328,6 +1331,11 @@ async function handleAdminCallback(user, chatId, data) {
 }
 
 async function clearTenantAdminState(user) {
+  if (user.adminStep === "TS:O_REF" && user.pendingOrderId) {
+    await require("./tenantOrder").flushPendingShopRef(user).catch((err) => {
+      console.error("SHOP REF FLUSH SKIP:", err.message);
+    });
+  }
   const data = {};
   if (isTenantAdminStep(user.adminStep)) data.adminStep = null;
   if (

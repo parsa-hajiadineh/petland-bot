@@ -32,6 +32,15 @@ const {
 } = require("../utils/invoice");
 const { parseQty, isDigitsOnly } = require("../utils/digits");
 const { TENANT_STEP, PROMPT, sendEditList } = require("../utils/cartEdit");
+const {
+  normalizeRef,
+  setAdminRef,
+  attachAdminRef,
+  attachAdminRefs,
+  refLabelSuffix,
+  adminRefLine,
+  MAX_REF_LEN,
+} = require("../services/orderAdminRef");
 
 const QTY_STEP = "TCK:QTY";
 const RECEIPT_STEP = "TCK:RECEIPT";
@@ -818,13 +827,15 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
     return;
   }
 
+  orders = await attachAdminRefs(orders);
+
   if (!orders.length) {
     await reply(user, chatId, "📦 هنوز سفارشی در این فروشگاه ثبت نکرده‌اید.", await shopMenu(user));
     return;
   }
 
   const rows = orders.map((order) => {
-    const label = `🔖 ${order.trackingCode} | ${statusLabel(order.status)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
+    const label = `🔖 ${order.trackingCode}${refLabelSuffix(order)} | ${statusLabel(order.status)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
     return [{ text: label, callback_data: order.trackingCode }];
   });
 
@@ -859,14 +870,15 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   );
   if (!order || !String(order.trackingCode).startsWith("TS-")) return false;
 
+  const withRef = await attachAdminRef(order);
   const { shop, bank } = await paymentBank(ctx.tenantId);
 
-  if (order.status === "WAITING_PAYMENT") {
+  if (withRef.status === "WAITING_PAYMENT") {
     await prisma.user.update({
       where: { id: user.id },
-      data: { orderStep: RECEIPT_STEP, pendingOrderId: order.id },
+      data: { orderStep: RECEIPT_STEP, pendingOrderId: withRef.id },
     });
-    const invoice = buildInvoiceText(order, order.items, shop.name);
+    const invoice = buildInvoiceText(withRef, withRef.items, shop.name);
     await reply(
       user,
       chatId,
@@ -876,21 +888,23 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
     return true;
   }
 
-  let detail = `🔖 کد پیگیری: ${order.trackingCode}\n`;
-  detail += `📊 وضعیت: ${statusLabel(order.status)}\n`;
-  if (order.status === "REJECTED" && order.rejectReason) {
-    detail += `❌ دلیل رد: ${order.rejectReason}\n`;
+  let detail = `🔖 کد پیگیری: ${withRef.trackingCode}\n`;
+  const refLine = adminRefLine(withRef);
+  if (refLine) detail += `${refLine}\n`;
+  detail += `📊 وضعیت: ${statusLabel(withRef.status)}\n`;
+  if (withRef.status === "REJECTED" && withRef.rejectReason) {
+    detail += `❌ دلیل رد: ${withRef.rejectReason}\n`;
   }
   detail += `\n📦 اقلام سفارش:\n\n`;
-  for (const item of order.items) {
+  for (const item of withRef.items) {
     detail += `• ${item.product.title}\n`;
     detail += `  تعداد: ${item.quantity} | قیمت واحد: ${item.unitPrice.toLocaleString("fa-IR")} تومان\n`;
     detail += `  جمع: ${(item.unitPrice * item.quantity).toLocaleString("fa-IR")} تومان\n\n`;
   }
   detail += `━━━━━━━━━━━━━━━━━━\n`;
-  detail += `💰 جمع کل: ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
-  if (order.shipmentInfo) {
-    detail += `\n\n🚚 اطلاعات ارسال: ${order.shipmentInfo}`;
+  detail += `💰 جمع کل: ${withRef.totalAmount.toLocaleString("fa-IR")} تومان`;
+  if (withRef.shipmentInfo) {
+    detail += `\n\n🚚 اطلاعات ارسال: ${withRef.shipmentInfo}`;
   }
   await reply(user, chatId, detail, await shopMenu(user));
   return true;
@@ -1082,7 +1096,7 @@ module.exports.showShopOrderDetail = async function showShopOrderDetail(
   user.pendingOrderId = order.id;
 
   const { shop } = await paymentBank(ctx.tenantId);
-  const invoice = buildInvoiceText(order, order.items, shop.name);
+  const invoice = buildInvoiceText(await attachAdminRef(order), order.items, shop.name);
   let extra = "";
   if (order.receiptImage) extra += "\n\n📸 رسید پرداخت ارسال شده است.";
   if (order.rejectReason) extra += `\n❌ دلیل رد: ${order.rejectReason}`;
@@ -1090,9 +1104,78 @@ module.exports.showShopOrderDetail = async function showShopOrderDetail(
   await reply(user, chatId, `${invoice}${extra}`, ownerActions(order));
 };
 
+async function finishShopApprovedRef(user, chatId, refNo, { replyOwner = true } = {}) {
+  const ctx = getBotContext();
+  const orderId = user.pendingOrderId;
+  const order = await loadShopOrder(orderId, ctx.tenantId);
+  if (refNo && order) await setAdminRef(order.id, refNo);
+  if (order) {
+    const withRef = await attachAdminRef(order);
+    const refLine = adminRefLine(withRef);
+    await notifyCustomer(
+      order,
+      `✅ فاکتور شما تایید شد.${refLine ? `\n\n${refLine}` : ""}`
+    );
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: OPEN_LIST_STEP, pendingOrderId: orderId },
+  });
+  user.adminStep = OPEN_LIST_STEP;
+  user.pendingOrderId = orderId;
+  if (replyOwner && chatId) {
+    await reply(
+      user,
+      chatId,
+      refNo ? "✅ شماره مرجع ثبت شد." : "فاکتور تایید شد.",
+      adminApprovedActions()
+    );
+  }
+}
+
+async function flushPendingShopRef(user) {
+  if (user.adminStep !== "TS:O_REF" || !user.pendingOrderId) return false;
+  await finishShopApprovedRef(user, null, null, { replyOwner: false });
+  return true;
+}
+
+async function handleShopRefText(user, chatId, text) {
+  if (user.adminStep !== "TS:O_REF" || !user.pendingOrderId) return false;
+  const ref = normalizeRef(text);
+  if (!ref) {
+    const tooLong = String(text || "").trim().length > MAX_REF_LEN;
+    await reply(
+      user,
+      chatId,
+      tooLong
+        ? `شماره مرجع حداکثر ${MAX_REF_LEN} کاراکتر است.`
+        : "شماره مرجع را به‌صورت متن وارد کنید.",
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
+    return true;
+  }
+  await finishShopApprovedRef(user, chatId, ref);
+  return true;
+}
+
+module.exports.flushPendingShopRef = flushPendingShopRef;
+module.exports.handleShopRefText = handleShopRefText;
+
 module.exports.handleOwnerText = async function handleOwnerText(user, chatId, text) {
   const ctx = getBotContext();
   if (!(await tenantAdmin.isShopOwner(user, ctx.tenantId))) return false;
+
+  if (user.adminStep === "TS:O_REF" && user.pendingOrderId) {
+    if (Object.values(BTN).includes(text)) {
+      await flushPendingShopRef(user);
+      if (text === BTN.APPROVE || text === BTN.REJECT) {
+        await reply(user, chatId, "فاکتور تایید شد.", adminApprovedActions());
+        return true;
+      }
+    } else {
+      return handleShopRefText(user, chatId, text);
+    }
+  }
 
   if (text === BTN.SHOP_ORDERS) {
     await module.exports.showShopOrders(user, chatId);
@@ -1165,8 +1248,18 @@ module.exports.handleOwnerText = async function handleOwnerText(user, chatId, te
         await reply(user, chatId, "این سفارش در این فروشگاه پیدا نشد.", tenantAdminMenu());
         return true;
       }
-      await notifyCustomer(order, "✅ فاکتور شما تایید شد.");
-      await reply(user, chatId, "فاکتور تایید شد.", adminApprovedActions());
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { adminStep: "TS:O_REF", pendingOrderId: order.id },
+      });
+      user.adminStep = "TS:O_REF";
+      user.pendingOrderId = order.id;
+      await reply(
+        user,
+        chatId,
+        "فاکتور تایید شد.\n\nشماره مرجع این فاکتور را وارد کنید:",
+        kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+      );
     } catch (err) {
       console.error("SHOP APPROVE:", err);
       await reply(user, chatId, "تایید فاکتور ممکن نشد.", tenantAdminMenu());

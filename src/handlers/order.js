@@ -26,6 +26,13 @@ const {
   buildPaymentInfo,
   buildShippingInfo,
 } = require("../utils/invoice");
+const {
+  attachAdminRef,
+  attachAdminRefs,
+  refLabelSuffix,
+  adminRefLine,
+  setAdminRef,
+} = require("../services/orderAdminRef");
 
 const CHECKOUT_NOTE_TEXT =
   "📝 توضیحات سفارش خود را بنویسید.\nبر فرض مثال طعم محصول یا سایز مد نظر خود را وارد کنید.\n\nاین مرحله اختیاری است؛ با دکمه «رد کردن» می‌توانید سفارش یا پیش‌فاکتور را ثبت کنید.";
@@ -633,13 +640,15 @@ module.exports.showMyOrders = async function showMyOrders(user, chatId) {
     return;
   }
 
+  orders = await attachAdminRefs(orders);
+
   if (!orders.length) {
     await reply(user, chatId, "📦 هنوز سفارشی ثبت نکرده‌اید.", backMain());
     return;
   }
 
   const rows = orders.map((order) => {
-    const label = `🔖 ${order.trackingCode} | ${orderStatusLabel(order)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
+    const label = `🔖 ${order.trackingCode}${refLabelSuffix(order)} | ${orderStatusLabel(order)} | ${order.totalAmount.toLocaleString("fa-IR")} تومان`;
     return [{ text: label, callback_data: order.trackingCode }];
   });
 
@@ -667,7 +676,7 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   chatId,
   code
 ) {
-  const order = await prisma.order.findFirst({
+  let order = await prisma.order.findFirst({
     where: {
       trackingCode: code.trim(),
       userId: user.id,
@@ -676,6 +685,8 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   });
 
   if (!order || !String(order.trackingCode).startsWith("PL-")) return false;
+
+  order = await attachAdminRef(order);
 
   if (order.status === "WAITING_PAYMENT") {
     if (isProformaPayExpired(order)) {
@@ -733,6 +744,8 @@ module.exports.showOrderByTracking = async function showOrderByTracking(
   });
 
   let detail = `🔖 کد پیگیری: ${order.trackingCode}\n`;
+  const refLine = adminRefLine(order);
+  if (refLine) detail += `${refLine}\n`;
   detail += `📊 وضعیت: ${orderStatusLabel(order)}\n`;
 
   if (order.status === "REJECTED" && order.rejectReason) {
@@ -863,22 +876,39 @@ module.exports.handleProformaCardText = async function handleProformaCardText(
   });
   await prisma.user.update({
     where: { id: user.id },
-    data: { adminStep: "ADMIN_PF_OK", pendingOrderId: null },
+    data: { adminStep: "PROFORMA_REF", pendingOrderId: order.id },
   });
-  user.adminStep = "ADMIN_PF_OK";
-  user.pendingOrderId = null;
+  user.adminStep = "PROFORMA_REF";
+  user.pendingOrderId = order.id;
 
+  await reply(
+    user,
+    chatId,
+    "✅ پیش‌فاکتور تایید شد.\n\nشماره مرجع این پیش‌فاکتور را وارد کنید:",
+    adminBackMenu()
+  );
+  return true;
+};
+
+async function notifyProformaApproved(orderId, refNo) {
+  if (refNo) await setAdminRef(orderId, refNo);
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+  if (!order || !String(order.trackingCode).startsWith("PL-")) return;
+  const withRef = await attachAdminRef(order);
+  const refLine = adminRefLine(withRef);
   await notifyWholesaleBuyer(
     order,
-    `✅ پیش‌فاکتور ${order.trackingCode} تایید شد.
+    `✅ پیش‌فاکتور ${order.trackingCode} تایید شد.${refLine ? `\n\n${refLine}` : ""}
 
 از بخش «📦 سفارشات من» وارد همین پیش‌فاکتور شوید و پرداخت را نهایی کنید.
 پیش‌فاکتورهای تایید شده تا ۳ ساعت اعتبار دارند.`
   );
+}
 
-  await require("./admin").showProformaList(user, chatId, "ok");
-  return true;
-};
+module.exports.notifyProformaApproved = notifyProformaApproved;
 
 module.exports.handleProformaRejectText = async function handleProformaRejectText(
   user,

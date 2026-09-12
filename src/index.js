@@ -46,6 +46,7 @@ app.listen(PORT, async () => {
     await require("./services/goldenCampaign").ensureGoldenCampaign();
     await require("./handlers/tenantSupport").ensureTicketTenantColumn();
     await require("./services/user").ensureManeliRole();
+    await require("./services/orderAdminRef").ensureOrderAdminRef();
   } catch (err) {
     console.error("SERVICE PACKAGES SKIP:", err.message);
   }

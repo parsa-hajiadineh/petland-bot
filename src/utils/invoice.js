@@ -22,6 +22,7 @@ function buildInvoiceText(order, items, shopName = SHOP_NAME) {
     title,
     `━━━━━━━━━━━━━━━━━━`,
     `🔖 کد پیگیری: ${order.trackingCode}`,
+    ...(order?.adminRefNo ? [`🏷️ شماره مرجع: ${order.adminRefNo}`] : []),
     `📊 وضعیت: ${orderStatusLabel(order)}`,
     `👤 ${order.fullName}`,
     `📱 ${order.phone}`,

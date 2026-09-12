@@ -21,7 +21,8 @@ const {
 const { buildInvoiceText } = require("../utils/invoice");
 const { statusLabel, isWholesaleProformaHold, readWholesaleKind, wholesaleKindLabel } = require("../utils/order");
 const { isWarehouseOnly } = require("../services/user");
-const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback } = require("./order");
+const { notifyOrderStatus, handleProformaCardText, handleProformaRejectText, handleProformaCallback, notifyProformaApproved } = require("./order");
+const { normalizeRef, attachAdminRef, MAX_REF_LEN, setAdminRef } = require("../services/orderAdminRef");
 const { getOrCreateWallet } = require("./wallet");
 const adminServices = require("./adminServices");
 const adminCreditSettings = require("./adminCreditSettings");
@@ -270,8 +271,115 @@ async function replayInvoiceList(user, chatId, step) {
   await showInvoicesMenu(user, chatId);
 }
 
+function isAdminRefAskStep(step) {
+  return step === "ORDER_REF" || step === "PROFORMA_REF";
+}
+
+async function sendApprovedInvoiceToBuyer(orderId, refNo) {
+  if (refNo) await setAdminRef(orderId, refNo);
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: ORDER_WITH_ITEMS_SELECT,
+  });
+  if (!order || !String(order.trackingCode).startsWith("PL-")) return;
+  const withRef = await attachAdminRef(order);
+  const owner = await prisma.user.findUnique({
+    where: { id: order.userId },
+  });
+  if (!owner) return;
+  await partnerNotify.notifyOrderBuyer(
+    { ...withRef, user: owner },
+    buildInvoiceText({ ...withRef, user: owner }, withRef.items)
+  );
+}
+
+async function flushPendingAdminRef(user) {
+  const step = user.adminStep;
+  const orderId = user.pendingOrderId;
+  if (!orderId || !isAdminRefAskStep(step)) return false;
+
+  if (step === "ORDER_REF") {
+    await sendApprovedInvoiceToBuyer(orderId, null);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_APPROVED", pendingOrderId: orderId },
+    });
+    user.adminStep = "ADMIN_APPROVED";
+    user.pendingOrderId = orderId;
+    return true;
+  }
+
+  await notifyProformaApproved(orderId, null);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: "ADMIN_PF_OK", pendingOrderId: null },
+  });
+  user.adminStep = "ADMIN_PF_OK";
+  user.pendingOrderId = null;
+  return true;
+}
+
+async function completeAdminRefFromText(user, chatId, text) {
+  const ref = normalizeRef(text);
+  if (!ref) {
+    const tooLong = String(text || "").trim().length > MAX_REF_LEN;
+    await reply(
+      user,
+      chatId,
+      tooLong
+        ? `شماره مرجع حداکثر ${MAX_REF_LEN} کاراکتر است.`
+        : "شماره مرجع را به‌صورت متن وارد کنید.",
+      adminBackMenu()
+    );
+    return true;
+  }
+
+  const orderId = user.pendingOrderId;
+  if (user.adminStep === "ORDER_REF") {
+    await sendApprovedInvoiceToBuyer(orderId, ref);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_APPROVED", pendingOrderId: orderId },
+    });
+    user.adminStep = "ADMIN_APPROVED";
+    user.pendingOrderId = orderId;
+    await reply(user, chatId, "✅ شماره مرجع ثبت شد.", adminApprovedActions());
+    return true;
+  }
+
+  if (user.adminStep === "PROFORMA_REF") {
+    await notifyProformaApproved(orderId, ref);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { adminStep: "ADMIN_PF_OK", pendingOrderId: null },
+    });
+    user.adminStep = "ADMIN_PF_OK";
+    user.pendingOrderId = null;
+    await reply(user, chatId, "✅ شماره مرجع ثبت شد.", adminProformaMenu());
+    await showProformaList(user, chatId, "ok");
+    return true;
+  }
+
+  return true;
+}
+
 async function goAdminBack(user, chatId) {
   const step = user.adminStep || "";
+
+  if (isAdminRefAskStep(step) && user.pendingOrderId) {
+    await flushPendingAdminRef(user);
+    if (user.adminStep === "ADMIN_APPROVED") {
+      const order = await prisma.order.findUnique({
+        where: { id: user.pendingOrderId },
+        select: ORDER_WITH_ITEMS_SELECT,
+      });
+      if (order) await showAdminOrderDetail(user, chatId, order);
+      else await replayInvoiceList(user, chatId, "ADMIN_APPROVED");
+      return true;
+    }
+    await showProformaList(user, chatId, "ok");
+    return true;
+  }
 
   if (step === "PROFORMA_CARD" || step === "PROFORMA_REJECT") {
     await showProformaHub(user, chatId);
@@ -510,6 +618,25 @@ async function showOrdersInline(user, chatId, where, title, morePrefix = null, o
 }
 
 module.exports.handleAdmin = async function handleAdmin(user, chatId, text) {
+  if (isAdminRefAskStep(user.adminStep) && user.pendingOrderId) {
+    if (Object.values(BTN).includes(text)) {
+      const wasOrderRef = user.adminStep === "ORDER_REF";
+      await flushPendingAdminRef(user);
+      if (text === BTN.APPROVE || text === BTN.REJECT) {
+        await reply(
+          user,
+          chatId,
+          wasOrderRef ? "✅ فاکتور تایید شد." : "✅ پیش‌فاکتور تایید شد.",
+          wasOrderRef ? adminApprovedActions() : adminProformaMenu()
+        );
+        if (!wasOrderRef) await showProformaList(user, chatId, "ok");
+        return true;
+      }
+    } else {
+      return completeAdminRefFromText(user, chatId, text);
+    }
+  }
+
   if (text === BTN.ADMIN_PANEL) {
     await module.exports.showAdminPanel(user, chatId);
     return true;
@@ -975,7 +1102,7 @@ async function showAdminOrderDetail(user, chatId, order) {
     data: { pendingOrderId: order.id },
   });
 
-  const withBuyer = await attachBuyer(order);
+  const withBuyer = await attachAdminRef(await attachBuyer(order));
   const invoice = buildInvoiceText(withBuyer, withBuyer.items);
   let keyboard = adminBackMenu();
 
@@ -1007,7 +1134,11 @@ async function approveOrder(user, chatId) {
   let order;
   try {
     const moved = await prisma.order.updateMany({
-      where: { id: orderId, status: "WAITING_APPROVAL" },
+      where: {
+        id: orderId,
+        status: "WAITING_APPROVAL",
+        trackingCode: { startsWith: "PL-" },
+      },
       data: { status: "PACKAGING" },
     });
     if (moved.count !== 1) {
@@ -1063,11 +1194,6 @@ async function approveOrder(user, chatId) {
   }));
 
   if (owner) {
-    await partnerNotify.notifyOrderBuyer(
-      { ...order, user: owner },
-      buildInvoiceText({ ...order, user: owner }, order.items)
-    );
-
     if (
       owner.referrerId &&
       owner.referrerId !== owner.id &&
@@ -1112,7 +1238,19 @@ async function approveOrder(user, chatId) {
     }
   }
 
-  await reply(user, chatId, "✅ فاکتور تایید شد.", adminApprovedActions());
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { adminStep: "ORDER_REF", pendingOrderId: order.id },
+  });
+  user.adminStep = "ORDER_REF";
+  user.pendingOrderId = order.id;
+
+  await reply(
+    user,
+    chatId,
+    "✅ فاکتور تایید شد.\n\nشماره مرجع این فاکتور را وارد کنید:",
+    adminBackMenu()
+  );
 }
 
 module.exports.viewOrderById = async function viewOrderById(user, chatId, orderId) {
@@ -1133,6 +1271,7 @@ module.exports.showRejectedOrders = async function showRejectedOrders(user, chat
 
 module.exports.showProformaList = showProformaList;
 module.exports.showProformaHub = showProformaHub;
+module.exports.flushPendingAdminRef = flushPendingAdminRef;
 
 module.exports.showShippedOrders = async function showShippedOrders(user, chatId, offset) {
   await showOrdersInline(user, chatId, { status: "SHIPPED" }, "🚚 فاکتورهای ارسال شده", "shipd_more", offset, "ADMIN_SHIPPED");

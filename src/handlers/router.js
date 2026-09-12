@@ -94,6 +94,14 @@ module.exports = async function messageHandler(message, user) {
 
   if (text === BTN.BACK_MAIN || isStartText(text)) {
     try {
+      if (
+        (user.adminStep === "ORDER_REF" || user.adminStep === "PROFORMA_REF") &&
+        user.pendingOrderId
+      ) {
+        await adminHandler.flushPendingAdminRef(user).catch((err) => {
+          console.error("ADMIN REF FLUSH SKIP:", err.message);
+        });
+      }
       await prisma.user.update({
         where: { id: user.id },
         data: {
