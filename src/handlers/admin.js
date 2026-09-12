@@ -282,6 +282,7 @@ async function sendApprovedInvoiceToBuyer(orderId, refNo) {
     select: ORDER_WITH_ITEMS_SELECT,
   });
   if (!order || !String(order.trackingCode).startsWith("PL-")) return;
+  if (order.status === "REJECTED") return;
   const withRef = await attachAdminRef(order);
   const owner = await prisma.user.findUnique({
     where: { id: order.userId },

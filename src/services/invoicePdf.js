@@ -23,17 +23,11 @@ function watermarkPath() {
 
 const COLOR = {
   title: "#1E3A8A",
-  muted: "#5B4B8A",
-  head: "#2563EB",
-  group: "#EDE9FE",
-  groupText: "#5B21B6",
-  row: "#F5F3FF",
-  ink: "#1F2937",
-  line: "#C4B5FD",
-  footerBg: "#EEF2FF",
+  muted: "#7C3AED",
+  ink: "#0F172A",
   footer: "#3730A3",
-  paidBg: "#DCFCE7",
-  paid: "#166534",
+  paid: "#047857",
+  white: "#FFFFFF",
 };
 
 function hasPersian(text) {
@@ -54,6 +48,14 @@ function plainLabel(text) {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function chromeGradient(doc, x1, y1, x2, y2) {
+  const grad = doc.linearGradient(x1, y1, x2, y2);
+  grad.stop(0, "#22D3EE");
+  grad.stop(0.45, "#3B82F6");
+  grad.stop(1, "#D946EF");
+  return grad;
 }
 
 function buildInvoicePdf(order, items) {
@@ -79,7 +81,9 @@ function buildInvoicePdf(order, items) {
     doc.font("vazir");
 
     const margin = 26;
+    const gap = 8;
     const tableW = doc.page.width - margin * 2;
+    const halfW = (tableW - gap) / 2;
     const colTotal = 88;
     const colUnit = 88;
     const colQty = 44;
@@ -168,10 +172,39 @@ function buildInvoicePdf(order, items) {
       doc.y = prevY;
     }
 
+    function paintPageBg() {
+      const bg = doc.linearGradient(0, 0, doc.page.width, doc.page.height);
+      bg.stop(0, "#F8FBFF");
+      bg.stop(1, "#F4F0FF");
+      doc.save();
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(bg);
+      doc.restore();
+    }
+
+    function paintGlassBox(x, y, w, h, opts = {}) {
+      const fill = doc.linearGradient(x, y, x, y + h);
+      fill.stop(0, opts.fillTop || "#FFFFFF");
+      fill.stop(0.4, opts.fillMid || "#F0F9FF");
+      fill.stop(1, opts.fillBottom || "#F5F3FF");
+      doc.save();
+      doc.roundedRect(x, y, w, h, 9).fill(fill);
+      doc.restore();
+      doc.save();
+      doc.fillOpacity(0.42);
+      doc.roundedRect(x + 2, y + 2, w - 4, Math.min(11, h * 0.32), 6).fill("#FFFFFF");
+      doc.restore();
+      doc.save();
+      doc.lineWidth(1.4);
+      doc
+        .roundedRect(x, y, w, h, 9)
+        .stroke(chromeGradient(doc, x, y, x + w, y + h));
+      doc.restore();
+    }
+
     function paintWatermark() {
       if (!fs.existsSync(watermarkPath())) return;
       doc.save();
-      doc.opacity(0.1);
+      doc.opacity(0.08);
       const size = 280;
       paintImage(
         watermarkPath(),
@@ -187,18 +220,20 @@ function buildInvoicePdf(order, items) {
       const prevY = doc.y;
       const bottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      const y = doc.page.height - 36;
-      doc.save();
-      doc.rect(margin, y, tableW, 22).fill(COLOR.footerBg);
-      doc.restore();
+      const y = doc.page.height - 38;
+      paintGlassBox(margin, y, tableW, 24, {
+        fillTop: "#EEF2FF",
+        fillMid: "#F5F3FF",
+        fillBottom: "#EDE9FE",
+      });
       doc.fontSize(9).fillColor(COLOR.footer);
-      paintText("@Pawora_bot", margin + 8, y + 5, {
-        width: tableW / 2 - 10,
+      paintText("@Pawora_bot", margin + 10, y + 6, {
+        width: tableW / 2 - 12,
         align: "left",
         lineBreak: false,
       });
-      paintText("@support_pawora", margin + tableW / 2 + 2, y + 5, {
-        width: tableW / 2 - 10,
+      paintText("@support_pawora", margin + tableW / 2 + 2, y + 6, {
+        width: tableW / 2 - 12,
         align: "right",
         lineBreak: false,
       });
@@ -208,63 +243,103 @@ function buildInvoicePdf(order, items) {
     }
 
     function paintHeader() {
+      paintPageBg();
       paintFooter();
       if (fs.existsSync(logoPath())) {
-        paintImage(logoPath(), margin, 12, { width: 48, height: 48 });
+        paintImage(logoPath(), margin, 10, { width: 52, height: 52 });
       }
-      const titleW = tableW - 60;
-      doc.fontSize(16).fillColor(COLOR.title);
-      drawText("فاکتور فروش پائورا", margin, 16, titleW);
+      const titleW = tableW - 64;
+      doc.fontSize(17).fillColor(COLOR.title);
+      drawText("فاکتور فروش پائورا", margin, 12, titleW);
       doc.fontSize(9).fillColor(COLOR.muted);
       drawText(
         order?.trackingCode ? `کد پیگیری ${order.trackingCode}` : "فاکتور فروش",
         margin,
-        40,
+        36,
         titleW
       );
-      doc.y = 70;
-    }
-
-    function paintBand(text, fill, color, h = 24) {
-      const y = doc.y;
       doc.save();
-      doc.rect(margin, y, tableW, h).fill(fill);
+      doc.lineWidth(2);
+      doc
+        .moveTo(margin + 60, 62)
+        .lineTo(margin + tableW, 62)
+        .stroke(chromeGradient(doc, margin + 60, 62, margin + tableW, 62));
       doc.restore();
-      doc.fontSize(11).fillColor(color);
-      drawText(text, margin, y, tableW);
-      doc.y = y + h;
+      doc.y = 72;
     }
 
-    function paintInfoRow(label, value) {
-      if (!value && value !== 0) return;
-      const text = `${label}: ${value}`;
+    function paintSection(title) {
+      ensureSpace(36, false);
+      const y = doc.y + 8;
+      doc.save();
+      doc.roundedRect(margin, y, tableW, 26, 9).fill(
+        chromeGradient(doc, margin, y, margin + tableW, y)
+      );
+      doc.restore();
+      doc.fontSize(11).fillColor(COLOR.white);
+      drawText(title, margin, y + 1, tableW);
+      doc.y = y + 32;
+    }
+
+    function fieldHeight(value, width) {
       doc.fontSize(10);
-      const h = lineHeight(text, tableW);
+      return Math.max(44, 22 + lineHeight(String(value || "—"), width - 16));
+    }
+
+    function paintField(x, y, w, h, label, value) {
+      paintGlassBox(x, y, w, h);
+      doc.fontSize(8).fillColor(COLOR.muted);
+      drawText(label, x + 6, y + 2, w - 12);
+      doc.fontSize(10).fillColor(COLOR.ink);
+      drawText(value || "—", x + 6, y + 16, w - 12);
+    }
+
+    function paintPair(rightField, leftField) {
+      const hasRight = Boolean(rightField && (rightField.value || rightField.value === 0));
+      const hasLeft = Boolean(leftField && (leftField.value || leftField.value === 0));
+      if (!hasRight && !hasLeft) return;
+      if (hasRight && !hasLeft) {
+        paintFull(rightField.label, rightField.value);
+        return;
+      }
+      if (!hasRight && hasLeft) {
+        paintFull(leftField.label, leftField.value);
+        return;
+      }
+      const h = Math.max(
+        fieldHeight(rightField.value, halfW),
+        fieldHeight(leftField.value, halfW)
+      );
+      ensureSpace(h + 6, false);
       const y = doc.y;
-      doc.save();
-      doc.rect(margin, y, tableW, h).fill("#ffffff");
-      doc.restore();
-      doc.save();
-      doc.lineWidth(0.3).strokeColor(COLOR.line);
-      doc.rect(margin, y, tableW, h).stroke();
-      doc.restore();
-      doc.fillColor(COLOR.ink);
-      drawText(text, margin, y, tableW);
-      doc.y = y + h;
+      paintField(margin + halfW + gap, y, halfW, h, rightField.label, rightField.value);
+      paintField(margin, y, halfW, h, leftField.label, leftField.value);
+      doc.y = y + h + 6;
+    }
+
+    function paintFull(label, value) {
+      if (!value && value !== 0) return;
+      const h = fieldHeight(value, tableW);
+      ensureSpace(h + 6, false);
+      const y = doc.y;
+      paintField(margin, y, tableW, h, label, value);
+      doc.y = y + h + 6;
     }
 
     function paintTableHead() {
       const y = doc.y;
-      const h = 22;
+      const h = 24;
       doc.save();
-      doc.rect(margin, y, tableW, h).fill(COLOR.head);
+      doc.roundedRect(margin, y, tableW, h, 0).fill(
+        chromeGradient(doc, margin, y, margin + tableW, y)
+      );
       doc.restore();
-      doc.fontSize(9).fillColor("#ffffff");
-      drawText("نام محصول", xName, y, colName);
-      drawText("کد", xCode, y, colCode, { align: "center" });
-      drawText("تعداد", xQty, y, colQty, { align: "center" });
-      drawText("قیمت واحد", xUnit, y, colUnit, { align: "center" });
-      drawText("جمع", xTotal, y, colTotal, { align: "center" });
+      doc.fontSize(9).fillColor(COLOR.white);
+      drawText("نام محصول", xName, y + 1, colName);
+      drawText("کد", xCode, y + 1, colCode, { align: "center" });
+      drawText("تعداد", xQty, y + 1, colQty, { align: "center" });
+      drawText("قیمت واحد", xUnit, y + 1, colUnit, { align: "center" });
+      drawText("جمع", xTotal, y + 1, colTotal, { align: "center" });
       doc.y = y + h;
     }
 
@@ -282,24 +357,31 @@ function buildInvoicePdf(order, items) {
     }
 
     paintHeader();
-    paintBand("مشخصات فاکتور", COLOR.group, COLOR.groupText);
-    paintInfoRow("کد پیگیری", order?.trackingCode);
-    paintInfoRow("شماره مرجع", order?.adminRefNo);
-    paintInfoRow("وضعیت سفارش", plainLabel(orderStatusLabel(order)));
-    paintInfoRow("نوع", plainLabel(orderKindLabel(order)));
-    paintInfoRow("نام", order?.fullName);
-    paintInfoRow("تلفن", order?.phone);
-    paintInfoRow(
-      "شهر",
-      [order?.province, order?.city].filter(Boolean).join("، ")
+    paintSection("مشخصات فاکتور");
+    paintPair(
+      { label: "کد پیگیری", value: order?.trackingCode },
+      { label: "شماره مرجع", value: order?.adminRefNo }
     );
-    paintInfoRow("آدرس", order?.address);
-    paintInfoRow("کد پستی", order?.postalCode);
-    paintInfoRow("توضیحات", order?.description);
+    paintPair(
+      { label: "وضعیت سفارش", value: plainLabel(orderStatusLabel(order)) },
+      { label: "نوع", value: plainLabel(orderKindLabel(order)) }
+    );
 
-    ensureSpace(minRowH * 2 + 16, false);
-    doc.y += 10;
-    paintBand("اقلام سفارش", COLOR.group, COLOR.groupText);
+    paintSection("مشخصات خریدار");
+    paintPair(
+      { label: "نام", value: order?.fullName },
+      { label: "تلفن", value: order?.phone }
+    );
+    paintPair(
+      { label: "استان", value: order?.province },
+      { label: "شهر", value: order?.city }
+    );
+    paintFull("کد پستی", order?.postalCode);
+    paintFull("آدرس", order?.address);
+    paintFull("توضیحات", order?.description);
+
+    ensureSpace(minRowH * 2 + 20, false);
+    paintSection("اقلام سفارش");
     paintTableHead();
 
     rows.forEach((item, index) => {
@@ -315,10 +397,10 @@ function buildInvoicePdf(order, items) {
       doc.save();
       doc
         .rect(margin, yRow, tableW, h)
-        .fill(index % 2 === 0 ? COLOR.row : "#ffffff");
+        .fill(index % 2 === 0 ? "#F0F9FF" : "#FFFFFF");
       doc.restore();
       doc.save();
-      doc.lineWidth(0.35).strokeColor(COLOR.line);
+      doc.lineWidth(0.4).strokeColor("#C4B5FD");
       doc.rect(margin, yRow, tableW, h).stroke();
       doc.restore();
       doc.fontSize(9).fillColor(COLOR.ink);
@@ -330,22 +412,26 @@ function buildInvoicePdf(order, items) {
       doc.y = yRow + h;
     });
 
-    ensureSpace(70, false);
-    doc.y += 8;
-    const totalH = 28;
+    ensureSpace(80, false);
+    doc.y += 10;
+    const totalH = 30;
     doc.save();
-    doc.rect(margin, doc.y, tableW, totalH).fill(COLOR.head);
+    doc.roundedRect(margin, doc.y, tableW, totalH, 9).fill(
+      chromeGradient(doc, margin, doc.y, margin + tableW, doc.y)
+    );
     doc.restore();
-    doc.fontSize(12).fillColor("#ffffff");
-    drawText(`جمع کل: ${formatPrice(order?.totalAmount || 0)}`, margin, doc.y, tableW);
+    doc.fontSize(12).fillColor(COLOR.white);
+    drawText(`جمع کل: ${formatPrice(order?.totalAmount || 0)}`, margin, doc.y + 2, tableW);
     doc.y += totalH + 8;
 
-    const paidH = 28;
-    doc.save();
-    doc.rect(margin, doc.y, tableW, paidH).fill(COLOR.paidBg);
-    doc.restore();
+    const paidH = 30;
+    paintGlassBox(margin, doc.y, tableW, paidH, {
+      fillTop: "#ECFDF5",
+      fillMid: "#D1FAE5",
+      fillBottom: "#CFFAFE",
+    });
     doc.fontSize(12).fillColor(COLOR.paid);
-    drawText("وضعیت پرداخت: پرداخت شده", margin, doc.y, tableW);
+    drawText("وضعیت پرداخت: پرداخت شده", margin, doc.y + 2, tableW);
     doc.y += paidH;
 
     paintWatermark();
