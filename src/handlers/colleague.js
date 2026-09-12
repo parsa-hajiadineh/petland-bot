@@ -3,7 +3,7 @@ const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
 const { reply } = require("../bot/messenger");
 const { BTN, mainMenu, backMain, kb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
-const { isWarehouseOnly } = require("../services/user");
+const { isWarehouseOnly, canSwitchModes } = require("../services/user");
 const {
   provisionShop,
   findOwnedTenant,
@@ -426,7 +426,12 @@ function isColleagueEntryBtn(text) {
 }
 
 function isWholesaleLocked(user) {
+  if (canSwitchModes(user)) return false;
   return user.role === "COLLEAGUE" || user.role === "MANELI";
+}
+
+function keepsAdminRole(user) {
+  return user.role === "ADMIN" || canSwitchModes(user);
 }
 
 async function rejectModeChange(user, chatId) {
@@ -519,7 +524,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
   }
 
   if (text === BTN.RETAIL_MODE) {
-    if (user.role !== "ADMIN") {
+    if (!keepsAdminRole(user)) {
       await reply(
         user,
         chatId,
@@ -584,10 +589,10 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       return true;
     }
 
-    const roleData =
-      user.role === "ADMIN"
-        ? { orderStep: null }
-        : { role: "MANELI", orderStep: null };
+    const keepRole = keepsAdminRole(user);
+    const roleData = keepRole
+      ? { orderStep: null }
+      : { role: "MANELI", orderStep: null };
     try {
       await prisma.user.update({
         where: { id: user.id },
@@ -595,7 +600,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
       });
     } catch (err) {
       console.error("MANELI ROLE SET SKIP:", err.message);
-      if (user.role !== "ADMIN") {
+      if (!keepRole) {
         await prisma.$executeRawUnsafe(
           `UPDATE "User" SET role = 'MANELI', "orderStep" = NULL WHERE id = $1`,
           user.id
@@ -607,7 +612,7 @@ module.exports = async function colleagueHandler(user, chatId, text) {
         });
       }
     }
-    if (user.role === "ADMIN") {
+    if (keepRole) {
       setAdminRetailView(user.id, false);
       setAdminManeliView(user.id, true);
     } else user.role = "MANELI";
@@ -651,15 +656,15 @@ PawOra | More Than Care`,
       return true;
     }
 
-    const roleData =
-      user.role === "ADMIN"
-        ? { orderStep: null }
-        : { role: "COLLEAGUE", orderStep: null };
+    const keepRole = keepsAdminRole(user);
+    const roleData = keepRole
+      ? { orderStep: null }
+      : { role: "COLLEAGUE", orderStep: null };
     await prisma.user.update({
       where: { id: user.id },
       data: roleData,
     });
-    if (user.role === "ADMIN") {
+    if (keepRole) {
       setAdminRetailView(user.id, false);
       setAdminManeliView(user.id, false);
     } else user.role = "COLLEAGUE";

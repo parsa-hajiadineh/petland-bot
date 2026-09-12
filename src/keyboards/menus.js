@@ -257,9 +257,9 @@ function inlineKb(rows) {
 }
 
 function mainMenu(user) {
-  const { isWarehouseOnly, isPrimaryAdmin } = require("../services/user");
+  const { isWarehouseOnly, canSwitchModes } = require("../services/user");
   const warehouseOnly = isWarehouseOnly(user);
-  const primaryAdmin = isPrimaryAdmin(user);
+  const staffAdmin = canSwitchModes(user);
 
   const rows = [
     [{ text: BTN.PRODUCTS }, { text: BTN.SEARCH }],
@@ -276,18 +276,19 @@ function mainMenu(user) {
     rows.push([{ text: BTN.MARKETING }, { text: BTN.WALLET }]);
   }
 
-  if ((user.role === "COLLEAGUE" || primaryAdmin) && !warehouseOnly) {
+  if ((user.role === "COLLEAGUE" || staffAdmin) && !warehouseOnly) {
     rows.push([{ text: BTN.CREATE_SHOP_BOT }]);
   }
 
-  const wholesaleLocked = user.role === "COLLEAGUE" || user.role === "MANELI";
+  const wholesaleLocked =
+    (user.role === "COLLEAGUE" || user.role === "MANELI") && !staffAdmin;
 
   if (warehouseOnly) {
     rows.push([{ text: BTN.ADMIN_PANEL }]);
     rows.push([{ text: BTN.ADMIN_INVOICES }, { text: BTN.ADMIN_PROFORMAS }]);
     rows.push([{ text: BTN.ADMIN_TICKETS }]);
     rows.push([{ text: BTN.COLLEAGUE }, { text: BTN.RETAIL_MODE }]);
-  } else if (user.role === "ADMIN" || primaryAdmin) {
+  } else if (user.role === "ADMIN" || staffAdmin) {
     rows.push([{ text: BTN.ADMIN_PANEL }, { text: BTN.COLLEAGUE }]);
     rows.push([{ text: BTN.RETAIL_MODE }]);
   } else if (!wholesaleLocked) {

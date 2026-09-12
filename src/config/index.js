@@ -11,8 +11,10 @@ function normalizeBaleId(value) {
 
 const parseIds = (value) =>
   (value || "")
-    .split(/[,;\s]+/)
-    .map((id) => normalizeBaleId(id.replace(/^["']+|["']+$/g, "")))
+    .split(/[,;،\s]+/)
+    .map((id) =>
+      normalizeBaleId(id.replace(/^["'“”«»]+|["'“”«»]+$/g, ""))
+    )
     .filter(Boolean);
 
 function parseBroadcastGroups(value) {

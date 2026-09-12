@@ -20,9 +20,15 @@ function baleIdOf(userOrId) {
 }
 
 function idListHas(list, value) {
-  const id = normalizeBaleId(value);
+  const raw =
+    value && typeof value === "object"
+      ? String(value.baleId || "")
+      : String(value || "");
+  const id = normalizeBaleId(raw);
   if (!id) return false;
-  return list.includes(id) || list.includes(String(value || "").trim());
+  return list.some(
+    (item) => item === id || item === raw.trim() || normalizeBaleId(item) === id
+  );
 }
 
 function isPrimaryAdmin(user) {
@@ -37,6 +43,10 @@ function isWarehouseOnly(user) {
   return isWarehouseAdmin(user) && !isPrimaryAdmin(user);
 }
 
+function canSwitchModes(user) {
+  return isPrimaryAdmin(user) || isWarehouseAdmin(user);
+}
+
 function isStaffBaleId(baleId) {
   return idListHas(adminIds(), baleId) || idListHas(warehouseAdminIds(), baleId);
 }
@@ -48,16 +58,23 @@ function staffNotifyIds() {
 }
 
 async function getOrCreateUser(msg, referrerBaleId = null) {
-  const baleId = String(msg?.from?.id || msg?.chat?.id || "");
+  const rawBaleId = String(msg?.from?.id || msg?.chat?.id || "");
+  const baleId = normalizeBaleId(rawBaleId) || rawBaleId;
   if (!baleId) throw new Error("NO_BALE_ID");
   const staff =
     isStaffBaleId(baleId) ||
+    isStaffBaleId(rawBaleId) ||
     isStaffBaleId(msg?.from?.id) ||
     isStaffBaleId(msg?.chat?.id);
 
   let user = await prisma.user.findUnique({
     where: { baleId },
   });
+  if (!user && rawBaleId && rawBaleId !== baleId) {
+    user = await prisma.user.findUnique({
+      where: { baleId: rawBaleId },
+    });
+  }
 
   if (!user) {
     let referrerId = null;
@@ -77,7 +94,10 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
         ...(referrerId ? { referrerId } : {}),
       },
     });
-  } else if (staff && user.role !== "ADMIN") {
+  } else if (
+    (staff || isStaffBaleId(user.baleId) || canSwitchModes(user)) &&
+    user.role !== "ADMIN"
+  ) {
     user = await prisma.user.update({
       where: { id: user.id },
       data: { role: "ADMIN" },
@@ -92,7 +112,7 @@ async function reloadUser(userId) {
 }
 
 function isAdmin(user) {
-  return user?.role === "ADMIN" || isWarehouseAdmin(user);
+  return user?.role === "ADMIN" || canSwitchModes(user);
 }
 
 async function ensureManeliRole() {
@@ -112,6 +132,7 @@ module.exports = {
   isPrimaryAdmin,
   isWarehouseAdmin,
   isWarehouseOnly,
+  canSwitchModes,
   staffNotifyIds,
   ensureManeliRole,
 };
