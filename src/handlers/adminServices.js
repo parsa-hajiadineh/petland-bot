@@ -1,5 +1,5 @@
 const prisma = require("../database/prisma");
-const { reply, notifyShop, sendReceiptPhoto } = require("../bot/messenger");
+const { reply, replyPhoto, notifyShop, sendReceiptPhoto } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const {
   BTN,
@@ -532,7 +532,7 @@ async function goBack(user, chatId) {
     return true;
   }
 
-  if (step === "SVC:SPECIAL_TEXT" || step.startsWith("SVC:NEW")) {
+  if (step === "SVC:SPECIAL_TEXT" || step === "SVC:SPECIAL_PHOTO" || step.startsWith("SVC:NEW")) {
     await showList(user, chatId);
     return true;
   }
@@ -612,6 +612,7 @@ async function handleText(user, chatId, text) {
   if (text === BTN.SVC_SPECIAL_TEXT && isServiceAdminStep(user.adminStep)) {
     const specialServices = require("../services/specialServices");
     const current = await specialServices.getText();
+    const image = await specialServices.getImage();
     await setStep(user, "SVC:SPECIAL_TEXT");
     await reply(
       user,
@@ -619,6 +620,9 @@ async function handleText(user, chatId, text) {
       `📝 متن فعلی خدمات ویژه:\n\n${current}\n\nمتن جدید را بفرستید:`,
       kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
     );
+    if (image) {
+      await replyPhoto(user, chatId, image, "عکس فعلی خدمات ویژه");
+    }
     return true;
   }
   if (
@@ -627,8 +631,25 @@ async function handleText(user, chatId, text) {
   ) {
     const specialServices = require("../services/specialServices");
     await specialServices.setText(text);
-    await reply(user, chatId, "✅ متن خدمات ویژه ذخیره شد.", adminServicesMenu());
-    await showList(user, chatId);
+    await setStep(user, "SVC:SPECIAL_PHOTO");
+    await reply(
+      user,
+      chatId,
+      "✅ متن خدمات ویژه ذخیره شد.\n\nحالا عکس خدمات ویژه را بفرستید:",
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
+    return true;
+  }
+  if (
+    user.adminStep === "SVC:SPECIAL_PHOTO" &&
+    !Object.values(BTN).includes(text)
+  ) {
+    await reply(
+      user,
+      chatId,
+      "لطفاً عکس را به‌صورت تصویر بفرستید. با بازگشت می‌توانید بدون تغییر عکس خارج شوید.",
+      kb([[{ text: BTN.BACK_PRODUCT_LIST }]])
+    );
     return true;
   }
 
@@ -815,12 +836,24 @@ async function handleText(user, chatId, text) {
   return false;
 }
 
+async function handlePhoto(user, chatId, photo) {
+  if (user.adminStep !== "SVC:SPECIAL_PHOTO" || !photo?.length) return false;
+  const fileId = photo[photo.length - 1].file_id;
+  if (!fileId) return false;
+  const specialServices = require("../services/specialServices");
+  await specialServices.setImage(fileId);
+  await reply(user, chatId, "✅ عکس خدمات ویژه ذخیره شد.", adminServicesMenu());
+  await showList(user, chatId);
+  return true;
+}
+
 module.exports = {
   isServiceAdminStep,
   isInvoiceAdminStep,
   showList,
   showDetail,
   handleText,
+  handlePhoto,
   handleCallback,
   goBack,
 };

@@ -22,9 +22,39 @@ async function getRecord() {
   return rows?.[0] || null;
 }
 
+let imageColPromise = null;
+
+async function ensureImageColumn() {
+  if (!imageColPromise) {
+    imageColPromise = prisma
+      .$executeRawUnsafe(
+        `ALTER TABLE "ServicePackage" ADD COLUMN IF NOT EXISTS "imageUrl" TEXT`
+      )
+      .catch((err) => {
+        imageColPromise = null;
+        console.error("SPECIAL IMAGE COL SKIP:", err.message);
+      });
+  }
+  return imageColPromise;
+}
+
 async function getText() {
   const row = await getRecord();
   return String(row?.description || "").trim() || DEFAULT_TEXT;
+}
+
+async function getImage() {
+  await ensureImageColumn();
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT "imageUrl" FROM "ServicePackage" WHERE "code" = $1 LIMIT 1`,
+      SPECIAL_TEXT_CODE
+    );
+    return String(rows?.[0]?.imageUrl || "").trim() || null;
+  } catch (err) {
+    console.error("SPECIAL IMAGE GET SKIP:", err.message);
+    return null;
+  }
 }
 
 async function setText(text) {
@@ -73,6 +103,28 @@ async function setText(text) {
   return getText();
 }
 
+async function setImage(fileId) {
+  const id = String(fileId || "").trim();
+  if (!id) return getImage();
+  await ensureImageColumn();
+  let existing = await getRecord();
+  if (!existing?.id) {
+    await setText(DEFAULT_TEXT);
+    existing = await getRecord();
+  }
+  if (!existing?.id) return null;
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ServicePackage" SET "imageUrl" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
+      id,
+      existing.id
+    );
+  } catch (err) {
+    console.error("SPECIAL IMAGE SET SKIP:", err.message);
+  }
+  return getImage();
+}
+
 function isSpecialTextPackage(pack) {
   return pack?.code === SPECIAL_TEXT_CODE;
 }
@@ -80,6 +132,8 @@ function isSpecialTextPackage(pack) {
 module.exports = {
   SPECIAL_TEXT_CODE,
   getText,
+  getImage,
   setText,
+  setImage,
   isSpecialTextPackage,
 };

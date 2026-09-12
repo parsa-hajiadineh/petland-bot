@@ -1,6 +1,6 @@
 const prisma = require("../database/prisma");
 const { COLLEAGUE_ACCESS_CODE, MANELI_ACCESS_CODE } = require("../config");
-const { reply, notify } = require("../bot/messenger");
+const { reply, replyPhoto, notify } = require("../bot/messenger");
 const bale = require("../bot/bale");
 const { BTN, mainMenu, backMain, kb, inlineKb, colleagueGateMenu } = require("../keyboards/menus");
 const { setAdminRetailView, setAdminManeliView } = require("../utils/price");
@@ -369,12 +369,18 @@ async function showProgrammingHub(user, chatId) {
 
 async function showSpecialServices(user, chatId) {
   const body = await specialServices.getText();
+  const image = await specialServices.getImage();
   await prisma.user.update({
     where: { id: user.id },
     data: { orderStep: "PROG_SPECIAL" },
   });
   user.orderStep = "PROG_SPECIAL";
-  await reply(user, chatId, body, kb([[{ text: BTN.BACK_MAIN }]]));
+  if (image) {
+    await replyPhoto(user, chatId, image, "⭐ خدمات ویژه", kb([[{ text: BTN.BACK_MAIN }]]));
+    await reply(user, chatId, body, kb([[{ text: BTN.BACK_MAIN }]]), { keepLast: true });
+  } else {
+    await reply(user, chatId, body, kb([[{ text: BTN.BACK_MAIN }]]));
+  }
   const result = await bale.sendKeyboard(
     chatId,
     "ثبت درخواست:",

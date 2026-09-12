@@ -1417,5 +1417,6 @@ module.exports.handleAdminPhoto = async function handleAdminPhoto(
   chatId,
   photo
 ) {
+  if (await adminServices.handlePhoto(user, chatId, photo)) return true;
   return adminProducts.handlePhoto(user, chatId, photo);
 };

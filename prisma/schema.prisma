@@ -570,6 +570,7 @@ model ServicePackage {
   code        String   @unique
   title       String
   description String?
+  imageUrl    String?
   priceToman  Int
   kind        String   @default("SERVICE")
   billing     String   @default("ONCE")
