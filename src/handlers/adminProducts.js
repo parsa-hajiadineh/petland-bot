@@ -18,6 +18,7 @@ const STEP_HUB = "ADMIN_PRODUCTS";
 const STEP_PHOTO = "AP:PHOTO";
 const STEP_DESC = "AP:DESC";
 const STEP_PRICE = "AP:PRICE";
+const STEP_STOCK = "AP:STOCK";
 const STEP_DEL = "AP:DEL";
 const STEP_ADD_CODE = "AP:ADD_CODE";
 const STEP_ADD_TITLE = "AP:ADD_TITLE";
@@ -30,6 +31,7 @@ const CODES = {
   "photo-s": "photo",
   "desc-s": "desc",
   "price-s": "price",
+  "stock-s": "stock",
 };
 
 function isProductAdminStep(step) {
@@ -45,7 +47,9 @@ function helpText() {
     "• photo-s  تنظیم / تعویض عکس",
     "• desc-s  تغییر توضیحات",
     "• price-s  تغییر قیمت همکاری",
+    "• stock-s  موجود / ناموجود کردن کالا",
     "",
+    "از دکمه‌های همین صفحه می‌توانید محصول جدید بسازید یا محصولی را با کد حذف کنید.",
     "اگر محصول عکس داشته باشد، عکس قبلی حذف می‌شود و عکس جدید گرفته می‌شود.",
   ].join("\n");
 }
@@ -226,7 +230,57 @@ async function handleQuick(user, chatId, text) {
     );
     return true;
   }
+  if (kind === "stock") {
+    await askStock(user, chatId, product);
+    return true;
+  }
   return false;
+}
+
+function stockLabel(status) {
+  return status === "AVAILABLE" ? "موجود" : "ناموجود";
+}
+
+function parseStock(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (["موجود", "موجود است", "available"].includes(t)) return "AVAILABLE";
+  if (["ناموجود", "ناموجود است", "unavailable"].includes(t)) return "UNAVAILABLE";
+  return null;
+}
+
+async function applyStock(user, chatId, status) {
+  const product = await loadMotherProduct(user.lastProductCode);
+  if (!product) {
+    await reply(user, chatId, "محصول پیدا نشد. دوباره از لیست باز کنید.", adminBackMenu());
+    return;
+  }
+  await prisma.product.update({
+    where: { id: product.id },
+    data: { status },
+  });
+  await setStep(user, null, { lastProductCode: product.code });
+  await reply(user, chatId, `✅ «${product.title}» ${stockLabel(status)} شد.`);
+  await refreshProduct(user, chatId, product.code);
+}
+
+async function askStock(user, chatId, product) {
+  await setStep(user, STEP_STOCK, { lastProductCode: product.code });
+  await reply(
+    user,
+    chatId,
+    `وضعیت فعلی «${product.title}»: ${stockLabel(product.status)}\n\nموجود یا ناموجود بودن را انتخاب کنید:`,
+    adminBackMenu()
+  );
+  await bale.sendKeyboard(
+    chatId,
+    "روی وضعیت بزنید:",
+    inlineKb([
+      [
+        { text: "✅ موجود", callback_data: "aps:1" },
+        { text: "❌ ناموجود", callback_data: "aps:0" },
+      ],
+    ])
+  );
 }
 
 function categoryRows() {
@@ -304,15 +358,15 @@ async function saveNewProduct(user, chatId, draft) {
       tenantId: motherId || undefined,
     },
   });
-  await setStep(user, STEP_HUB, {
+  await setStep(user, STEP_PHOTO, {
     lastProductCode: created.code,
     tempDescription: null,
   });
   await reply(
     user,
     chatId,
-    `✅ محصول ثبت شد.\n🔖 ${created.code}\n📦 ${created.title}\n💰 ${formatPrice(created.costPrice)}\n📂 ${cat.btn} › ${brand}`,
-    adminProductsMenu()
+    `✅ محصول ثبت شد.\n🔖 ${created.code}\n📦 ${created.title}\n💰 ${formatPrice(created.costPrice)}\n📂 ${cat.btn} › ${brand}\n\nاگر عکس دارد همین حالا بفرستید. در غیر این صورت بازگشت بزنید.`,
+    adminBackMenu()
   );
 }
 
@@ -338,6 +392,11 @@ async function handleCallback(user, chatId, data) {
     const brandIndex = Number(parts[1]);
     const draft = readDraft(user);
     await saveNewProduct(user, chatId, { ...draft, catIndex, brandIndex });
+    return true;
+  }
+  if (data.startsWith("aps:")) {
+    if (user.adminStep !== STEP_STOCK) return true;
+    await applyStock(user, chatId, data.slice(4) === "1" ? "AVAILABLE" : "UNAVAILABLE");
     return true;
   }
   return false;
@@ -370,7 +429,7 @@ async function goBack(user, chatId) {
   if (!isProductAdminStep(step) && step !== "SET_IMAGE_UPLOAD" && step !== "SET_IMAGE_CODE") {
     return false;
   }
-  if (step === STEP_PHOTO || step === STEP_DESC || step === STEP_PRICE || step === "SET_IMAGE_UPLOAD") {
+  if (step === STEP_PHOTO || step === STEP_DESC || step === STEP_PRICE || step === STEP_STOCK || step === "SET_IMAGE_UPLOAD") {
     const code = user.lastProductCode;
     await setStep(user, null);
     if (code) await refreshProduct(user, chatId, code);
@@ -485,6 +544,16 @@ async function handleText(user, chatId, text) {
     await setStep(user, null, { lastProductCode: product.code });
     await reply(user, chatId, `✅ قیمت همکاری ${formatPrice(amount)} شد.`);
     await refreshProduct(user, chatId, product.code);
+    return true;
+  }
+
+  if (user.adminStep === STEP_STOCK) {
+    const status = parseStock(text);
+    if (!status) {
+      await reply(user, chatId, "موجود یا ناموجود را انتخاب کنید.", adminBackMenu());
+      return true;
+    }
+    await applyStock(user, chatId, status);
     return true;
   }
 
