@@ -19,7 +19,7 @@ const {
   takePreviousCatalogPdf,
 } = require("../services/catalogPdf");
 const { getUnitPrice, formatPrice, isWholesaleUser } = require("../utils/price");
-const { scoreText } = require("../utils/smartSearch");
+const { scoreCatalogItem } = require("../utils/smartSearch");
 const { isMother } = require("../bot/context");
 
 const PRODUCT_LIST_SELECT = {
@@ -661,10 +661,7 @@ module.exports.handleSearch = async function handleSearch(user, chatId, query) {
     products = (rows || [])
       .map((row) => ({
         ...row,
-        _score: scoreText(
-          `${row.title || ""} ${row.code || ""} ${row.brand || ""} ${row.description || ""} ${row.category?.title || ""}`,
-          term
-        ),
+        _score: scoreCatalogItem(row, term),
       }))
       .filter((row) => row._score > 0 && row.status === "AVAILABLE")
       .sort((a, b) => b._score - a._score)

@@ -48,6 +48,16 @@ function primaryTokens(text) {
   return [...new Set(normalizeFa(text).split(/\s+/).filter(Boolean))];
 }
 
+function searchTokens(query) {
+  return [
+    ...new Set(
+      primaryTokens(query)
+        .map(compact)
+        .filter((part) => part && (part.length >= 2 || /^\d+$/.test(part)))
+    ),
+  ];
+}
+
 function sqlCompact(expr) {
   return `replace(replace(replace(replace(replace(replace(replace(replace(
     lower(coalesce(${expr}, '')),
@@ -55,7 +65,7 @@ function sqlCompact(expr) {
 }
 
 function buildAndLikes(blobSql, query) {
-  const parts = primaryTokens(query);
+  const parts = searchTokens(query);
   if (!parts.length) return null;
   const params = [];
   const clauses = [];
@@ -77,14 +87,37 @@ function buildAndLikes(blobSql, query) {
 function scoreText(haystack, query) {
   const h = compact(haystack);
   const q = compact(query);
-  if (!h || !q) return 0;
-  if (h === q) return 100;
-  if (h.startsWith(q)) return 85;
-  if (h.includes(q)) return 70;
-  let score = 0;
-  for (const part of primaryTokens(query)) {
-    const c = compact(part);
-    if (c && h.includes(c)) score += c.length >= 3 ? 18 : 10;
+  const tokens = searchTokens(query);
+  if (!h || (!q && !tokens.length)) return 0;
+
+  if (tokens.length) {
+    for (const token of tokens) {
+      if (!h.includes(token)) return 0;
+    }
+  } else if (!h.includes(q)) {
+    return 0;
+  }
+
+  if (q && h === q) return 100;
+  if (q && h.startsWith(q)) return 85;
+  if (q && h.includes(q)) return 70;
+
+  let score = 50;
+  for (const token of tokens) {
+    score += token.length >= 3 ? 18 : 10;
+  }
+  return score;
+}
+
+function scoreCatalogItem(row, query) {
+  const blob = `${row.title || ""} ${row.code || ""} ${row.brand || ""} ${row.description || ""} ${row.category?.title || ""}`;
+  let score = scoreText(blob, query);
+  const code = compact(row.code || "");
+  const q = compact(query);
+  if (code && q) {
+    if (code === q) return 200;
+    if (code.startsWith(q) || q.startsWith(code)) return Math.max(score, 140);
+    if (q.length >= 2 && code.includes(q)) return Math.max(score, 110);
   }
   return score;
 }
@@ -94,7 +127,9 @@ module.exports = {
   normalizeFa,
   compact,
   primaryTokens,
+  searchTokens,
   sqlCompact,
   buildAndLikes,
   scoreText,
+  scoreCatalogItem,
 };
