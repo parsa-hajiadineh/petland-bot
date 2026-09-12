@@ -281,9 +281,14 @@ function buildPdf(products, user) {
       doc.rect(margin, y, tableW, 22).fill(COLOR.footerBg);
       doc.restore();
       doc.fontSize(9).fillColor(COLOR.footer);
-      doc.text("@Pawora_bot", margin, y + 5, {
-        width: tableW,
-        align: "center",
+      paintText("@Pawora_bot", margin + 8, y + 5, {
+        width: tableW / 2 - 10,
+        align: "left",
+        lineBreak: false,
+      });
+      paintText("@support_pawora", margin + tableW / 2 + 2, y + 5, {
+        width: tableW / 2 - 10,
+        align: "right",
         lineBreak: false,
       });
       doc.page.margins.bottom = bottom;
