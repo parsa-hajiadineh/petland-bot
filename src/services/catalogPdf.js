@@ -260,7 +260,7 @@ function buildPdf(products, user) {
     function paintWatermark() {
       if (!fs.existsSync(watermarkPath())) return;
       doc.save();
-      doc.opacity(0.06);
+      doc.opacity(0.1);
       const size = 280;
       paintImage(
         watermarkPath(),
@@ -297,7 +297,6 @@ function buildPdf(products, user) {
     }
 
     function paintHeader() {
-      paintWatermark();
       paintFooter();
       if (fs.existsSync(logoPath())) {
         paintImage(logoPath(), margin, 12, { width: 48, height: 48 });
@@ -331,6 +330,7 @@ function buildPdf(products, user) {
     }
 
     function newPage(withTableHead) {
+      paintWatermark();
       doc.addPage();
       doc.font("vazir");
       paintHeader();
@@ -382,6 +382,7 @@ function buildPdf(products, user) {
       }
     }
 
+    paintWatermark();
     doc.end();
   });
 }
