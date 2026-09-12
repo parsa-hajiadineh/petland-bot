@@ -64,11 +64,8 @@ const BRAND_TITLES = [
   { re: /bravecto/, title: "محصولات براوکتو" },
 ];
 
-function rtlWords(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return "";
-  if (!/[\u0600-\u06FF]/.test(raw)) return raw;
-  return raw.split(/\s+/).reverse().join(" ");
+function hasPersian(text) {
+  return /[\u0600-\u06FF]/.test(text);
 }
 
 function brandKey(brand) {
@@ -191,9 +188,32 @@ function buildPdf(products, user) {
       return lines;
     }
 
+    function paintText(text, x, y, opts) {
+      const prevX = doc.x;
+      const prevY = doc.y;
+      doc.text(text, x, y, opts);
+      doc.x = prevX;
+      doc.y = prevY;
+    }
+
     function drawLine(text, x, y, width, align) {
-      const drawn = rtlWords(text);
-      doc.text(drawn, x, y, { width, align, lineBreak: false });
+      const raw = String(text || "");
+      if (!hasPersian(raw)) {
+        paintText(raw, x, y, { width, align, lineBreak: false });
+        return;
+      }
+      const words = raw.split(/\s+/).filter(Boolean);
+      const space = doc.widthOfString(" ");
+      const total =
+        words.reduce((sum, word) => sum + doc.widthOfString(word), 0) +
+        space * Math.max(0, words.length - 1);
+      let cursor =
+        align === "center" ? x + (width + total) / 2 : x + width;
+      for (const word of words) {
+        cursor -= doc.widthOfString(word);
+        paintText(word, cursor, y, { lineBreak: false });
+        cursor -= space;
+      }
     }
 
     function drawText(text, x, y, width, opts = {}) {
@@ -201,7 +221,7 @@ function buildPdf(products, user) {
       let yy = y + 6;
       for (const line of lines) {
         drawLine(line, x + 4, yy, width - 8, opts.align || "right");
-        yy += Math.max(12, Math.ceil(doc.heightOfString(rtlWords(line))) + 1);
+        yy += Math.max(12, Math.ceil(doc.heightOfString(line)) + 1);
       }
     }
 
@@ -209,7 +229,7 @@ function buildPdf(products, user) {
       const lines = wrapLogical(text, width - 8);
       let total = 12;
       for (const line of lines) {
-        total += Math.max(12, Math.ceil(doc.heightOfString(rtlWords(line))) + 1);
+        total += Math.max(12, Math.ceil(doc.heightOfString(line)) + 1);
       }
       return Math.max(minRowH, total);
     }
