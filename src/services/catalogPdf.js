@@ -387,10 +387,8 @@ function buildPdf(products, user) {
   });
 }
 
-async function buildCatalogPdf(user, products) {
-  const list = Array.isArray(products)
-    ? products
-    : await loadAvailableProducts();
+async function buildCatalogPdf(user) {
+  const list = await loadAvailableProducts();
   if (!list.length) return { buffer: null, count: 0 };
   const buffer = await buildPdf(list, user);
   return { buffer, count: list.length };
