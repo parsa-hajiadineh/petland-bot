@@ -1,7 +1,8 @@
 const prisma = require("../database/prisma");
 const { BOT_USERNAME, SHOP_NAME } = require("../config");
 const { reply } = require("../bot/messenger");
-const { backMain } = require("../keyboards/menus");
+const bale = require("../bot/bale");
+const { backMain, inlineKb } = require("../keyboards/menus");
 
 function buildReferralLink(baleId) {
   if (!BOT_USERNAME) return null;
@@ -50,4 +51,22 @@ module.exports.showMarketing = async function showMarketing(user, chatId) {
   }
 
   await reply(user, chatId, lines.join("\n"), backMain());
+
+  if (!referralLink) return;
+
+  const result = await bale.sendKeyboard(
+    chatId,
+    "برای کپی کردن لینک معرفی، دکمه زیر را بزنید:",
+    inlineKb([
+      [{ text: "📋 کپی لینک معرفی", copy_text: { text: referralLink } }],
+    ])
+  );
+  const msgId = result?.result?.message_id;
+  if (msgId && user?.id) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastMessageId: msgId },
+    });
+    user.lastMessageId = msgId;
+  }
 };

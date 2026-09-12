@@ -95,11 +95,12 @@ async function getOrCreateUser(msg, referrerBaleId = null) {
   if (!user) {
     let referrerId = null;
 
-    if (referrerBaleId && referrerBaleId !== baleId) {
+    const refId = normalizeBaleId(referrerBaleId);
+    if (refId && refId !== baleId && !idsCompatible(refId, baleId)) {
       const referrer = await prisma.user.findUnique({
-        where: { baleId: referrerBaleId },
+        where: { baleId: refId },
       });
-      if (referrer) referrerId = referrer.id;
+      if (referrer && referrer.baleId !== baleId) referrerId = referrer.id;
     }
 
     user = await prisma.user.create({

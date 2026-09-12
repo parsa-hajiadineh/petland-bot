@@ -1070,6 +1070,7 @@ async function approveOrder(user, chatId) {
 
     if (
       owner.referrerId &&
+      owner.referrerId !== owner.id &&
       owner.role !== "MANELI" &&
       owner.role !== "COLLEAGUE"
     ) {
@@ -1082,6 +1083,7 @@ async function approveOrder(user, chatId) {
       if (
         commission > 0 &&
         referrer &&
+        referrer.id !== owner.id &&
         referrer.role !== "COLLEAGUE" &&
         referrer.role !== "MANELI"
       ) {
