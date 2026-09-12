@@ -57,11 +57,12 @@ function isWarehouseAdmin(user) {
 }
 
 function isWarehouseOnly(user) {
-  return isWarehouseAdmin(user) && !isPrimaryAdmin(user);
+  if (isPrimaryAdmin(user)) return false;
+  return isWarehouseAdmin(user) || user?.role === "ADMIN";
 }
 
 function canSwitchModes(user) {
-  return isPrimaryAdmin(user) || isWarehouseAdmin(user);
+  return isPrimaryAdmin(user) || isWarehouseAdmin(user) || isWarehouseOnly(user);
 }
 
 function isStaffBaleId(baleId) {
